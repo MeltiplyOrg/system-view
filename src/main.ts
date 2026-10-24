@@ -65,7 +65,7 @@ app.innerHTML = `
             <button id="fit" type="button">Fit</button>
             <button id="zoom-in" type="button" aria-label="Zoom in">+</button>
           </div>
-          <p class="view-hint">Scroll to zoom · drag to move</p>
+          <p class="view-hint">Pinch or scroll to zoom · drag to move</p>
         </section>
 
         <section class="section">

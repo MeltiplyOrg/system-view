@@ -203,7 +203,45 @@ test.describe("minimal isometric canvas", () => {
 });
 
 test.describe("mobile overlay", () => {
-  test.use({ viewport: { width: 390, height: 844 } });
+  test.use({ viewport: { width: 390, height: 844 }, hasTouch: true });
+
+  test("pinch zooms the canvas", async ({ page, browserName }) => {
+    test.skip(browserName !== "chromium", "CDP touch input is Chromium-only.");
+
+    await page.goto("/");
+    const viewBox = () => page.locator("#scene").getAttribute("viewBox");
+    const initial = await viewBox();
+    const cdp = await page.context().newCDPSession(page);
+    const touch = (
+      type: "touchStart" | "touchMove" | "touchEnd",
+      points: { x: number; y: number }[],
+    ) =>
+      cdp.send("Input.dispatchTouchEvent", {
+        type,
+        touchPoints: points.map((point, id) => ({
+          ...point,
+          id,
+          radiusX: 1,
+          radiusY: 1,
+          force: 1,
+        })),
+      });
+
+    // Spread two contacts around the canvas center; the viewBox must shrink
+    // (zoom in) even though the page itself has pinch-zoom disabled by the
+    // canvas touch-action.
+    await touch("touchStart", [
+      { x: 150, y: 420 },
+      { x: 240, y: 420 },
+    ]);
+    await touch("touchMove", [
+      { x: 110, y: 420 },
+      { x: 280, y: 420 },
+    ]);
+    await touch("touchEnd", []);
+
+    await expect.poll(viewBox).not.toBe(initial);
+  });
 
   test("fits the canvas and sidebar without horizontal scrolling", async ({
     page,

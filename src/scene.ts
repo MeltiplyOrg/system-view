@@ -17,9 +17,10 @@ const MAX_ZOOM = 8;
  * Owns the full-viewport SVG scene.
  *
  * Responsibilities: shared rack definitions, the isometric grid, design
- * layers, fit behavior, wheel zoom, and pointer panning. It never renders UI
- * chrome; the overlay/sidebar state belongs to `main.ts`. The instance lives
- * for the page lifetime, so its event listeners are intentionally permanent.
+ * layers, fit behavior, wheel/pinch zoom, and pointer panning. It never
+ * renders UI chrome; the overlay/sidebar state belongs to `main.ts`. The
+ * instance lives for the page lifetime, so its event listeners are
+ * intentionally permanent.
  */
 export class SystemScene {
   /** Design content group replaced atomically on each render. */
@@ -34,26 +35,41 @@ export class SystemScene {
   /** Aspect-matched base viewBox at zoom 1. */
   private base = { width: 1000, height: 700 };
 
+  /** Last CSS-pixel size observed by the ResizeObserver. */
+  private viewport = { width: 1, height: 1 };
+
   /** Current viewBox center in SVG user units. */
   private center: [number, number] = [0, 0];
 
   /** Multiplicative zoom, clamped to MIN_ZOOM…MAX_ZOOM. */
   private zoom = 1;
 
-  /** Active pointer for panning, or null when idle. */
+  /** Active pointer for one-finger/mouse panning, or null when idle. */
   private dragPointer: number | null = null;
 
   /** Last client-space pointer position while dragging. */
   private lastPointer: { x: number; y: number } | null = null;
 
+  /** Every pointer currently down, keyed by pointer id. */
+  private readonly activePointers = new Map<number, { x: number; y: number }>();
+
+  /** Previous two-finger span, or null outside a pinch gesture. */
+  private pinch: {
+    distance: number;
+    midpoint: { x: number; y: number };
+  } | null = null;
+
+  /** Pending requestAnimationFrame id for coalesced pointer updates. */
+  private pointerFrame: number | null = null;
+
   /**
    * @param svg Full-viewport SVG element. The caller should not append other
    *   defs or content; this class owns its child order.
    *
-   * The constructor wires a non-passive wheel handler and the pointer-capture
-   * lifecycle. A ResizeObserver re-derives the base viewBox without resetting
-   * the user's zoom or pan. No cleanup is provided because the scene is a
-   * page-lifetime singleton.
+   * The constructor wires a non-passive wheel handler, pinch zoom, and the
+   * pointer-capture lifecycle. A ResizeObserver re-derives the base viewBox
+   * without resetting the user's zoom or pan. No cleanup is provided because
+   * the scene is a page-lifetime singleton.
    */
   constructor(private readonly svg: SVGSVGElement) {
     this.grid.classList.add("space-grid");
@@ -78,33 +94,66 @@ export class SystemScene {
       // Primary button only: secondary clicks and context menus stay native.
       if (event.button !== 0) return;
       event.preventDefault();
-      this.dragPointer = event.pointerId;
-      this.lastPointer = { x: event.clientX, y: event.clientY };
-      // Capture keeps the drag alive when the pointer leaves the SVG.
+      // Settle a pending pan before the new contact changes the gesture mode.
+      this.flushPointerUpdate();
+      this.activePointers.set(event.pointerId, {
+        x: event.clientX,
+        y: event.clientY,
+      });
+      // Capture keeps each contact alive if it leaves the SVG.
       svg.setPointerCapture(event.pointerId);
       svg.classList.add("dragging");
+
+      if (this.activePointers.size === 1) {
+        this.dragPointer = event.pointerId;
+        this.lastPointer = { x: event.clientX, y: event.clientY };
+      } else if (this.activePointers.size === 2) {
+        // The second contact starts a pinch. Drop the one-finger pan baseline
+        // so lifting a finger later cannot jump the view.
+        this.dragPointer = null;
+        this.lastPointer = null;
+        this.pinch = this.pinchState();
+      }
     });
 
     svg.addEventListener("pointermove", (event) => {
-      if (this.dragPointer !== event.pointerId || !this.lastPointer) return;
-      const from = this.clientToUser(this.lastPointer.x, this.lastPointer.y),
-        to = this.clientToUser(event.clientX, event.clientY);
-      this.lastPointer = { x: event.clientX, y: event.clientY };
-      if (!from || !to) return;
-      // Move the world with the pointer by moving the viewBox center opposite.
-      this.center[0] -= to.x - from.x;
-      this.center[1] -= to.y - from.y;
-      this.updateViewport();
+      if (!this.activePointers.has(event.pointerId)) return;
+      this.activePointers.set(event.pointerId, {
+        x: event.clientX,
+        y: event.clientY,
+      });
+      // Phones can emit several pointer moves per display frame. Applying each
+      // one rewrites the viewBox and regenerates the grid repeatedly, so batch
+      // them and read the latest positions once per frame.
+      this.schedulePointerUpdate();
     });
 
     // One idempotent stop path for pointerup, pointercancel, and lost capture.
     const stopDragging = (event: PointerEvent) => {
-      if (this.dragPointer !== event.pointerId) return;
-      this.dragPointer = null;
-      this.lastPointer = null;
-      svg.classList.remove("dragging");
+      if (!this.activePointers.has(event.pointerId)) return;
+      // Apply the last coalesced movement before the contact disappears; a
+      // short pinch can otherwise end before its first animation frame.
+      this.flushPointerUpdate();
+      this.activePointers.delete(event.pointerId);
       if (svg.hasPointerCapture(event.pointerId))
         svg.releasePointerCapture(event.pointerId);
+
+      if (this.activePointers.size === 0) {
+        this.dragPointer = null;
+        this.lastPointer = null;
+        this.pinch = null;
+        svg.classList.remove("dragging");
+        return;
+      }
+
+      // Rebase the remaining contact so a pinch that becomes a one-finger pan
+      // (or vice versa) starts from the current position instead of jumping.
+      this.pinch = this.activePointers.size >= 2 ? this.pinchState() : null;
+      if (this.activePointers.size === 1) {
+        const [id, point] = this.activePointers.entries().next().value!;
+        this.dragPointer = id;
+        this.lastPointer = { ...point };
+      }
     };
     svg.addEventListener("pointerup", stopDragging);
     svg.addEventListener("pointercancel", stopDragging);
@@ -210,7 +259,7 @@ export class SystemScene {
    * under the same screen pixel.
    */
   zoomBy(factor: number, clientX?: number, clientY?: number): void {
-    const next = Math.max(MIN_ZOOM, Math.min(MAX_ZOOM, this.zoom * factor));
+    const next = this.clampZoom(factor);
     if (next === this.zoom) return;
 
     const anchor =
@@ -226,6 +275,138 @@ export class SystemScene {
     this.updateViewport();
   }
 
+  /** Clamp a multiplicative zoom factor to the supported range. */
+  private clampZoom(factor: number): number {
+    return Math.max(MIN_ZOOM, Math.min(MAX_ZOOM, this.zoom * factor));
+  }
+
+  /** Apply the latest pointer positions in one viewport update. */
+  private applyPointerUpdate(): void {
+    if (this.activePointers.size >= 2) {
+      if (!this.pinch) return;
+      const next = this.pinchState();
+      if (!next) return;
+      this.applyPinch(this.pinch, next);
+      this.pinch = next;
+      return;
+    }
+
+    if (this.dragPointer === null || !this.lastPointer) return;
+    const point = this.activePointers.get(this.dragPointer);
+    if (!point) return;
+    this.panBetween(this.lastPointer, point);
+    this.lastPointer = { ...point };
+  }
+
+  /** Queue a pointer update for the next paint, if none is pending. */
+  private schedulePointerUpdate(): void {
+    if (this.pointerFrame !== null) return;
+    this.pointerFrame = requestAnimationFrame(() => {
+      this.pointerFrame = null;
+      this.applyPointerUpdate();
+    });
+  }
+
+  /**
+   * Apply a queued pointer update immediately.
+   *
+   * Pointer-up must not drop the final move of a short gesture. Cancelling the
+   * frame here, before the contact is removed, keeps the final pan/zoom and the
+   * gesture-state transition atomic.
+   */
+  private flushPointerUpdate(): void {
+    if (this.pointerFrame === null) return;
+    cancelAnimationFrame(this.pointerFrame);
+    this.pointerFrame = null;
+    this.applyPointerUpdate();
+  }
+
+  /**
+   * Apply a two-finger zoom and midpoint pan in one viewport write.
+   *
+   * Anchoring the zoom at the previous midpoint and then shifting by the
+   * midpoint delta keeps the world point under the fingers fixed. Doing both
+   * operations here avoids the intermediate viewport/grid write that a
+   * `zoomBy` followed by `panBetween` would perform on every frame.
+   */
+  private applyPinch(
+    previous: { distance: number; midpoint: { x: number; y: number } },
+    next: { distance: number; midpoint: { x: number; y: number } },
+  ): void {
+    const scale =
+      previous.distance > 0 && next.distance > 0
+        ? next.distance / previous.distance
+        : 1;
+    const nextZoom = this.clampZoom(scale);
+    const dx = next.midpoint.x - previous.midpoint.x;
+    const dy = next.midpoint.y - previous.midpoint.y;
+    if (nextZoom === this.zoom && dx === 0 && dy === 0) return;
+
+    if (nextZoom !== this.zoom) {
+      const anchor = this.clientToUser(
+        previous.midpoint.x,
+        previous.midpoint.y,
+      );
+      if (anchor) {
+        const ratio = this.zoom / nextZoom;
+        this.center[0] = anchor.x - (anchor.x - this.center[0]) * ratio;
+        this.center[1] = anchor.y - (anchor.y - this.center[1]) * ratio;
+      }
+      this.zoom = nextZoom;
+    }
+
+    // Base and viewport aspects match after `resize`, so one scale converts
+    // both axes. Guard zero-sized layouts during startup and teardown.
+    if (this.viewport.width > 0) {
+      const unitsPerPixel = this.base.width / this.zoom / this.viewport.width;
+      this.center[0] -= dx * unitsPerPixel;
+      this.center[1] -= dy * unitsPerPixel;
+    }
+    this.updateViewport();
+  }
+
+  /**
+   * Move the view so the world point under `from` follows it to `to`.
+   *
+   * Both points are client-space pixels from the same pointer event. The
+   * conversion uses the current CTM, so this works while pinching (after the
+   * zoom anchor has already been applied) and while panning.
+   */
+  private panBetween(
+    from: { x: number; y: number },
+    to: { x: number; y: number },
+  ): void {
+    const a = this.clientToUser(from.x, from.y),
+      b = this.clientToUser(to.x, to.y);
+    if (!a || !b) return;
+    // Move the world with the fingers by moving the viewBox center opposite.
+    this.center[0] -= b.x - a.x;
+    this.center[1] -= b.y - a.y;
+    this.updateViewport();
+  }
+
+  /**
+   * Current span and midpoint of the first two active contacts.
+   *
+   * Returns null until two pointers are down. Map insertion order keeps the
+   * first two contacts stable for the whole gesture, so adding a third finger
+   * cannot make the pinch target jump between contacts.
+   */
+  private pinchState(): {
+    distance: number;
+    midpoint: { x: number; y: number };
+  } | null {
+    const [first, second] = this.activePointers.values();
+    if (!first || !second) return null;
+    return {
+      distance: Math.hypot(second.x - first.x, second.y - first.y),
+      midpoint: {
+        x: (first.x + second.x) / 2,
+        y: (first.y + second.y) / 2,
+      },
+    };
+  }
+
   /**
    * Match the base viewBox to the viewport aspect ratio.
    *
@@ -235,9 +416,10 @@ export class SystemScene {
    * safe to call from ResizeObserver as well as `fit`.
    */
   private resize(): void {
-    const bounds = this.svg.getBoundingClientRect(),
-      aspect =
-        bounds.width && bounds.height ? bounds.width / bounds.height : 4 / 3;
+    const bounds = this.svg.getBoundingClientRect();
+    this.viewport = { width: bounds.width, height: bounds.height };
+    const aspect =
+      bounds.width && bounds.height ? bounds.width / bounds.height : 4 / 3;
     let width = this.contentBounds.width,
       height = this.contentBounds.height;
     if (width / height < aspect) width = height * aspect;
