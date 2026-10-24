@@ -502,6 +502,12 @@ textarea[aria-invalid="true"] {
   font: 7px var(--mono);
   letter-spacing: 0.035em;
 }
+.cluster-label {
+  fill: var(--muted);
+  font: 8px var(--mono);
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+}
 .space-grid {
   fill: none;
   stroke: var(--grid);

@@ -5,6 +5,8 @@ import {
   project,
 } from "./database";
 import type { Design } from "./design";
+import { layoutDesign } from "./layout";
+import type { PlacedCluster } from "./layout";
 import { createPlatforms } from "./platform";
 
 const NS = "http://www.w3.org/2000/svg";
@@ -12,6 +14,41 @@ const NS = "http://www.w3.org/2000/svg";
 /** Zoom bounds chosen to keep the grid usable at both extreme scales. */
 const MIN_ZOOM = 0.25;
 const MAX_ZOOM = 8;
+
+/**
+ * Build the optional cluster captions as one non-interactive SVG group.
+ *
+ * Labels are centered beneath the projected footprint of their group. The
+ * isometric footprint is a diamond, so the caption uses the projected
+ * bounding-box center rather than a world-space Y offset; that keeps the text
+ * visually attached to the platform at every cluster size. Text is assigned
+ * with `textContent`, so imported cluster names cannot inject markup.
+ */
+function createClusterLabels(clusters: readonly PlacedCluster[]): SVGGElement {
+  const group = document.createElementNS(NS, "g");
+  group.classList.add("clusters");
+  for (const cluster of clusters) {
+    const { x, y, width, height } = cluster.bounds,
+      corners = [
+        project(x, y, 7),
+        project(x + width, y, 7),
+        project(x, y + height, 7),
+        project(x + width, y + height, 7),
+      ],
+      left = Math.min(...corners.map(([cornerX]) => cornerX)),
+      right = Math.max(...corners.map(([cornerX]) => cornerX)),
+      bottom = Math.max(...corners.map(([, cornerY]) => cornerY));
+    const label = document.createElementNS(NS, "text");
+    label.classList.add("cluster-label");
+    label.dataset.clusterId = cluster.id;
+    label.setAttribute("x", ((left + right) / 2).toFixed(1));
+    label.setAttribute("y", (bottom + 22).toFixed(1));
+    label.setAttribute("text-anchor", "middle");
+    label.textContent = cluster.label;
+    group.append(label);
+  }
+  return group;
+}
 
 /**
  * Owns the full-viewport SVG scene.
@@ -163,24 +200,33 @@ export class SystemScene {
   /**
    * Replace the scene content atomically and refit the view.
    *
-   * Paint order is platforms, links, then racks back-to-front. Isometric depth
-   * is `x + y` (larger is nearer) with `z` as a tie-breaker. Bounds are taken
-   * from this content only, never the regenerating grid, so fit stays stable.
+   * Layout and colors are derived here rather than stored in the document.
+   * Paint order is platforms, cluster captions, links, then racks back-to-front.
+   * Isometric depth is `x + y` (larger is nearer) with `z` as a tie-breaker.
+   * Bounds are taken from this content only, never the regenerating grid, so
+   * fit stays stable.
    *
    * @param design - Already validated document. The defensive endpoint check
    *   protects against callers bypassing the parser.
    * @throws Error when a connection references a missing node.
    */
   render(design: Design): void {
-    const layer = document.createElementNS(NS, "g");
-    layer.append(createPlatforms(design.nodes));
+    const layout = layoutDesign(design),
+      layer = document.createElementNS(NS, "g");
+    layer.append(
+      createPlatforms(layout.nodes),
+      createClusterLabels(layout.clusters),
+    );
 
-    const byId = new Map(design.nodes.map((node) => [node.id, node]));
+    const byId = new Map(layout.nodes.map((node) => [node.id, node]));
     for (const [index, link] of design.connections.entries()) {
       const from = byId.get(link.from),
         to = byId.get(link.to);
+      const connectionId = link.id ?? `${link.from}->${link.to}`;
       if (!from || !to)
-        throw new Error(`Connection ${link.id} references an unknown node.`);
+        throw new Error(
+          `Connection ${connectionId} references an unknown node.`,
+        );
 
       // Links attach just above the base. The quadratic control point at the
       // source Y / target X approximates an orthogonal cable while staying
@@ -196,17 +242,19 @@ export class SystemScene {
 
       const group = document.createElementNS(NS, "g");
       group.classList.add("connection");
-      group.dataset.connectionId = link.id;
-      group.style.setProperty("--cable-color", link.color);
+      group.dataset.connectionId = connectionId;
+      group.style.setProperty("--cable-color", from.color);
       group.innerHTML = `<path class="wire-glow" d="${d}"/><path class="wire" d="${d}"/><path class="pulse" pathLength="100" style="--duration:3s;--delay:${-index * 0.6}s" d="${d}"/>`;
       const title = document.createElementNS(NS, "title");
-      title.textContent = `${link.id}: ${from.label} → ${to.label}`;
+      title.textContent = `${connectionId}: ${from.label} → ${to.label}${
+        link.relation ? ` · ${link.relation}` : ""
+      }`;
       group.prepend(title);
       layer.append(group);
     }
 
     // Back to front; no depth sorting or geometry generation during animation.
-    for (const node of design.nodes
+    for (const node of layout.nodes
       .slice()
       .sort(
         (a, b) =>

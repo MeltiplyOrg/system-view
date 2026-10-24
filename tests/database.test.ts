@@ -11,6 +11,10 @@ import {
   project,
 } from "../src/database";
 import { example } from "../src/design";
+import { layoutDesign } from "../src/layout";
+
+/** First placed rack from the default clustered design. */
+const placed = layoutDesign(example).nodes[0];
 
 describe("Database Rack geometry", () => {
   test("projects model axes to the isometric plane", () => {
@@ -35,9 +39,9 @@ describe("Database Rack geometry", () => {
   });
 
   test("creates a colored rack with shared layers, cables, and an identity plate", () => {
-    const rack = new DatabaseRack(example.nodes[0]);
+    const rack = new DatabaseRack(placed);
     expect(rack.element.classList.contains("database-rack")).toBe(true);
-    expect(rack.element.dataset.nodeId).toBe("database-01");
+    expect(rack.element.dataset.nodeId).toBe("db-01");
     expect(rack.element.style.getPropertyValue("--cable-color")).toBe(
       "#ff9d52",
     );
@@ -48,13 +52,13 @@ describe("Database Rack geometry", () => {
       "Database Rack 01",
     );
     expect(rack.element.querySelector("title")?.textContent).toBe(
-      "Database Rack 01 (database-01) · Database Rack",
+      "Database Rack 01 (db-01) · Database Rack",
     );
   });
 
   test("fits long labels inside the nameplate", () => {
     const rack = new DatabaseRack({
-      ...example.nodes[0],
+      ...placed,
       label: "Extremely long imported database rack name",
     });
     const label = rack.element.querySelector(".node-label");

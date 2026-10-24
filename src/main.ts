@@ -29,7 +29,7 @@ const app = mustQuery<HTMLDivElement>("#app");
 app.innerHTML = `
   <main class="stage">
     <svg id="scene" xmlns="http://www.w3.org/2000/svg" role="img" aria-labelledby="scene-description" preserveAspectRatio="xMidYMid meet">
-      <desc id="scene-description">Isometric grid with three database racks and animated connections. Scroll to zoom, drag to move, or open Design to edit the JSON and switch themes.</desc>
+      <desc id="scene-description">Isometric grid with three database racks in a cluster and animated connections. Pinch or scroll to zoom, drag to move, or open Design to edit the JSON and switch themes.</desc>
     </svg>
     <button id="panel-toggle" class="panel-toggle" type="button" aria-expanded="false" aria-controls="sidebar">
       <svg viewBox="0 0 14 14" aria-hidden="true"><path d="M2 4h10M2 7h10M2 10h10"/></svg>
@@ -80,9 +80,9 @@ app.innerHTML = `
         </section>
 
         <section class="section schema-note">
-          <div class="section-label">Database rack</div>
-          <code>type: "database-rack"<br>position: { x, y, z }<br>color: "#ff9d52"</code>
-          <p>Positions are world units. Links reference node IDs. The rack faces are decorative.</p>
+          <div class="section-label">Dynamic design</div>
+          <code>nodes: [{ id, label? }]<br>connections: [{ from, to, relation? }]<br>clusters: [{ label?, nodes }]</code>
+          <p>The ID prefix picks the type (db-…). Positions and distinct colors are generated; cluster members share a platform.</p>
         </section>
       </div>
       <footer class="sidebar-footer">
@@ -115,7 +115,12 @@ function apply(design: Design): void {
   current = design;
   source.value = JSON.stringify(design, null, 2);
   sceneTitle.textContent = design.name;
-  sceneCount.textContent = `${design.nodes.length} racks · ${design.connections.length} links`;
+  const clusters = design.clusters.length;
+  sceneCount.textContent = `${design.nodes.length} racks · ${
+    design.connections.length
+  } links${
+    clusters === 0 ? "" : ` · ${clusters} cluster${clusters === 1 ? "" : "s"}`
+  }`;
   source.removeAttribute("aria-invalid");
   message.classList.remove("error");
   message.textContent = "Canvas is up to date.";

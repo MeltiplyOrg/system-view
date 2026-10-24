@@ -11,86 +11,189 @@ const example: Design = {
   version: 1,
   name: "Connected import",
   nodes: [
-    {
-      id: "a",
-      type: "database-rack",
-      label: "A",
-      position: { x: 0, y: 0, z: 0 },
-      color: "#ff9d52",
-    },
-    {
-      id: "b",
-      type: "database-rack",
-      label: "B",
-      position: { x: 400, y: 0, z: 0 },
-      color: "#42d9e8",
-    },
-    {
-      id: "c",
-      type: "database-rack",
-      label: "C",
-      position: { x: 800, y: 0, z: 0 },
-      color: "#b49aff",
-    },
+    { id: "db-a", label: "A" },
+    { id: "db-b" },
+    { id: "db-c", label: "C" },
   ],
   connections: [
-    { id: "a-b", from: "a", to: "b", color: "#ff9d52" },
-    { id: "b-c", from: "b", to: "c", color: "#42d9e8" },
+    { from: "db-a", to: "db-b", relation: "replicates" },
+    { id: "b-c", from: "db-b", to: "db-c" },
   ],
+  clusters: [{ label: "Database cluster", nodes: ["db-a", "db-b"] }],
 };
 
 describe("design imports", () => {
-  test("preserves elevated positions, colors, and directed connections through export/import", () => {
-    const design = structuredClone(example);
-    design.nodes[0].position = { x: -240, y: 500, z: 120 };
-    design.nodes[0].color = "#ab12CD";
-    const imported = parseDesign(JSON.stringify(design));
-    expect(imported).toEqual(design);
-    expect(parseDesign(JSON.stringify(imported))).toEqual(design);
+  test("round-trips optional labels, relations, and clusters", () => {
+    const imported = parseDesign(JSON.stringify(example));
+    expect(imported).toEqual(example);
+    expect(parseDesign(JSON.stringify(imported))).toEqual(example);
   });
+
+  test("accepts minimal nodes and strips the old generated fields", () => {
+    const imported = parseDesign(
+      JSON.stringify({
+        version: 1,
+        name: "Minimal",
+        nodes: [
+          "db-only",
+          {
+            id: "db-two",
+            label: "Two",
+            type: "server",
+            position: { x: 50, y: 60, z: 70 },
+            color: "not-a-color",
+          },
+        ],
+      }),
+    );
+    expect(imported).toEqual({
+      version: 1,
+      name: "Minimal",
+      nodes: [{ id: "db-only" }, { id: "db-two", label: "Two" }],
+      connections: [],
+      clusters: [],
+    });
+  });
+
+  test("accepts an empty scene and omitted optional collections", () => {
+    expect(parseDesign('{"version":1,"name":"Empty","nodes":[]}')).toEqual({
+      version: 1,
+      name: "Empty",
+      nodes: [],
+      connections: [],
+      clusters: [],
+    });
+    expect(
+      parseDesign(
+        '{"version":1,"name":"Unnamed group","nodes":["db-a"],"clusters":[{"nodes":["db-a"]}]}',
+      ).clusters,
+    ).toEqual([{ nodes: ["db-a"] }]);
+  });
+
   test("rejects duplicate node IDs and dangling connection endpoints", () => {
     const duplicate = structuredClone(example);
     duplicate.nodes[1].id = duplicate.nodes[0].id;
     expect(() => parseDesign(JSON.stringify(duplicate))).toThrow(
       "Duplicate node id",
     );
+
     const dangling = structuredClone(example);
     dangling.nodes.pop();
     expect(() => parseDesign(JSON.stringify(dangling))).toThrow("unknown node");
   });
-  test("rejects duplicate link IDs and self-links", () => {
+
+  test("rejects duplicate effective link IDs and self-links", () => {
     const duplicate = structuredClone(example);
-    duplicate.connections[1].id = duplicate.connections[0].id;
+    duplicate.connections.push({
+      from: duplicate.connections[0].from,
+      to: duplicate.connections[0].to,
+    });
     expect(() => parseDesign(JSON.stringify(duplicate))).toThrow(
+      "Duplicate connection id: db-a->db-b",
+    );
+
+    const duplicateId = structuredClone(example);
+    duplicateId.connections[0].id = "link";
+    duplicateId.connections[1].id = "link";
+    expect(() => parseDesign(JSON.stringify(duplicateId))).toThrow(
       "Duplicate connection id",
     );
+
     const self = structuredClone(example);
     self.connections[0].to = self.connections[0].from;
     expect(() => parseDesign(JSON.stringify(self))).toThrow(
       "two different nodes",
     );
   });
-  test("rejects invalid render coordinates and CSS color injection", () => {
-    const position = structuredClone(example);
-    position.nodes[0].position.z = 10001;
-    expect(() => parseDesign(JSON.stringify(position))).toThrow(
-      "finite number",
+
+  test("validates cluster membership and IDs", () => {
+    const unknown = structuredClone(example);
+    unknown.clusters[0].nodes.push("missing");
+    expect(() => parseDesign(JSON.stringify(unknown))).toThrow("unknown node");
+
+    const repeated = structuredClone(example);
+    repeated.clusters[0].nodes.push("db-a");
+    expect(() => parseDesign(JSON.stringify(repeated))).toThrow("repeat");
+
+    const overlapping = structuredClone(example);
+    overlapping.clusters.push({ nodes: ["db-a"] });
+    expect(() => parseDesign(JSON.stringify(overlapping))).toThrow(
+      "more than one cluster",
+    );
+
+    const duplicateId = structuredClone(example);
+    duplicateId.clusters[0].id = "group";
+    duplicateId.clusters.push({ id: "group", nodes: ["db-c"] });
+    expect(() => parseDesign(JSON.stringify(duplicateId))).toThrow(
+      "Duplicate cluster id",
+    );
+
+    const empty = structuredClone(example);
+    empty.clusters[0].nodes = [];
+    expect(() => parseDesign(JSON.stringify(empty))).toThrow("1–64 node IDs");
+  });
+
+  test("rejects invalid text, versions, and collection shapes", () => {
+    expect(() => parseDesign("[]")).toThrow("must be an object");
+    expect(() => parseDesign('{"version":2,"name":"Bad","nodes":[]}')).toThrow(
+      "version must be 1",
+    );
+    expect(() => parseDesign('{"version":1,"name":"","nodes":[]}')).toThrow(
+      "name must contain",
     );
     expect(() =>
-      parseDesign(JSON.stringify(example).replace('"x":0', '"x":1e999')),
-    ).toThrow("finite number");
-    const color = structuredClone(example);
-    color.nodes[0].color = "red;filter:url(https://example.com)";
-    expect(() => parseDesign(JSON.stringify(color))).toThrow("hex color");
+      parseDesign('{"version":1,"name":"Bad","nodes":[[]]}'),
+    ).toThrow("must be an object");
+    expect(() =>
+      parseDesign(
+        '{"version":1,"name":"Bad","nodes":[{"id":"db-a","label":""}]}',
+      ),
+    ).toThrow("label must contain");
+    expect(() =>
+      parseDesign(
+        '{"version":1,"name":"Bad","nodes":[{"id":"db-a"}],"connections":[{"from":"","to":"db-a"}]}',
+      ),
+    ).toThrow("from must contain");
+    expect(() =>
+      parseDesign(
+        '{"version":1,"name":"Bad","nodes":[{"id":"db-a"}],"connections":[{"from":"db-a","to":"db-a"}]}',
+      ),
+    ).toThrow("two different nodes");
+    expect(() =>
+      parseDesign('{"version":1,"name":"Bad","nodes":[],"connections":{}}'),
+    ).toThrow("connections must be an array");
+    expect(() =>
+      parseDesign('{"version":1,"name":"Bad","nodes":[],"clusters":{}}'),
+    ).toThrow("clusters must be an array");
+    expect(() =>
+      parseDesign(
+        '{"version":1,"name":"Bad","nodes":["db-a"],"clusters":[{"nodes":["db-a"],"label":""}]}',
+      ),
+    ).toThrow("label must contain");
   });
-  test("supports an empty scene but rejects unsupported object types", () => {
-    expect(
-      parseDesign('{"version":1,"name":"Empty","nodes":[],"connections":[]}'),
-    ).toEqual({ version: 1, name: "Empty", nodes: [], connections: [] });
-    const unsupported = {
-      ...example,
-      nodes: [{ ...example.nodes[0], type: "server" }],
-    };
-    expect(() => parseDesign(JSON.stringify(unsupported))).toThrow();
+
+  test("enforces document limits", () => {
+    const tooManyNodes = Array.from({ length: 65 }, (_, index) => ({
+      id: `db-${index}`,
+    }));
+    expect(() =>
+      parseDesign(
+        JSON.stringify({
+          version: 1,
+          name: "Too many",
+          nodes: tooManyNodes,
+        }),
+      ),
+    ).toThrow("at most 64");
+    expect(() =>
+      parseDesign(
+        '{"version":1,"name":"Bad","nodes":[],"connections":[],"clusters":[{"nodes":[]}]}',
+      ),
+    ).toThrow("1–64 node IDs");
+    expect(() =>
+      parseDesign(
+        `{"version":1,"name":"Bad","nodes":["db-a","db-b"],"connections":[{"from":"db-a","to":"db-b","relation":"${"x".repeat(101)}"}]}`,
+      ),
+    ).toThrow("relation must contain");
   });
 });
