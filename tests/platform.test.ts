@@ -1,4 +1,4 @@
-import { expect, test } from "bun:test";
+import { expect, test } from "vite-plus/test";
 import type { DatabaseNode } from "../src/design";
 import { mergePlatformFootprints } from "../src/platform";
 

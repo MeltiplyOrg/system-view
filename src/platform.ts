@@ -1,5 +1,5 @@
-import type { DatabaseNode } from "./design";
 import { project } from "./database";
+import type { DatabaseNode } from "./design";
 
 type Point = readonly [number, number];
 export interface PlatformFootprint {
@@ -10,6 +10,16 @@ interface Edge {
   start: number;
   end: number;
   direction: number;
+}
+
+function coordinateIndex(
+  map: ReadonlyMap<number, number>,
+  key: number,
+): number {
+  const index = map.get(key);
+  if (index === undefined)
+    throw new Error(`Platform boundary coordinate not indexed: ${key}`);
+  return index;
 }
 
 /** Union of the actual 288 × 150 rack feet, not a bounding box or convex hull.
@@ -46,10 +56,10 @@ export function mergePlatformFootprints(
       stride = xs.length;
     const occupied = new Uint8Array(width * height);
     for (const rectangle of rectangles) {
-      const left = xIndex.get(rectangle.x0)!,
-        right = xIndex.get(rectangle.x1)!;
-      const top = yIndex.get(rectangle.y0)!,
-        bottom = yIndex.get(rectangle.y1)!;
+      const left = coordinateIndex(xIndex, rectangle.x0),
+        right = coordinateIndex(xIndex, rectangle.x1);
+      const top = coordinateIndex(yIndex, rectangle.y0),
+        bottom = coordinateIndex(yIndex, rectangle.y1);
       for (let y = top; y < bottom; y++)
         occupied.fill(1, y * width + left, y * width + right);
     }
@@ -90,7 +100,9 @@ export function mergePlatformFootprints(
           ys[Math.floor(edge.start / stride)],
         ]);
         if (edge.end === edges[first].start) break;
-        const candidates = outgoing.get(edge.end)!;
+        const candidates = outgoing.get(edge.end);
+        if (!candidates)
+          throw new Error(`Unclosed platform boundary at ${edge.end}`);
         // Right turn first keeps corner-touching islands as separate contours.
         let next = -1;
         for (const direction of [

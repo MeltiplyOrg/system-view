@@ -11,5 +11,12 @@
     "skipLibCheck": true,
     "types": ["vite/client", "bun"]
   },
-  "include": ["src", "tests"]
+  "include": [
+    "src",
+    "tests",
+    "e2e",
+    "scripts",
+    "vite.config.ts",
+    "playwright.config.ts"
+  ]
 }

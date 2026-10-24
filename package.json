@@ -1,21 +1,36 @@
 {
   "name": "system-view",
   "license": "Apache-2.0",
-  "private": true,
   "version": "1.0.0",
+  "private": true,
   "type": "module",
-  "packageManager": "bun@1.3.14",
   "scripts": {
-    "dev": "vite --host 0.0.0.0",
-    "build": "tsc --noEmit && vite build",
-    "preview": "vite preview --host 0.0.0.0",
-    "deploy": "bun run build && wrangler pages deploy dist --project-name system-view",
-    "test": "bun test"
+    "dev": "vp dev",
+    "build": "vp build",
+    "preview": "vp preview",
+    "check": "vp check",
+    "check:fix": "vp check --fix",
+    "format": "vp fmt",
+    "lint": "vp lint",
+    "typecheck": "tsc --noEmit",
+    "test": "vp test",
+    "test:coverage": "vp test run --coverage",
+    "test:e2e": "vp build && playwright test",
+    "size": "bun scripts/check-bundle.ts",
+    "verify": "vp check && vp test run --coverage && vp build && bun scripts/check-bundle.ts"
   },
   "devDependencies": {
+    "@axe-core/playwright": "^4.14.0",
+    "@playwright/test": "^1.64.1",
     "@types/bun": "^1.4.4",
+    "@vitest/coverage-v8": "5.0.5",
+    "happy-dom": "^21.0.4",
     "typescript": "^7.0.2",
-    "vite": "^8.3.5",
-    "wrangler": "^4.152.0"
-  }
+    "vite-plus": "1.4.0"
+  },
+  "overrides": {
+    "vite": "npm:@voidzero-dev/vite-plus-core@1.4.0",
+    "vitest": "5.0.5"
+  },
+  "packageManager": "bun@1.3.14"
 }
