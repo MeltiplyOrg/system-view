@@ -21,6 +21,14 @@ const ignored = [
 ];
 
 export default defineConfig({
+  // Cloudflare's quick tunnel arrives with a *.trycloudflare.com Host header.
+  // Dev-server host checking only affects `vp dev`, so allow every host here
+  // and keep the production build unchanged.
+  server: {
+    port: 5173,
+    strictPort: true,
+    allowedHosts: true,
+  },
   fmt: {
     ignorePatterns: ignored,
     printWidth: 80,
