@@ -8,6 +8,7 @@ const ignored = [
   "playwright-report/**",
   "skills-lock.json",
   "bun.lock",
+  "AGENTS.md",
 ];
 
 export default defineConfig({
