@@ -1,3 +1,8 @@
+/**
+ * Database Rack rendering tests. They exercise the shared `<defs>` contract,
+ * per-instance color/label wiring, and the isometric projection without a
+ * browser, using Vitest's happy-dom environment.
+ */
 import { describe, expect, test } from "vite-plus/test";
 import {
   createDatabaseDefinitions,

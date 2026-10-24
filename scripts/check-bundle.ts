@@ -1,14 +1,27 @@
+/**
+ * CI bundle-budget gate.
+ *
+ * Runs after `vp build`. Gzip size approximates first-load transfer better
+ * than raw bytes, so every emitted JS/CSS/HTML asset is compressed and checked
+ * against a per-type and total budget. Budgets include deliberate headroom;
+ * tighten them when the product scope is stable rather than on every change.
+ */
 import { readdirSync, readFileSync } from "node:fs";
 import { extname, join } from "node:path";
 import { gzipSync } from "node:zlib";
 
+/** Maximum gzipped bytes per emitted asset type. */
 const budgets = {
   ".js": 30 * 1024,
   ".css": 10 * 1024,
   ".html": 2 * 1024,
 } as const;
+
+/** Maximum gzipped bytes for the whole build. */
 const totalBudget = 40 * 1024;
 
+// Dist is flat today, but recursive discovery keeps the gate valid if assets
+// move into nested chunks. Unknown file types are intentionally ignored.
 const files = readdirSync("dist", { recursive: true, withFileTypes: true })
   .filter((entry) => entry.isFile() && extname(entry.name) in budgets)
   .map((entry) => join(entry.parentPath, entry.name))
@@ -19,6 +32,7 @@ if (files.length === 0) {
   process.exit(1);
 }
 
+// Collect all violations so one CI run reports every over-budget asset.
 const failures: string[] = [];
 let totalGzip = 0;
 console.log("\nBundle budgets (gzip)");

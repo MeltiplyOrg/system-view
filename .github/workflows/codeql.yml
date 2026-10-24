@@ -1,3 +1,5 @@
+# Static security analysis for the client bundle and CI scripts. The weekly
+# schedule catches newly published query updates, not only code changes.
 name: CodeQL
 
 on:

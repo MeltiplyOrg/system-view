@@ -1,8 +1,12 @@
+/**
+ * Import-boundary tests. The renderer trusts validated data, so these cover
+ * the failure modes that would otherwise reach SVG path generation.
+ */
 import { describe, expect, test } from "vite-plus/test";
 import type { Design } from "../src/design";
 import { parseDesign } from "../src/design";
 
-// Import validation uses a connected fixture, independent of the starter layout.
+/** Connected three-node fixture, intentionally independent of the default scene. */
 const example: Design = {
   version: 1,
   name: "Connected import",

@@ -1,3 +1,5 @@
+# Weekly, grouped updates keep toolchain churn reviewable. Vite+ and Vitest
+# are exact-pinned because their versions are coupled; review those manually.
 version: 2
 updates:
   - package-ecosystem: bun

@@ -3,6 +3,14 @@ import type { Design } from "./design";
 import { example, parseDesign } from "./design";
 import { SystemScene } from "./scene";
 
+/**
+ * Resolve a required descendant or fail immediately.
+ *
+ * The HTML template below is the only source for these IDs. A missing node
+ * means the template and controller drifted apart, which is a programming
+ * error; throwing during boot is clearer than silently skipping wiring.
+ * The generic parameter is the caller's expected element subtype.
+ */
 function mustQuery<T extends Element>(selector: string): T {
   const element = document.querySelector<T>(selector);
   if (!element) throw new Error(`Missing required element: ${selector}`);
@@ -10,6 +18,14 @@ function mustQuery<T extends Element>(selector: string): T {
 }
 
 const app = mustQuery<HTMLDivElement>("#app");
+
+/**
+ * Static shell for the overlay UI.
+ *
+ * The Canvas owns the viewport; the sidebar is a fixed overlay with `inert`
+ * and `aria-hidden` until expanded. All controls live inside it so the grid
+ * remains unobstructed. IDs here are consumed by the wiring below.
+ */
 app.innerHTML = `
   <main class="stage">
     <svg id="scene" xmlns="http://www.w3.org/2000/svg" role="img" aria-labelledby="scene-description" preserveAspectRatio="xMidYMid meet">
@@ -83,8 +99,17 @@ const scene = new SystemScene(mustQuery<SVGSVGElement>("#scene"));
 const sceneTitle = mustQuery<HTMLElement>("#scene-title");
 const sceneCount = mustQuery<HTMLElement>("#scene-count");
 const applyButton = mustQuery<HTMLButtonElement>("#apply");
+
+/** Last successfully applied document; exports must never read the draft. */
 let current: Design = example;
 
+/**
+ * Commit a validated design to the canvas and editor.
+ *
+ * The scene renders first; only then are the textarea and metadata replaced,
+ * so a render failure cannot leave the UI claiming a design is applied. The
+ * caller is responsible for validation. `current` is the export source.
+ */
 function apply(design: Design): void {
   scene.render(design);
   current = design;
@@ -95,37 +120,52 @@ function apply(design: Design): void {
   message.classList.remove("error");
   message.textContent = "Canvas is up to date.";
 }
+
+/**
+ * Surface an import/apply failure without mutating the scene.
+ *
+ * The live region announces the message, and `aria-invalid` ties the textarea
+ * to its error. The previously applied scene and `current` stay intact.
+ */
 function showError(error: unknown): void {
   message.textContent =
     error instanceof Error ? error.message : "Could not load the design.";
   message.classList.add("error");
   source.setAttribute("aria-invalid", "true");
 }
+
 applyButton.addEventListener("click", () => {
+  // Parse/validate before rendering so a bad document cannot partially apply.
   try {
     apply(parseDesign(source.value));
   } catch (error) {
     showError(error);
   }
 });
+
 source.addEventListener("input", () => {
   message.classList.remove("error");
   source.removeAttribute("aria-invalid");
   message.textContent = "Unapplied changes.";
 });
+
 source.addEventListener("keydown", (event) => {
+  // Cmd/Ctrl+Enter mirrors the visible Apply button for keyboard users.
   if ((event.ctrlKey || event.metaKey) && event.key === "Enter") {
     event.preventDefault();
     applyButton.click();
   }
 });
+
 mustQuery<HTMLButtonElement>("#reset").addEventListener("click", () =>
   apply(example),
 );
+
 const file = mustQuery<HTMLInputElement>("#file");
 mustQuery<HTMLButtonElement>("#import").addEventListener("click", () =>
   file.click(),
 );
+
 file.addEventListener("change", async () => {
   const selected = file.files?.[0];
   if (!selected) return;
@@ -134,9 +174,11 @@ file.addEventListener("change", async () => {
   } catch (error) {
     showError(error);
   } finally {
+    // Clear the input so selecting the same file again still fires `change`.
     file.value = "";
   }
 });
+
 mustQuery<HTMLButtonElement>("#export").addEventListener("click", () => {
   // Export exactly what is visible, never a potentially invalid editor draft.
   const url = URL.createObjectURL(
@@ -148,14 +190,20 @@ mustQuery<HTMLButtonElement>("#export").addEventListener("click", () => {
   link.href = url;
   link.download = "system-design.json";
   link.click();
+  // Browsers keep the Blob URL alive until revoked; one second is enough for
+  // the click to start and avoids leaking URLs over repeated exports.
   setTimeout(() => URL.revokeObjectURL(url), 1000);
   message.textContent = "Exported system-design.json.";
 });
+
 const theme = mustQuery<HTMLSelectElement>("#theme");
 theme.addEventListener("change", () => {
+  // Absence of data-theme delegates to the OS preference in CSS; explicit
+  // values override it for this document only.
   if (theme.value === "system") delete document.documentElement.dataset.theme;
   else document.documentElement.dataset.theme = theme.value;
 });
+
 mustQuery<HTMLButtonElement>("#zoom-in").addEventListener("click", () =>
   scene.zoomBy(1.25),
 );
@@ -170,7 +218,18 @@ mustQuery<HTMLButtonElement>("#fit").addEventListener("click", () =>
 const toggle = mustQuery<HTMLButtonElement>("#panel-toggle");
 const sidebar = mustQuery<HTMLElement>("#sidebar");
 const closeButton = mustQuery<HTMLButtonElement>("#panel-close");
+
+/** Element to focus when the overlay closes, captured at open time. */
 let returnFocus: HTMLElement | null = null;
+
+/**
+ * Expand or collapse the overlay and keep ARIA/focus in sync.
+ *
+ * Opening removes `inert`, exposes the sidebar to assistive technology, and
+ * focuses the close button. Closing reverses that and restores the previous
+ * focus, falling back to the toggle. `preventScroll` is essential: the
+ * off-screen fixed panel would otherwise scroll the stage and shift the grid.
+ */
 function setPanelOpen(open: boolean): void {
   sidebar.classList.toggle("open", open);
   toggle.setAttribute("aria-expanded", String(open));
@@ -188,13 +247,18 @@ function setPanelOpen(open: boolean): void {
     if (returnFocus?.isConnected) returnFocus.focus({ preventScroll: true });
   }
 }
+
 toggle.addEventListener("click", () => setPanelOpen(true));
 closeButton.addEventListener("click", () => setPanelOpen(false));
+
 document.addEventListener("keydown", (event) => {
   if (event.key === "Escape" && sidebar.classList.contains("open"))
     setPanelOpen(false);
 });
+
 document.addEventListener("pointerdown", (event) => {
+  // A click anywhere outside the panel (and its trigger) dismisses it. The
+  // canvas has no controls of its own, so this does not steal interactions.
   const target = event.target as Node;
   if (
     sidebar.classList.contains("open") &&
@@ -203,8 +267,10 @@ document.addEventListener("pointerdown", (event) => {
   )
     setPanelOpen(false);
 });
+
 // Hidden tabs need no decorative animation work. Reduced motion is handled in CSS.
 document.addEventListener("visibilitychange", () =>
   document.documentElement.classList.toggle("paused", document.hidden),
 );
+
 apply(example);
