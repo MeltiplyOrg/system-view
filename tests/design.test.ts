@@ -1,6 +1,6 @@
-import { describe, expect, test } from "bun:test";
-import { parseDesign } from "../src/design";
+import { describe, expect, test } from "vite-plus/test";
 import type { Design } from "../src/design";
+import { parseDesign } from "../src/design";
 
 // Import validation uses a connected fixture, independent of the starter layout.
 const example: Design = {

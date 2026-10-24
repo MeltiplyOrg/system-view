@@ -1,10 +1,10 @@
-import type { Design } from "./design";
 import {
-  DatabaseRack,
   createDatabaseDefinitions,
   DATABASE_ANCHOR,
+  DatabaseRack,
   project,
 } from "./database";
+import type { Design } from "./design";
 import { createPlatforms } from "./platform";
 
 const NS = "http://www.w3.org/2000/svg";
@@ -69,8 +69,10 @@ export class SystemScene {
     layer.append(createPlatforms(design.nodes));
     const byId = new Map(design.nodes.map((node) => [node.id, node]));
     for (const [index, link] of design.connections.entries()) {
-      const from = byId.get(link.from)!,
-        to = byId.get(link.to)!;
+      const from = byId.get(link.from),
+        to = byId.get(link.to);
+      if (!from || !to)
+        throw new Error(`Connection ${link.id} references an unknown node.`);
       // Links attach to the base in model space; elevated nodes retain their z.
       const a = project(from.position.x, from.position.y, from.position.z + 4);
       const b = project(to.position.x, to.position.y, to.position.z + 4);

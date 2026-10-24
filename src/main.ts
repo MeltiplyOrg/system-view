@@ -1,9 +1,15 @@
 import "./style.css";
-import { example, parseDesign } from "./design";
 import type { Design } from "./design";
+import { example, parseDesign } from "./design";
 import { SystemScene } from "./scene";
 
-const app = document.querySelector<HTMLDivElement>("#app")!;
+function mustQuery<T extends Element>(selector: string): T {
+  const element = document.querySelector<T>(selector);
+  if (!element) throw new Error(`Missing required element: ${selector}`);
+  return element;
+}
+
+const app = mustQuery<HTMLDivElement>("#app");
 app.innerHTML = `
   <main class="stage">
     <svg id="scene" xmlns="http://www.w3.org/2000/svg" role="img" aria-labelledby="scene-description" preserveAspectRatio="xMidYMid meet">
@@ -71,18 +77,20 @@ app.innerHTML = `
     </aside>
   </main>`;
 
-const source = document.querySelector<HTMLTextAreaElement>("#source")!;
-const message = document.querySelector<HTMLParagraphElement>("#message")!;
-const scene = new SystemScene(document.querySelector<SVGSVGElement>("#scene")!);
+const source = mustQuery<HTMLTextAreaElement>("#source");
+const message = mustQuery<HTMLParagraphElement>("#message");
+const scene = new SystemScene(mustQuery<SVGSVGElement>("#scene"));
+const sceneTitle = mustQuery<HTMLElement>("#scene-title");
+const sceneCount = mustQuery<HTMLElement>("#scene-count");
+const applyButton = mustQuery<HTMLButtonElement>("#apply");
 let current: Design = example;
 
 function apply(design: Design): void {
   scene.render(design);
   current = design;
   source.value = JSON.stringify(design, null, 2);
-  document.querySelector("#scene-title")!.textContent = design.name;
-  document.querySelector("#scene-count")!.textContent =
-    `${design.nodes.length} racks · ${design.connections.length} links`;
+  sceneTitle.textContent = design.name;
+  sceneCount.textContent = `${design.nodes.length} racks · ${design.connections.length} links`;
   source.removeAttribute("aria-invalid");
   message.classList.remove("error");
   message.textContent = "Canvas is up to date.";
@@ -93,7 +101,7 @@ function showError(error: unknown): void {
   message.classList.add("error");
   source.setAttribute("aria-invalid", "true");
 }
-document.querySelector("#apply")!.addEventListener("click", () => {
+applyButton.addEventListener("click", () => {
   try {
     apply(parseDesign(source.value));
   } catch (error) {
@@ -108,16 +116,16 @@ source.addEventListener("input", () => {
 source.addEventListener("keydown", (event) => {
   if ((event.ctrlKey || event.metaKey) && event.key === "Enter") {
     event.preventDefault();
-    document.querySelector<HTMLButtonElement>("#apply")!.click();
+    applyButton.click();
   }
 });
-document
-  .querySelector("#reset")!
-  .addEventListener("click", () => apply(example));
-const file = document.querySelector<HTMLInputElement>("#file")!;
-document
-  .querySelector("#import")!
-  .addEventListener("click", () => file.click());
+mustQuery<HTMLButtonElement>("#reset").addEventListener("click", () =>
+  apply(example),
+);
+const file = mustQuery<HTMLInputElement>("#file");
+mustQuery<HTMLButtonElement>("#import").addEventListener("click", () =>
+  file.click(),
+);
 file.addEventListener("change", async () => {
   const selected = file.files?.[0];
   if (!selected) return;
@@ -129,10 +137,10 @@ file.addEventListener("change", async () => {
     file.value = "";
   }
 });
-document.querySelector("#export")!.addEventListener("click", () => {
+mustQuery<HTMLButtonElement>("#export").addEventListener("click", () => {
   // Export exactly what is visible, never a potentially invalid editor draft.
   const url = URL.createObjectURL(
-    new Blob([JSON.stringify(current, null, 2) + "\n"], {
+    new Blob([`${JSON.stringify(current, null, 2)}\n`], {
       type: "application/json",
     }),
   );
@@ -143,23 +151,25 @@ document.querySelector("#export")!.addEventListener("click", () => {
   setTimeout(() => URL.revokeObjectURL(url), 1000);
   message.textContent = "Exported system-design.json.";
 });
-const theme = document.querySelector<HTMLSelectElement>("#theme")!;
+const theme = mustQuery<HTMLSelectElement>("#theme");
 theme.addEventListener("change", () => {
   if (theme.value === "system") delete document.documentElement.dataset.theme;
   else document.documentElement.dataset.theme = theme.value;
 });
-document
-  .querySelector("#zoom-in")!
-  .addEventListener("click", () => scene.zoomBy(1.25));
-document
-  .querySelector("#zoom-out")!
-  .addEventListener("click", () => scene.zoomBy(0.8));
-document.querySelector("#fit")!.addEventListener("click", () => scene.fit());
+mustQuery<HTMLButtonElement>("#zoom-in").addEventListener("click", () =>
+  scene.zoomBy(1.25),
+);
+mustQuery<HTMLButtonElement>("#zoom-out").addEventListener("click", () =>
+  scene.zoomBy(0.8),
+);
+mustQuery<HTMLButtonElement>("#fit").addEventListener("click", () =>
+  scene.fit(),
+);
 
 /* The sidebar is an overlay: closed by default, never reserved layout space. */
-const toggle = document.querySelector<HTMLButtonElement>("#panel-toggle")!;
-const sidebar = document.querySelector<HTMLElement>("#sidebar")!;
-const closeButton = document.querySelector<HTMLButtonElement>("#panel-close")!;
+const toggle = mustQuery<HTMLButtonElement>("#panel-toggle");
+const sidebar = mustQuery<HTMLElement>("#sidebar");
+const closeButton = mustQuery<HTMLButtonElement>("#panel-close");
 let returnFocus: HTMLElement | null = null;
 function setPanelOpen(open: boolean): void {
   sidebar.classList.toggle("open", open);
