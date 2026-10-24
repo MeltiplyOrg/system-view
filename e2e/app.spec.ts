@@ -36,7 +36,9 @@ const imported: Design = {
 
 async function openSidebar(page: Page) {
   await page.getByRole("button", { name: "Design" }).click();
-  await expect(page.locator("#sidebar")).toBeVisible();
+  const sidebar = page.locator("#sidebar");
+  await expect(sidebar).toBeVisible();
+  await expect(sidebar).toHaveCSS("opacity", "1");
 }
 
 test.describe("minimal isometric canvas", () => {
