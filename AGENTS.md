@@ -42,3 +42,12 @@ Write the smallest design that meets today's requirements and stays easy to chan
 - Remove dead, commented-out, debug, and unused code in the change that makes it obsolete.
 - Keep each diff focused on one purpose. Put unrelated cleanup and refactors in their own commit.
 - When a concrete requirement conflicts with a rule, follow the requirement and record why in the comment or commit body.
+
+## Tests
+
+Keep iteration in a tight loop. Human-loop development depends on fast, deterministic feedback.
+
+- **Inner loop:** run targeted unit tests (`bun run test [filter]`, e.g. `bun run test layout`). They run in happy-dom in sub-second time.
+- **Fast gate:** run `bun run test` to verify all unit suites before expanding scope.
+- **Milestone gate:** defer full browser verification (`bun run test:e2e`) and the complete check suite (`bun run verify`) to milestone checkpoints and final handoff. Keep slow browser tests out of inner edit-and-verify loops.
+- **Root-cause reproduction:** write or run the minimal unit test in `tests/` to reproduce and prove behavior before touching end-to-end specs.

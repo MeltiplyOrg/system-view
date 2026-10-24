@@ -21,6 +21,7 @@
   --glow-opacity: 0.22;
   --pulse: #fff4df;
   --accent: #ffac6b;
+  --cluster-hover: #facc15;
 }
 /*
  * Default follows the operating system. An explicit data-theme attribute set
@@ -44,6 +45,7 @@
     --glow-opacity: 0.26;
     --pulse: #fff8ea;
     --accent: #985019;
+    --cluster-hover: #b47800;
   }
 }
 :root[data-theme="light"] {
@@ -63,6 +65,7 @@
   --glow-opacity: 0.26;
   --pulse: #fff8ea;
   --accent: #985019;
+  --cluster-hover: #b47800;
 }
 * {
   box-sizing: border-box;
@@ -119,13 +122,10 @@ a {
   width: 100%;
   height: 100%;
   touch-action: none;
-  cursor: grab;
+  cursor: default;
   user-select: none;
 }
-#scene.dragging {
-  cursor: grabbing;
-}
-.database-rack {
+.platforms {
   pointer-events: none;
 }
 
@@ -508,6 +508,32 @@ textarea[aria-invalid="true"] {
   letter-spacing: 0.14em;
   text-transform: uppercase;
 }
+/*
+ * Cluster frames are painted on the grid plane behind the plinth. The dash
+ * pattern uses screen-space units (non-scaling stroke), so it stays readable
+ * at every zoom instead of collapsing into a solid line at low zoom.
+ */
+.cluster-frames {
+  pointer-events: none;
+}
+.cluster-frame {
+  fill: transparent;
+  stroke: var(--line);
+  stroke-width: 1.1;
+  stroke-dasharray: 7 6;
+  stroke-linejoin: round;
+  vector-effect: non-scaling-stroke;
+  opacity: 0.8;
+  pointer-events: all;
+  transition:
+    stroke 0.25s ease,
+    opacity 0.25s ease;
+}
+.cluster-frame.hovered,
+.cluster-frame:hover {
+  stroke: var(--cluster-hover, #facc15);
+  opacity: 1;
+}
 .space-grid {
   fill: none;
   stroke: var(--grid);
@@ -569,7 +595,8 @@ textarea[aria-invalid="true"] {
 /* Motion is decorative; disable transitions and cable flow when requested. */
 @media (prefers-reduced-motion: reduce) {
   .panel-toggle,
-  .sidebar {
+  .sidebar,
+  .cluster-frame {
     transition: none;
   }
   .pulse {

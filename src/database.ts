@@ -400,8 +400,8 @@ export class DatabaseRack {
    * The node color becomes `--cable-color` and is inherited by cables, ports,
    * LEDs, and glass tint. The label is assigned with `textContent`, so imported
    * text cannot inject markup. Labels longer than 16 characters are compressed
-   * into the 74-unit clip region; the title exposes the full name to assistive
-   * technology.
+   * into the 74-unit clip region; aria-label exposes the full name to
+   * assistive technology without triggering browser hover tooltips.
    *
    * @throws Error indirectly if the DOM or shared defs are unavailable.
    */
@@ -427,8 +427,10 @@ export class DatabaseRack {
     nameplate.append(label);
     this.element.append(nameplate);
 
-    const title = document.createElementNS(NS, "title");
-    title.textContent = `${node.label} (${node.id}) · Database Rack`;
-    this.element.prepend(title);
+    this.element.setAttribute("role", "img");
+    this.element.setAttribute(
+      "aria-label",
+      `${node.label} (${node.id}) · Database Rack`,
+    );
   }
 }

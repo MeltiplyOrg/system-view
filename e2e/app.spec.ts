@@ -56,6 +56,11 @@ test.describe("minimal isometric canvas", () => {
     await expect(page.locator(".database-rack")).toHaveCount(3);
     await expect(page.locator(".connection")).toHaveCount(2);
     await expect(page.locator(".cluster-label")).toHaveText("Database cluster");
+    await expect(page.locator(".cluster-frame")).toHaveCount(1);
+    await expect(page.locator(".cluster-frame")).toHaveAttribute(
+      "data-cluster-id",
+      "cluster-1",
+    );
     await expect(page.locator(".space-grid")).toHaveAttribute("d", /M/);
     await expect(page.locator("#sidebar")).toBeHidden();
     await expect(page.getByRole("button", { name: "Design" })).toBeVisible();
@@ -138,6 +143,7 @@ test.describe("minimal isometric canvas", () => {
     await page.getByRole("button", { name: "Apply", exact: true }).click();
     await expect(page.locator(".database-rack")).toHaveCount(1);
     await expect(page.locator(".cluster-label")).toHaveCount(0);
+    await expect(page.locator(".cluster-frame")).toHaveCount(0);
     await expect(page.locator("#scene-title")).toHaveText("Single rack");
 
     await page.locator("#file").setInputFiles({
@@ -148,6 +154,11 @@ test.describe("minimal isometric canvas", () => {
     await expect(page.locator(".database-rack")).toHaveCount(2);
     await expect(page.locator(".connection")).toHaveCount(1);
     await expect(page.locator(".cluster-label")).toHaveText("Imported cluster");
+    await expect(page.locator(".cluster-frame")).toHaveCount(1);
+    await expect(page.locator(".cluster-frame")).toHaveAttribute(
+      "data-cluster-id",
+      "imported-cluster",
+    );
 
     const invalid = {
       ...oneRack,
