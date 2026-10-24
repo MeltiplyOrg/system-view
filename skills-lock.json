@@ -1,0 +1,101 @@
+{
+  "version": 1,
+  "skills": {
+    "code-review": {
+      "source": "Essential-kit/skills",
+      "sourceType": "github",
+      "skillPath": "skills/code-review/SKILL.md",
+      "computedHash": "cafed111d56b39a2d994637f9aef659bf920ff675cda98b4bff7ce33ca05e557"
+    },
+    "codebase-design": {
+      "source": "Essential-kit/skills",
+      "sourceType": "github",
+      "skillPath": "skills/codebase-design/SKILL.md",
+      "computedHash": "b2888e4f4e8c0af3bfd557575a64b905c44e6248c3101d72077816882b3a92b9"
+    },
+    "diagnosing-bugs": {
+      "source": "Essential-kit/skills",
+      "sourceType": "github",
+      "skillPath": "skills/diagnosing-bugs/SKILL.md",
+      "computedHash": "ede7254edbd22fcab97a0941511f7d440d8f9a249348fea97c50987ad5501674"
+    },
+    "domain-modeling": {
+      "source": "Essential-kit/skills",
+      "sourceType": "github",
+      "skillPath": "skills/domain-modeling/SKILL.md",
+      "computedHash": "b3eb40152b81f0c98fd2095a023c019452dbdce56f7540cc67fece2972db8369"
+    },
+    "grill-with-docs": {
+      "source": "Essential-kit/skills",
+      "sourceType": "github",
+      "skillPath": "skills/grill-with-docs/SKILL.md",
+      "computedHash": "35e62aa423aaeab6a414bcac273f56dfb17802ef2334b41b6a3b00f28196c8cf"
+    },
+    "grilling": {
+      "source": "Essential-kit/skills",
+      "sourceType": "github",
+      "skillPath": "skills/grilling/SKILL.md",
+      "computedHash": "ef1641a2047b71b60f1942cd35efb47d3afc9d584dff5a0b01f8c7db923aaa08"
+    },
+    "handoff": {
+      "source": "Essential-kit/skills",
+      "sourceType": "github",
+      "skillPath": "skills/handoff/SKILL.md",
+      "computedHash": "8ebcf017c0a59681f3c2f1ebf90e32f481954a068181a75151c44aa2c55de4b4"
+    },
+    "implement": {
+      "source": "Essential-kit/skills",
+      "sourceType": "github",
+      "skillPath": "skills/implement/SKILL.md",
+      "computedHash": "247dd46c7943b2eef3be8be845277d3db2ad3e98a04b516122e54966b257c56b"
+    },
+    "implement-spec": {
+      "source": "Essential-kit/skills",
+      "sourceType": "github",
+      "skillPath": "skills/implement-spec/SKILL.md",
+      "computedHash": "75079231ec3504f845b1fc9de7346e1f54ce02269710cf8eae76e5f3123a99aa"
+    },
+    "improve-codebase-architecture": {
+      "source": "Essential-kit/skills",
+      "sourceType": "github",
+      "skillPath": "skills/improve-codebase-architecture/SKILL.md",
+      "computedHash": "91d92a66a885bd4f3781c59a0f2c275fd835ffdc4390211bf95c84a03f849e52"
+    },
+    "pr": {
+      "source": "Essential-kit/skills",
+      "sourceType": "github",
+      "skillPath": "skills/pr/SKILL.md",
+      "computedHash": "e6822e75d334dd6e5a70ed6ddbedec47c9ad19da96080941375922a1e1aeaa49"
+    },
+    "research": {
+      "source": "Essential-kit/skills",
+      "sourceType": "github",
+      "skillPath": "skills/research/SKILL.md",
+      "computedHash": "c8c1cba327a6f824b554cd978079a3dadd7406d73174f8fb9bfef58824691970"
+    },
+    "tdd": {
+      "source": "Essential-kit/skills",
+      "sourceType": "github",
+      "skillPath": "skills/tdd/SKILL.md",
+      "computedHash": "0f15e93952916555d05a8489645843a5058e5d2085647b22be836e71fe427fec"
+    },
+    "to-spec": {
+      "source": "Essential-kit/skills",
+      "sourceType": "github",
+      "skillPath": "skills/to-spec/SKILL.md",
+      "computedHash": "3b719c0f6b881ee837cfaaff80c02413d25ff5a56ae05e48b4938d79e422897e"
+    },
+    "to-tickets": {
+      "source": "Essential-kit/skills",
+      "sourceType": "github",
+      "skillPath": "skills/to-tickets/SKILL.md",
+      "computedHash": "e93cd141339325c14917b6e3ac00b7e576b5ede1b8c97ec98b84c54bd087fd26"
+    },
+    "writing-for-agents": {
+      "source": "Essential-kit/skills",
+      "sourceType": "github",
+      "skillPath": "skills/writing-for-agents/SKILL.md",
+      "computedHash": "95da47fc97af998e85b7d7e6d57b3ac76727c1e290cfe9ea09005aacb826959f"
+    }
+  }
+}

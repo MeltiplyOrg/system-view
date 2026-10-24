@@ -1,0 +1,9 @@
+{
+  // Cloudflare Pages Git build: bun install --frozen-lockfile && bun run build
+  // Build output: dist. Local development: bun run dev.
+  // Manual upload after Cloudflare login: bun run deploy.
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "system-view",
+  "pages_build_output_dir": "./dist",
+  "compatibility_date": "2026-10-24",
+}
