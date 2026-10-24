@@ -1,3 +1,7 @@
+/*
+ * One palette drives both the UI chrome and the SVG drawing. Components read
+ * these custom properties, so theme swaps never require re-rendering markup.
+ */
 :root {
   font-family: "Manrope", ui-sans-serif, system-ui, sans-serif;
   color-scheme: dark;
@@ -18,6 +22,10 @@
   --pulse: #fff4df;
   --accent: #ffac6b;
 }
+/*
+ * Default follows the operating system. An explicit data-theme attribute set
+ * by the theme select wins; removing it returns control to this media query.
+ */
 @media (prefers-color-scheme: light) {
   :root:not([data-theme="dark"]) {
     color-scheme: light;
@@ -93,6 +101,11 @@ a {
 }
 
 /* ---------- full-bleed scene ---------- */
+/*
+ * The canvas owns the viewport. `overflow: clip` (rather than hidden) prevents
+ * the off-screen fixed sidebar from becoming a programmatically scrollable
+ * area when focus moves into it; otherwise opening the panel shifts the grid.
+ */
 .stage {
   position: relative;
   width: 100%;
@@ -117,6 +130,7 @@ a {
 }
 
 /* ---------- floating panel trigger ---------- */
+/* The only persistent chrome: a compact control that expands the overlay. */
 .panel-toggle {
   position: fixed;
   top: 18px;
@@ -157,6 +171,11 @@ a {
 }
 
 /* ---------- sidebar overlay ---------- */
+/*
+ * Fixed overlay, never a layout column. It is opaque (no backdrop blur) so
+ * the animated grid behind cannot shimmer through a moving blur surface.
+ * Visibility is delayed while closing so the slide-out transition is visible.
+ */
 .sidebar {
   position: fixed;
   z-index: 30;
@@ -393,6 +412,10 @@ textarea[aria-invalid="true"] {
 }
 
 /* ---------- isometric drawing ---------- */
+/*
+ * Faces must stay opaque: SVG has no depth buffer, so painter order is the
+ * only occlusion. Non-scaling strokes keep the hairline look at every zoom.
+ */
 .face {
   fill: var(--body);
   stroke: var(--line);
@@ -507,8 +530,12 @@ textarea[aria-invalid="true"] {
   stroke-width: 5;
   opacity: var(--glow-opacity);
 }
-/* Broad, translucent static strokes provide glow without expensive SVG blur surfaces.
-   Only 21 rack pulses + scene link pulses repaint; chassis geometry is shared. */
+/*
+ * Glow is a second, broad translucent stroke rather than an SVG blur filter.
+ * Only 21 rack pulses plus design-link pulses repaint; chassis geometry is
+ * shared defs. `pathLength="100"` normalizes the dash distance across cables,
+ * so one CSS keyframe serves every length without per-cable JS.
+ */
 .pulse {
   stroke: var(--pulse);
   stroke-width: 1.5;
@@ -533,6 +560,7 @@ textarea[aria-invalid="true"] {
 .paused .pulse {
   animation-play-state: paused;
 }
+/* Motion is decorative; disable transitions and cable flow when requested. */
 @media (prefers-reduced-motion: reduce) {
   .panel-toggle,
   .sidebar {
@@ -543,6 +571,7 @@ textarea[aria-invalid="true"] {
     stroke-dashoffset: -44;
   }
 }
+/* On phones the overlay uses almost the full viewport but keeps an inset frame. */
 @media (max-width: 620px) {
   .panel-toggle {
     top: 12px;

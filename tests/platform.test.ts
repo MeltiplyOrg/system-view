@@ -1,7 +1,12 @@
+/**
+ * Platform-union tests. They assert real footprint topology (islands, holes,
+ * L-shapes, elevation separation), not only that a path string was emitted.
+ */
 import { expect, test } from "vite-plus/test";
 import type { DatabaseNode } from "../src/design";
 import { mergePlatformFootprints } from "../src/platform";
 
+/** Minimal validated node with a centered 288 × 150 foot. */
 function rack(id: string, x: number, y: number, z = 0): DatabaseNode {
   return {
     id,
@@ -11,6 +16,10 @@ function rack(id: string, x: number, y: number, z = 0): DatabaseNode {
     position: { x, y, z },
   };
 }
+/**
+ * Shoelace signed area. Positive means an outer contour; negative is a hole.
+ * Tests use the sign to prove the ring case stays hollow.
+ */
 function area(contour: readonly (readonly [number, number])[]): number {
   return (
     contour.reduce((sum, p, i) => {

@@ -1,7 +1,17 @@
 import type { DatabaseNode } from "./design";
 
 const NS = "http://www.w3.org/2000/svg";
+
+/** Rack-local world coordinate: [x, y, z] in model units. */
 type Point = readonly [number, number, number];
+
+/**
+ * Project rack-local world coordinates into SVG user units.
+ *
+ * The view is a 30° isometric projection: +x runs down-right, +y down-left,
+ * and +z up. One world unit maps to one SVG unit; translation and zoom are
+ * owned by the scene's `viewBox`.
+ */
 export const project = (
   x: number,
   y: number,
@@ -10,19 +20,43 @@ export const project = (
   (x - y) * Math.cos(Math.PI / 6),
   (x + y) * 0.5 - z,
 ];
+
+/** Projected rack-foot center; the scene aligns a node position to this point. */
 export const DATABASE_ANCHOR = project(144, 75, 0);
+
+/**
+ * Build an SVG matrix that maps a face-local 2D system onto a projected plane.
+ *
+ * `origin` is the face's local (0, 0) corner, `u` its horizontal unit axis,
+ * and `v` its vertical unit axis. Rounded rectangles and text can then be
+ * drawn in ordinary local coordinates while SVG applies the isometric skew.
+ */
 const plane = (origin: Point, u: Point, v: Point): string => {
   const o = project(...origin),
     a = project(...u),
     b = project(...v);
   return `matrix(${a[0]} ${a[1]} ${b[0]} ${b[1]} ${o[0]} ${o[1]})`;
 };
+
+/** Top face at z=max, facing upward. */
 const top = (x: number, y: number, z: number) =>
   plane([x, y, z], [1, 0, 0], [0, 1, 0]);
+
+/** Broad visible face at y=max, used for the glass side. */
 const front = (x: number, y: number, z: number) =>
   plane([x, y, z], [1, 0, 0], [0, 0, -1]);
+
+/** Narrow end at x=max, used for drawer fascias and the switch. */
 const side = (x: number, y: number, z: number) =>
   plane([x, y, z], [0, -1, 0], [0, 0, -1]);
+
+/**
+ * Project a polyline into an SVG path with two-decimal rounding.
+ *
+ * The caller appends `Z` when a closed face is required. Rounding keeps path
+ * strings compact; the resulting error is far below one screen pixel at the
+ * scene's fit scale.
+ */
 const path = (points: readonly Point[]) =>
   "M" +
   points
@@ -33,8 +67,19 @@ const path = (points: readonly Point[]) =>
     )
     .join("L");
 
-// Geometry adapted from April Zhu's rack: https://isoglow.dev/demo/objects#rack.
-// Shared symbols retain detail without copying the chassis into every object.
+// Geometry adapted from April Zhu's rack:
+// https://isoglow.dev/demo/objects#rack.
+// Shared definitions retain detail without copying chassis markup per object.
+
+/**
+ * Draw a box as one visible side wall plus its top face.
+ *
+ * `r` rounds all vertical corners, giving the cabinet its soft silhouette;
+ * it is clamped to half the smaller dimension. The wall samples only the
+ * front half of the rounded outline, because back faces are occluded by the
+ * opaque fill. Faces must stay opaque: SVG has no depth buffer, so painter
+ * order is the only depth sorting. Coordinates are rack-local world units.
+ */
 function box(
   x: number,
   y: number,
@@ -44,6 +89,8 @@ function box(
   h: number,
   r = 1,
 ): string {
+  // Six samples per rounded corner are enough at illustration scale; more
+  // segments only enlarge the shared SVG definitions.
   const arc = (
     cx: number,
     cy: number,
@@ -56,23 +103,36 @@ function box(
     });
   const q = Math.PI / 4,
     half = Math.PI / 2;
+
+  // Full rounded rectangle used as the top-face outline.
   const ring = [
     ...arc(x + w - r, y + r, -half, 0),
     ...arc(x + w - r, y + d - r, 0, half),
     ...arc(x + r, y + d - r, half, 2 * half),
     ...arc(x + r, y + r, 2 * half, 3 * half),
   ];
+
+  // Only the front-facing half of the outline is needed for the side wall.
   const visible = [
     ...arc(x + w - r, y + r, -q, 0),
     ...arc(x + w - r, y + d - r, 0, half),
     ...arc(x + r, y + d - r, half, 3 * q),
   ];
+
+  // Wall = visible edge at the base followed by the reversed edge at the top.
   const wall: Point[] = [
     ...visible.map(([a, b]): Point => [a, b, z]),
     ...visible.reverse().map(([a, b]): Point => [a, b, z + h]),
   ];
   return `<path class="face" d="${path(wall)}Z"/><path class="face top" d="${path(ring.map(([a, b]): Point => [a, b, z + h]))}Z"/>`;
 }
+
+/**
+ * Build repeated vertical detail lines as one path.
+ *
+ * Used for vents and slot texture. Batching avoids hundreds of SVG nodes and
+ * keeps the shared definitions small; values are face-local units.
+ */
 function slits(
   start: number,
   end: number,
@@ -85,9 +145,20 @@ function slits(
     d += `M${x.toFixed(2)} ${low}V${high}`;
   return `<path class="detail" d="${d}"/>`;
 }
+
+/**
+ * Build a circle path using two arcs.
+ *
+ * Circles are merged into one path when used as screws or LEDs, reducing node
+ * count. Coordinates are face-local units; the caller owns placement.
+ */
 function circle(x: number, y: number, r: number): string {
   return `M${x - r} ${y}a${r} ${r} 0 1 0 ${2 * r} 0a${r} ${r} 0 1 0 ${-2 * r} 0`;
 }
+
+// Shared chassis dimensions in world units. The 240 × 92 cabinet sits on a
+// 20-unit base; RF is the broad glass face and the drawers live on the narrow
+// x=max end. UH is one rack unit (RU); each row subtracts 1.5 for a seam.
 const RX = 24,
   RY = 22,
   RW = 240,
@@ -95,6 +166,10 @@ const RX = 24,
   RZ = 20,
   RF = 114;
 const UH = 13;
+
+// Bottom-to-top row stack. The tuple is [height in RU, visual kind]; display
+// numbers count top-down so row 07 is the top of the cabinet. 4U storage and
+// 2U storage rows get HDD caddies; other rows are compute drawers.
 let nextZ = RZ + 2;
 const units = (
   [
@@ -111,20 +186,40 @@ const units = (
   nextZ += height * UH;
   return unit;
 });
+
+// Switch sits above the last server row; the roof adds 20 units on top.
 const SZ = nextZ,
   SH = 11.5,
   ZT = SZ + 16,
   TOPZ = ZT + 20;
-const portU = (n: number) => 46 + n * 5;
-const switchZ = SZ + 9.5 - 4.4 / 2; // Center of the switch jack, not the fascia edge.
 
+/**
+ * Face-local X of a network jack (0–80 on the narrow end).
+ * The 5-unit pitch keeps seven cables separate at fit scale.
+ */
+const portU = (n: number) => 46 + n * 5;
+
+// Center of the switch jack in world z; the port rectangle is 4.4 units tall.
+const switchZ = SZ + 9.5 - 4.4 / 2;
+
+/**
+ * Build the rear layer painted before cables.
+ *
+ * Includes the plinth, visible chassis walls, interior trays, glass side,
+ * drawer fascias, rails, and switch. The broad y=max wall is intentionally
+ * omitted: the tinted glass and internals replace it. No event handlers or
+ * per-instance data belong here; this markup is shared through `<defs>`.
+ */
 function rearGeometry(): string {
-  // The broad side is glazed; opaque walls must not cover the internal modules.
+  // Scene-level platform union replaces individual bottom plates and seams.
   let svg = box(RX + 6, RY + 6, 7, RW - 12, RD - 10, 10, 2);
   svg += box(RX, RY, 17, RW, RD, 3);
   svg += box(RX, RY, RZ, RW, 6, ZT - RZ);
   svg += box(RX, RY, RZ, 6, RD, ZT - RZ);
   svg += box(RX + RW - 5, RY, RZ, 5, RD, ZT - RZ);
+
+  // Interiors are visible through the broad glass pane. Storage rows show
+  // three cages; compute rows show a board, chip, and vent fields.
   svg += '<g class="rack-internals">';
   for (const u of units) {
     const storage = u.kind === "store" || u.kind === "bays";
@@ -149,6 +244,9 @@ function rearGeometry(): string {
     svg += "</g>";
   }
   svg += "</g>";
+
+  // Glass frame: the even-odd path cuts the pane out of the solid frame.
+  // Reflections are clipped to the pane and kept at low opacity.
   const sideScrews = [
     [5, 6],
     [235, 6],
@@ -166,6 +264,9 @@ function rearGeometry(): string {
     <path class="detail" d="M221 89v8"/>
   </g>`;
 
+  // Drawer fascias live on the narrow x=max face. Storage rows get six
+  // vertical hot-swap caddies per row; compute rows get a pull and vents.
+  // All of this is visual only: no row is a control.
   for (const u of units) {
     const middle = u.h / 2,
       storage = u.kind === "store" || u.kind === "bays";
@@ -200,12 +301,16 @@ function rearGeometry(): string {
     }
     svg += `<path class="led" d="${leds}"/><rect class="port" x="${portU(u.n) - 2.1}" y="3.5" width="4.2" height="4.4" rx=".5"/></g>`;
   }
+
+  // Switch fascia and its seven destination jacks.
   svg += `<g transform="${side(RX + RW, RF, SZ + SH)}">
     <rect class="face drawer-front" x="6" y=".7" width="80" height="${SH - 1.4}" rx="1.2"/>
     <text class="label" x="10" y="8" font-size="5">SW</text>
     ${slits(25, 40, 3, 3, SH - 3)}
     ${units.map((u) => `<rect class="port" x="${portU(u.n) - 2.1}" y="${SH - 9.5}" width="4.2" height="4.4" rx=".5"/>`).join("")}
   </g>`;
+
+  // Front rails with mounting holes.
   let holes = "";
   for (let v = 4; v < ZT - RZ - 4; v += 4.33) holes += circle(2.5, v, 0.75);
   for (const u of [0, RD - 5]) {
@@ -216,6 +321,14 @@ function rearGeometry(): string {
   }
   return svg;
 }
+
+/**
+ * Build the roof layer painted after cables.
+ *
+ * Cables terminate on the narrow face and must pass under the roof's front
+ * strip. Only the top fans and roof outline are shared; the per-instance
+ * database name is added by `DatabaseRack`.
+ */
 function frontGeometry(): string {
   // Roof is painted after the cables; its front strip carries only the database name.
   let svg = box(RX, RY, ZT, RW, RD, 20, 4);
@@ -224,6 +337,15 @@ function frontGeometry(): string {
   svg += `<g transform="${top(RX, RY, TOPZ)}"><rect class="detail" x="6" y="6" width="228" height="80" rx="3"/>${fan(66, 46)}${fan(174, 46)}${slits(104, 136, 3.2, 24, 68)}</g>`;
   return svg;
 }
+
+/**
+ * Seven cubic cables from each row jack to the matching switch jack.
+ *
+ * Each curve bows out from the narrow face by an amount that grows with the
+ * vertical run. `pathLength="100"` normalizes dash distance so one CSS
+ * dash/gap pattern works for every cable regardless of length. The reversed
+ * stack gives stable painter ordering at shared port columns.
+ */
 const cables = units
   .slice()
   .reverse()
@@ -246,20 +368,49 @@ const cables = units
   })
   .join("");
 
+/**
+ * Create the shared `<defs>` required by every Database Rack.
+ *
+ * Must be appended exactly once per scene before any rack instance. The two
+ * clip paths and rear/front groups are referenced by ID from each instance.
+ * A `<g>` is used instead of `<symbol>` because symbols introduce an implicit
+ * viewport that would clip negative face coordinates.
+ */
 export function createDatabaseDefinitions(): SVGDefsElement {
   const defs = document.createElementNS(NS, "defs");
-  // <g> rather than <symbol> avoids an implicit viewport clipping the negative y coordinates.
   defs.innerHTML = `<clipPath id="rack-name-clip" clipPathUnits="userSpaceOnUse"><rect x="8" y="2" width="76" height="16"/></clipPath><clipPath id="rack-glass-clip" clipPathUnits="userSpaceOnUse"><rect x="10" y="10" width="220" height="167" rx="2"/></clipPath><g id="rack-rear">${rearGeometry()}</g><g id="rack-front">${frontGeometry()}</g>`;
   return defs;
 }
 
+/**
+ * SVG renderer for one Database Rack.
+ *
+ * The element is a `<g>` containing shared rear markup, cables, shared front
+ * markup, and a per-instance nameplate. It has no event listeners or internal
+ * state; the scene owns placement. Instances rely on the IDs produced by
+ * `createDatabaseDefinitions`, so that function must run first.
+ */
 export class DatabaseRack {
+  /** Ready-to-append group; caller applies the scene translation. */
   readonly element = document.createElementNS(NS, "g");
+
+  /**
+   * Render a validated node.
+   *
+   * The node color becomes `--cable-color` and is inherited by cables, ports,
+   * LEDs, and glass tint. The label is assigned with `textContent`, so imported
+   * text cannot inject markup. Labels longer than 16 characters are compressed
+   * into the 74-unit clip region; the title exposes the full name to assistive
+   * technology.
+   *
+   * @throws Error indirectly if the DOM or shared defs are unavailable.
+   */
   constructor(node: DatabaseNode) {
     this.element.classList.add("database-rack");
     this.element.dataset.nodeId = node.id;
     this.element.style.setProperty("--cable-color", node.color);
     this.element.innerHTML = `<use href="#rack-rear"/>${cables}<use href="#rack-front"/>`;
+
     // Plain identity lettering on the top strip of the narrow drawer face.
     const nameplate = document.createElementNS(NS, "g");
     nameplate.setAttribute("transform", side(RX + RW, RF, TOPZ));
@@ -275,6 +426,7 @@ export class DatabaseRack {
     }
     nameplate.append(label);
     this.element.append(nameplate);
+
     const title = document.createElementNS(NS, "title");
     title.textContent = `${node.label} (${node.id}) · Database Rack`;
     this.element.prepend(title);

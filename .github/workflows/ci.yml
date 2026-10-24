@@ -1,3 +1,5 @@
+# Quality gates run in parallel where possible. Vite+ owns Node/Bun setup and
+# package-manager caching; every action is referenced by a release tag.
 name: CI
 
 on:
@@ -38,6 +40,7 @@ jobs:
       - name: Unit tests with coverage
         run: vp test run --coverage
 
+      # Upload even on failure so regressions can be inspected without reruns.
       - name: Upload coverage report
         if: always()
         uses: actions/upload-artifact@v7
@@ -60,6 +63,8 @@ jobs:
           path: dist/
           retention-days: 1
 
+  # Reuse the quality job's build instead of compiling twice. Browser caches
+  # are keyed by the lockfile so toolchain upgrades invalidate Chromium.
   e2e:
     name: Browser end-to-end
     needs: quality
@@ -104,6 +109,7 @@ jobs:
           if-no-files-found: ignore
           retention-days: 7
 
+  # Dependency review runs on PRs; audit runs everywhere for the lockfile.
   security:
     name: Supply chain
     runs-on: ubuntu-latest

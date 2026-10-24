@@ -1,7 +1,12 @@
+/**
+ * Platform SVG tests. Unit coverage proves the merged footprint is translated
+ * into expectable markup: one group per elevation, even-odd holes, and walls.
+ */
 import { describe, expect, test } from "vite-plus/test";
 import type { DatabaseNode } from "../src/design";
 import { createPlatforms } from "../src/platform";
 
+/** Minimal validated node used to compose platform fixtures. */
 function rack(id: string, x: number, y: number, z = 0): DatabaseNode {
   return {
     id,

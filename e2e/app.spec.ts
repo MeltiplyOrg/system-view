@@ -1,9 +1,17 @@
+/**
+ * Browser-level contract tests for the built site.
+ *
+ * Covers the minimal viewport, overlay stability, pan/zoom controls, JSON and
+ * file round-trips, WCAG scans, and the mobile overlay. These run against
+ * production output through Playwright's web server.
+ */
 import { readFileSync } from "node:fs";
 import AxeBuilder from "@axe-core/playwright";
 import type { Page } from "@playwright/test";
 import { expect, test } from "@playwright/test";
 import type { Design } from "../src/design";
 
+/** Smallest valid document used to prove apply/import replace the scene. */
 const oneRack: Design = {
   version: 1,
   name: "Single rack",
@@ -18,6 +26,7 @@ const oneRack: Design = {
   ],
   connections: [],
 };
+/** Two-node document with a link, used to verify file import and cables. */
 const imported: Design = {
   version: 1,
   name: "Imported layout",
@@ -34,6 +43,12 @@ const imported: Design = {
   connections: [{ id: "copy", from: "only", to: "second", color: "#42d9e8" }],
 };
 
+/**
+ * Open the overlay and wait for its final visual state.
+ *
+ * Waiting for both visibility and opacity prevents later color/DOM scans from
+ * observing the slide-in transition, which would make assertions timing-based.
+ */
 async function openSidebar(page: Page) {
   await page.getByRole("button", { name: "Design" }).click();
   const sidebar = page.locator("#sidebar");

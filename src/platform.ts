@@ -1,17 +1,41 @@
 import { project } from "./database";
 import type { DatabaseNode } from "./design";
 
+/** A world-space X/Y vertex; platform contours never carry elevation. */
 type Point = readonly [number, number];
+
+/**
+ * One merged base at a single elevation.
+ *
+ * `contours` are closed loops in world coordinates. Outer loops have positive
+ * signed area and holes negative (using the shoelace convention); SVG uses
+ * `fill-rule="evenodd"` so either direction renders correctly.
+ */
 export interface PlatformFootprint {
   elevation: number;
   contours: Point[][];
 }
+
+/**
+ * A directed boundary segment in the compressed occupancy grid.
+ *
+ * `start`/`end` are flattened vertex indices (`y * stride + x`). `direction`
+ * is 0=right, 1=down, 2=left, 3=up in world coordinates, which lets contour
+ * tracing prefer the correct right turn at ambiguous corners.
+ */
 interface Edge {
   start: number;
   end: number;
   direction: number;
 }
 
+/**
+ * Resolve a compressed-grid coordinate index.
+ *
+ * Every rectangle edge must appear in the coordinate table established above.
+ * A miss indicates an internal construction bug, so failing loudly is safer
+ * than silently producing an open contour.
+ */
 function coordinateIndex(
   map: ReadonlyMap<number, number>,
   key: number,
@@ -22,19 +46,39 @@ function coordinateIndex(
   return index;
 }
 
-/** Union of the actual 288 × 150 rack feet, not a bounding box or convex hull.
- * Disconnected islands and holes remain empty; only coplanar bases can merge.
- * Runs on design changes, never in the animation loop.
+/**
+ * Union the actual 288 × 150 rack feet at each elevation.
+ *
+ * Disconnected islands and enclosed holes remain empty; only coplanar,
+ * touching/overlapping bases merge. This is a true union, not a bounding box
+ * or convex hull, so distant racks never connect across empty space. Each
+ * footprint is a rectangle centered on `position` with half-width 144 and
+ * half-depth 75.
+ *
+ * The algorithm coordinate-compresses rectangle edges, fills a bit grid,
+ * emits only boundary edges, then traces directed loops with a right-turn
+ * preference. The right turn keeps diagonally touching islands separate
+ * instead of pinching them into one self-touching contour. Collinear vertices
+ * are dropped to reduce SVG path size.
+ *
+ * Runs once per design change, never inside the animation loop.
+ *
+ * @param nodes - Validated racks; only `position` is needed.
+ * @returns Platforms sorted by ascending elevation; empty for no nodes.
+ * @throws Error only if an internal lookup or contour closure invariant fails.
  */
 export function mergePlatformFootprints(
   nodes: readonly DatabaseNode[],
 ): PlatformFootprint[] {
+  // Elevation is exact: racks on different floors must not share a base, and
+  // inputs are validated numbers, so no epsilon merge is appropriate.
   const levels = new Map<number, DatabaseNode[]>();
   for (const node of nodes) {
     const level = levels.get(node.position.z);
     if (level) level.push(node);
     else levels.set(node.position.z, [node]);
   }
+
   const platforms: PlatformFootprint[] = [];
   for (const [elevation, group] of levels) {
     const rectangles = group.map(({ position }) => ({
@@ -43,6 +87,9 @@ export function mergePlatformFootprints(
       y0: position.y - 75,
       y1: position.y + 75,
     }));
+
+    // Compression keeps the occupancy grid proportional to distinct edges
+    // rather than to arbitrary world coordinates or off-screen space.
     const xs = [...new Set(rectangles.flatMap((r) => [r.x0, r.x1]))].sort(
       (a, b) => a - b,
     );
@@ -55,6 +102,8 @@ export function mergePlatformFootprints(
       height = ys.length - 1,
       stride = xs.length;
     const occupied = new Uint8Array(width * height);
+
+    // Half-open intervals avoid double-filling shared rectangle edges.
     for (const rectangle of rectangles) {
       const left = coordinateIndex(xIndex, rectangle.x0),
         right = coordinateIndex(xIndex, rectangle.x1);
@@ -63,6 +112,10 @@ export function mergePlatformFootprints(
       for (let y = top; y < bottom; y++)
         occupied.fill(1, y * width + left, y * width + right);
     }
+
+    // Emit boundary edges in clockwise order (top→right→bottom→left). The
+    // filled cells stay on the right side of travel, which makes the
+    // right-turn rule below produce simple, disambiguated contours.
     const edges: Edge[] = [];
     for (let y = 0; y < height; y++)
       for (let x = 0; x < width; x++) {
@@ -80,12 +133,15 @@ export function mergePlatformFootprints(
         if (x === 0 || !occupied[y * width + x - 1])
           edges.push({ start: bl, end: tl, direction: 3 });
       }
+
+    // Index outgoing edges by start vertex for O(1) contour following.
     const outgoing = new Map<number, number[]>();
     for (let i = 0; i < edges.length; i++) {
       const list = outgoing.get(edges[i].start);
       if (list) list.push(i);
       else outgoing.set(edges[i].start, [i]);
     }
+
     const visited = new Uint8Array(edges.length),
       contours: Point[][] = [];
     for (let first = 0; first < edges.length; first++) {
@@ -103,7 +159,8 @@ export function mergePlatformFootprints(
         const candidates = outgoing.get(edge.end);
         if (!candidates)
           throw new Error(`Unclosed platform boundary at ${edge.end}`);
-        // Right turn first keeps corner-touching islands as separate contours.
+
+        // Right turn first keeps corner-touching islands as separate loops.
         let next = -1;
         for (const direction of [
           (edge.direction + 1) % 4,
@@ -120,6 +177,9 @@ export function mergePlatformFootprints(
         if (next === -1) throw new Error("Could not close platform boundary.");
         current = next;
       } while (current !== first);
+
+      // Remove collinear vertices; the cross product is zero for a straight
+      // run. This is purely geometric cleanup and does not change the shape.
       contours.push(
         points.filter((point, i) => {
           const before = points[(i + points.length - 1) % points.length],
@@ -136,9 +196,18 @@ export function mergePlatformFootprints(
   return platforms.sort((a, b) => a.elevation - b.elevation);
 }
 
+/**
+ * Render all merged footprints as one SVG group.
+ *
+ * The compound top path uses `evenodd` so enclosed holes stay open. Side walls
+ * are emitted only for boundary edges whose outward normal faces the camera;
+ * decorative screws sit on long convex corners. The result is static markup
+ * with no listeners, created fresh for each design render.
+ */
 export function createPlatforms(nodes: readonly DatabaseNode[]): SVGGElement {
   const group = document.createElementNS("http://www.w3.org/2000/svg", "g");
   group.classList.add("platforms");
+
   for (const { elevation, contours } of mergePlatformFootprints(nodes)) {
     const platform = document.createElementNS(
       "http://www.w3.org/2000/svg",
@@ -149,17 +218,23 @@ export function createPlatforms(nodes: readonly DatabaseNode[]): SVGGElement {
     let top = "",
       walls = "",
       screws = "";
+
     for (const contour of contours) {
+      // The top face is one even-odd subpath per contour, including holes.
       top +=
         "M" +
         contour
           .map(([x, y]) => project(x, y, elevation + 7).join(" "))
           .join("L") +
         "Z";
+
       for (let i = 0; i < contour.length; i++) {
         const a = contour[i],
           b = contour[(i + 1) % contour.length],
           previous = contour[(i + contour.length - 1) % contour.length];
+
+        // Only edges moving left or down in world space face the viewer.
+        // Others are hidden behind the top face or the rack volume.
         if (b[0] < a[0] || b[1] > a[1]) {
           walls +=
             "M" +
@@ -173,6 +248,9 @@ export function createPlatforms(nodes: readonly DatabaseNode[]): SVGGElement {
               .join("L") +
             "Z";
         }
+
+        // A screw belongs only on a convex corner with enough rail length on
+        // both sides; the cross product tests turn direction.
         const incoming = [a[0] - previous[0], a[1] - previous[1]],
           outgoing = [b[0] - a[0], b[1] - a[1]];
         const inLength = Math.hypot(...incoming),
@@ -203,6 +281,7 @@ export function createPlatforms(nodes: readonly DatabaseNode[]): SVGGElement {
         }
       }
     }
+
     platform.innerHTML = `<path class="face platform-wall" d="${walls}"/><path class="face top platform-top" fill-rule="evenodd" d="${top}"/><path class="detail" d="${screws}"/>`;
     group.append(platform);
   }
