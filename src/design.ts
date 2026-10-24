@@ -1,25 +1,26 @@
 /**
  * JSON design document model and validation.
  *
- * Coordinates are rack-center world units: +x runs down-right, +y down-left,
- * +z is elevation. The projection is defined in `database.ts`; this module
- * only owns the persisted data shape and the trust boundary for imports.
+ * The persisted document is deliberately small: a node is an ID and an
+ * optional label, a connection names two IDs, and a cluster groups IDs. Type,
+ * color, and position are render-time derivations owned by `layout.ts`, so an
+ * exported document never accumulates generated data.
  */
 export interface Position {
-  /** Rack-center X in world units, constrained to ±10,000. */
+  /** Generated rack-center X in world units. */
   x: number;
-  /** Rack-center Y in world units, constrained to ±10,000. */
+  /** Generated rack-center Y in world units. */
   y: number;
-  /** Platform elevation in world units, constrained to ±10,000. */
+  /** Generated platform elevation in world units. */
   z: number;
 }
 
 /**
  * One renderable Database Rack.
  *
- * `id` is the stable key connections target and must be unique in a document.
- * `label` is limited to 1–100 characters; the renderer clips long names.
- * `color` is restricted to six-digit hex so it is safe as a CSS custom property.
+ * This is the placed form consumed by the renderer, not the imported JSON
+ * shape. `id` stays the stable key connections target; `label` is the
+ * user-facing name (an omitted imported label falls back to `id`).
  */
 export interface DatabaseNode {
   id: string;
@@ -30,63 +31,83 @@ export interface DatabaseNode {
 }
 
 /**
- * Directed link between two distinct Database Racks.
+ * One imported object. Only identity and presentation are persisted.
  *
- * Endpoints must reference node IDs present in the same document. The color
- * controls both the static cable and its animated pulse.
+ * IDs are the source of truth for both the node type (via prefix) and link
+ * endpoints. The renderer derives everything else.
  */
-export interface Connection {
+export interface DesignNode {
   id: string;
-  from: string;
-  to: string;
-  color: string;
+  label?: string;
 }
 
 /**
- * A complete editable scene. Version 1 is intentionally small: the renderer
- * knows one object type, and unknown fields are discarded during validation.
+ * Directed link between two distinct nodes.
+ *
+ * `id` is optional: the renderer falls back to `from->to`, which keeps simple
+ * documents free of bookkeeping. `relation` is optional prose for the link
+ * (for example "replicates") and is exposed in the cable title.
+ */
+export interface Connection {
+  id?: string;
+  from: string;
+  to: string;
+  relation?: string;
+}
+
+/**
+ * A named group of nodes that should share a platform and be laid out together.
+ *
+ * `id` and `label` are optional. The layout pass derives a stable fallback from
+ * the declaration order and uses the label for the on-canvas group caption.
+ */
+export interface Cluster {
+  id?: string;
+  label?: string;
+  nodes: string[];
+}
+
+/**
+ * A complete editable scene.
+ *
+ * `connections` and `clusters` may be omitted from imported JSON and normalize
+ * to empty arrays. Unknown fields, including the old `type`, `position`, and
+ * `color` fields, are ignored so older documents still open and are re-exported
+ * in the current shape.
  */
 export interface Design {
   version: 1;
   name: string;
-  nodes: DatabaseNode[];
+  nodes: DesignNode[];
   connections: Connection[];
+  clusters: Cluster[];
 }
 
 /**
- * Default scene: three equal peers, not a replication chain.
+ * Default scene: three peers grouped into one cluster with replication links.
  *
- * Cabinets are 92 units deep and spaced 128 units apart along +y, leaving
- * 36-unit service gaps. Their 150-unit-deep feet overlap, so the platform
- * union renders one shared plinth. The identical X keeps all baselines level.
+ * IDs intentionally use the `db-` prefix; the layout pass turns that prefix
+ * into the database-rack renderer, lays the three racks out in one column, and
+ * assigns three distinct colors. The cluster makes their feet share a plinth.
  */
 export const example: Design = {
   version: 1,
   name: "Horizontal scaling",
   nodes: [
+    { id: "db-01", label: "Database Rack 01" },
+    { id: "db-02", label: "Database Rack 02" },
+    { id: "db-03", label: "Database Rack 03" },
+  ],
+  connections: [
+    { from: "db-01", to: "db-02", relation: "replicates" },
+    { from: "db-02", to: "db-03", relation: "replicates" },
+  ],
+  clusters: [
     {
-      id: "database-01",
-      type: "database-rack",
-      label: "Database Rack 01",
-      position: { x: 0, y: 0, z: 0 },
-      color: "#ff9d52",
-    },
-    {
-      id: "database-02",
-      type: "database-rack",
-      label: "Database Rack 02",
-      position: { x: 0, y: 128, z: 0 },
-      color: "#42d9e8",
-    },
-    {
-      id: "database-03",
-      type: "database-rack",
-      label: "Database Rack 03",
-      position: { x: 0, y: 256, z: 0 },
-      color: "#b49aff",
+      label: "Database cluster",
+      nodes: ["db-01", "db-02", "db-03"],
     },
   ],
-  connections: [],
 };
 
 /**
@@ -106,8 +127,8 @@ function record(value: unknown, path: string): Record<string, unknown> {
 /**
  * Assert a non-empty string of at most 100 characters.
  *
- * Labels and IDs share this limit so imported text cannot grow SVG output
- * without bound or render as blank.
+ * Labels, IDs, and relations share this limit so imported text cannot grow SVG
+ * output without bound or render as blank.
  */
 function text(value: unknown, path: string): string {
   if (typeof value !== "string" || !value.trim() || value.length > 100)
@@ -116,97 +137,130 @@ function text(value: unknown, path: string): string {
 }
 
 /**
- * Restrict colors to six-digit hex before they flow into CSS.
- *
- * The value becomes `--cable-color`, which is inherited by SVG strokes and
- * glass tints. Rejecting arbitrary CSS here prevents declaration injection.
- */
-function color(value: unknown, path: string): string {
-  if (typeof value !== "string" || !/^#[\da-f]{6}$/i.test(value))
-    throw new Error(`${path} must be a six-digit hex color, e.g. #ff9d52.`);
-  return value;
-}
-
-/**
- * Assert a finite world coordinate within the supported scene extent.
- *
- * The ±10,000 bound keeps zoom/pan and platform subdivision numerically safe;
- * NaN and Infinity would poison SVG path data.
- */
-function coordinate(value: unknown, path: string): number {
-  if (
-    typeof value !== "number" ||
-    !Number.isFinite(value) ||
-    Math.abs(value) > 10000
-  )
-    throw new Error(
-      `${path} must be a finite number between -10000 and 10000.`,
-    );
-  return value;
-}
-
-/**
  * Parse and validate a JSON design without touching the live scene.
  *
  * Validation is all-or-nothing: malformed JSON throws `SyntaxError`, schema
  * violations throw `Error`, and the caller keeps the previous scene. Empty
- * scenes are valid. Duplicate node/link IDs, dangling endpoints, and
- * self-links are rejected because connections are resolved by ID at render
- * time. The returned object is normalized and contains only known fields.
+ * scenes are valid. Duplicate node/link/cluster IDs, dangling endpoints,
+ * self-links, and a node appearing in two clusters are rejected because the
+ * renderer resolves all of them by ID.
  *
- * Limits: 64 nodes, 256 links, ±10,000 coordinates, 100-character strings.
+ * `connections` and `clusters` are optional. Node entries may be strings
+ * (`"db-01"`) or objects (`{ "id": "db-01", "label": "Primary" }`). Generated
+ * fields from the previous schema are ignored and never returned.
+ *
+ * Limits: 64 nodes, 256 links, 64 clusters, 100-character strings.
  */
 export function parseDesign(source: string): Design {
   const root = record(JSON.parse(source) as unknown, "Design");
   if (root.version !== 1) throw new Error("version must be 1.");
   if (!Array.isArray(root.nodes) || root.nodes.length > 64)
-    throw new Error(
-      "nodes must be an array of at most 64 Database Rack objects.",
-    );
-  if (!Array.isArray(root.connections) || root.connections.length > 256)
-    throw new Error("connections must be an array of at most 256 links.");
+    throw new Error("nodes must be an array of at most 64 node objects.");
 
-  // IDs are collected before links are parsed so every endpoint can be
-  // checked against the final node set, not the declaration order.
+  // IDs are collected before links and clusters are parsed so every reference
+  // can be checked against the final node set, not declaration order.
   const ids = new Set<string>();
-  const nodes = root.nodes.map((value, index): DatabaseNode => {
+  const nodes = root.nodes.map((value, index): DesignNode => {
     const path = `nodes[${index}]`,
-      node = record(value, path),
-      position = record(node.position, `${path}.position`);
+      node: Record<string, unknown> =
+        typeof value === "string" ? { id: value } : record(value, path);
     const id = text(node.id, `${path}.id`);
     if (ids.has(id)) throw new Error(`Duplicate node id: ${id}`);
     ids.add(id);
-    if (node.type !== "database-rack")
-      throw new Error(`${path}.type must be "database-rack".`);
-    return {
-      id,
-      type: "database-rack",
-      label: text(node.label, `${path}.label`),
-      color: color(node.color, `${path}.color`),
-      position: {
-        x: coordinate(position.x, `${path}.position.x`),
-        y: coordinate(position.y, `${path}.position.y`),
-        z: coordinate(position.z, `${path}.position.z`),
-      },
-    };
+    // `type`, `position`, and `color` are intentionally not read. They are
+    // derived from the ID and graph by the layout pass.
+    return node.label === undefined
+      ? { id }
+      : { id, label: text(node.label, `${path}.label`) };
   });
 
-  // Link validation reuses the node ID set and rejects duplicate link IDs so
-  // DOM nodes and CSS variables remain unambiguous.
+  const connectionInput =
+    root.connections === undefined ? [] : root.connections;
+  if (!Array.isArray(connectionInput) || connectionInput.length > 256)
+    throw new Error("connections must be an array of at most 256 links.");
+
+  // Link validation reuses the node ID set and rejects duplicate effective IDs
+  // so DOM nodes and CSS variables remain unambiguous.
   const linkIds = new Set<string>();
-  const connections = root.connections.map((value, index): Connection => {
+  const connections = connectionInput.map((value, index): Connection => {
     const path = `connections[${index}]`,
       link = record(value, path);
-    const id = text(link.id, `${path}.id`),
-      from = text(link.from, `${path}.from`),
+    const from = text(link.from, `${path}.from`),
       to = text(link.to, `${path}.to`);
-    if (linkIds.has(id)) throw new Error(`Duplicate connection id: ${id}`);
-    linkIds.add(id);
     if (!ids.has(from) || !ids.has(to))
       throw new Error(`${path} references an unknown node.`);
     if (from === to)
       throw new Error(`${path} must connect two different nodes.`);
-    return { id, from, to, color: color(link.color, `${path}.color`) };
+
+    const explicitId =
+      link.id === undefined ? undefined : text(link.id, `${path}.id`);
+    const id = explicitId ?? `${from}->${to}`;
+    if (linkIds.has(id)) throw new Error(`Duplicate connection id: ${id}`);
+    linkIds.add(id);
+
+    return {
+      ...(explicitId === undefined ? {} : { id: explicitId }),
+      from,
+      to,
+      ...(link.relation === undefined
+        ? {}
+        : { relation: text(link.relation, `${path}.relation`) }),
+    };
   });
-  return { version: 1, name: text(root.name, "name"), nodes, connections };
+
+  const clusterInput = root.clusters === undefined ? [] : root.clusters;
+  if (!Array.isArray(clusterInput) || clusterInput.length > 64)
+    throw new Error("clusters must be an array of at most 64 groups.");
+
+  // A node belongs to at most one cluster: two groups would place the same rack
+  // at conflicting coordinates. Cross-cluster membership is therefore treated
+  // as a validation error rather than silently picking the first group.
+  const clusterIds = new Set<string>(),
+    clustered = new Set<string>();
+  const clusters = clusterInput.map((value, index): Cluster => {
+    const path = `clusters[${index}]`,
+      cluster = record(value, path);
+    const explicitId =
+      cluster.id === undefined ? undefined : text(cluster.id, `${path}.id`);
+    const id = explicitId ?? `cluster-${index + 1}`;
+    if (clusterIds.has(id)) throw new Error(`Duplicate cluster id: ${id}`);
+    clusterIds.add(id);
+
+    if (
+      !Array.isArray(cluster.nodes) ||
+      cluster.nodes.length === 0 ||
+      cluster.nodes.length > 64
+    )
+      throw new Error(`${path}.nodes must contain 1–64 node IDs.`);
+
+    const members = cluster.nodes.map((nodeId, memberIndex) => {
+      const member = text(nodeId, `${path}.nodes[${memberIndex}]`);
+      if (!ids.has(member))
+        throw new Error(`${path} references an unknown node.`);
+      return member;
+    });
+    if (new Set(members).size !== members.length)
+      throw new Error(`${path}.nodes must not repeat a node.`);
+    for (const member of members) {
+      if (clustered.has(member))
+        throw new Error(`${member} appears in more than one cluster.`);
+      clustered.add(member);
+    }
+
+    return {
+      ...(explicitId === undefined ? {} : { id: explicitId }),
+      ...(cluster.label === undefined
+        ? {}
+        : { label: text(cluster.label, `${path}.label`) }),
+      nodes: members,
+    };
+  });
+
+  return {
+    version: 1,
+    name: text(root.name, "name"),
+    nodes,
+    connections,
+    clusters,
+  };
 }

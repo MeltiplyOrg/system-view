@@ -15,32 +15,25 @@ import type { Design } from "../src/design";
 const oneRack: Design = {
   version: 1,
   name: "Single rack",
-  nodes: [
-    {
-      id: "only",
-      type: "database-rack",
-      label: "Only Rack",
-      position: { x: 0, y: 0, z: 0 },
-      color: "#ff9d52",
-    },
-  ],
+  nodes: [{ id: "db-only", label: "Only Rack" }],
   connections: [],
+  clusters: [],
 };
-/** Two-node document with a link, used to verify file import and cables. */
+/** Two-node document with a link and a cluster, used to verify file import. */
 const imported: Design = {
   version: 1,
   name: "Imported layout",
-  nodes: [
-    ...oneRack.nodes,
+  nodes: [...oneRack.nodes, { id: "db-second", label: "Second Rack" }],
+  connections: [
+    { id: "copy", from: "db-only", to: "db-second", relation: "copies" },
+  ],
+  clusters: [
     {
-      id: "second",
-      type: "database-rack",
-      label: "Second Rack",
-      position: { x: 0, y: 150, z: 0 },
-      color: "#42d9e8",
+      id: "imported-cluster",
+      label: "Imported cluster",
+      nodes: ["db-only", "db-second"],
     },
   ],
-  connections: [{ id: "copy", from: "only", to: "second", color: "#42d9e8" }],
 };
 
 /**
@@ -61,6 +54,8 @@ test.describe("minimal isometric canvas", () => {
     await page.goto("/");
     await expect(page.locator("#scene")).toBeVisible();
     await expect(page.locator(".database-rack")).toHaveCount(3);
+    await expect(page.locator(".connection")).toHaveCount(2);
+    await expect(page.locator(".cluster-label")).toHaveText("Database cluster");
     await expect(page.locator(".space-grid")).toHaveAttribute("d", /M/);
     await expect(page.locator("#sidebar")).toBeHidden();
     await expect(page.getByRole("button", { name: "Design" })).toBeVisible();
@@ -142,6 +137,7 @@ test.describe("minimal isometric canvas", () => {
     await page.locator("#source").fill(JSON.stringify(oneRack));
     await page.getByRole("button", { name: "Apply", exact: true }).click();
     await expect(page.locator(".database-rack")).toHaveCount(1);
+    await expect(page.locator(".cluster-label")).toHaveCount(0);
     await expect(page.locator("#scene-title")).toHaveText("Single rack");
 
     await page.locator("#file").setInputFiles({
@@ -151,12 +147,11 @@ test.describe("minimal isometric canvas", () => {
     });
     await expect(page.locator(".database-rack")).toHaveCount(2);
     await expect(page.locator(".connection")).toHaveCount(1);
+    await expect(page.locator(".cluster-label")).toHaveText("Imported cluster");
 
     const invalid = {
       ...oneRack,
-      connections: [
-        { id: "bad", from: "only", to: "missing", color: "#ff9d52" },
-      ],
+      connections: [{ id: "bad", from: "db-only", to: "missing" }],
     };
     await page.locator("#source").fill(JSON.stringify(invalid));
     await page.getByRole("button", { name: "Apply", exact: true }).click();
@@ -178,9 +173,24 @@ test.describe("minimal isometric canvas", () => {
     const exported = JSON.parse(readFileSync(path, "utf8")) as Design;
     expect(exported.name).toBe("Horizontal scaling");
     expect(exported.nodes).toHaveLength(3);
-    expect(exported.nodes.every((node) => node.type === "database-rack")).toBe(
-      true,
-    );
+    expect(exported.nodes[0]).toEqual({
+      id: "db-01",
+      label: "Database Rack 01",
+    });
+    expect(
+      exported.nodes.every(
+        (node) =>
+          !Object.hasOwn(node, "type") &&
+          !Object.hasOwn(node, "position") &&
+          !Object.hasOwn(node, "color"),
+      ),
+    ).toBe(true);
+    expect(exported.clusters).toEqual([
+      {
+        label: "Database cluster",
+        nodes: ["db-01", "db-02", "db-03"],
+      },
+    ]);
   });
 
   test("has no serious accessibility violations in either state", async ({
