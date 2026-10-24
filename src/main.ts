@@ -5,34 +5,71 @@ import { SystemScene } from "./scene";
 
 const app = document.querySelector<HTMLDivElement>("#app")!;
 app.innerHTML = `
-  <header class="topbar">
-    <a class="brand" href="./"><span class="brand-mark" aria-hidden="true">◇</span> SYSTEM VIEW <span class="tag">/ spatial designer</span></a>
-    <div class="actions">
-      <label class="theme-label">Theme <select id="theme" aria-label="Color theme"><option value="system">System</option><option value="dark">Dark</option><option value="light">Light</option></select></label>
-      <button id="import">Import JSON</button><button id="export">Export JSON ↗</button>
-      <input id="file" type="file" accept=".json,application/json" hidden>
-    </div>
-  </header>
-  <main class="workspace">
-    <section class="canvas-panel" aria-labelledby="scene-title">
-      <header class="scene-header"><div><span class="eyebrow">WORKSPACE 01 / ISOMETRIC</span><h1 id="scene-title"></h1><p>A system defined by data. Connected in space.</p></div><span class="badge">DATABASE RACKS</span></header>
-      <div class="viewport">
-        <svg id="scene" xmlns="http://www.w3.org/2000/svg" role="img" aria-labelledby="scene-title scene-description"><desc id="scene-description">Isometric grid with database racks and animated connections. Decorative cable motion, not live telemetry.</desc></svg>
-        <div class="viewport-caption">X / Y / Z <span>30° ISOMETRIC PROJECTION</span></div>
-        <div class="zoom" aria-label="View controls"><button id="zoom-out" aria-label="Zoom out">−</button><button id="fit">Fit</button><button id="zoom-in" aria-label="Zoom in">+</button></div>
+  <main class="stage">
+    <svg id="scene" xmlns="http://www.w3.org/2000/svg" role="img" aria-labelledby="scene-description" preserveAspectRatio="xMidYMid meet">
+      <desc id="scene-description">Isometric grid with three database racks and animated connections. Scroll to zoom, drag to move, or open Design to edit the JSON and switch themes.</desc>
+    </svg>
+    <button id="panel-toggle" class="panel-toggle" type="button" aria-expanded="false" aria-controls="sidebar">
+      <svg viewBox="0 0 14 14" aria-hidden="true"><path d="M2 4h10M2 7h10M2 10h10"/></svg>
+      <span>Design</span>
+    </button>
+    <aside id="sidebar" class="sidebar" aria-labelledby="editor-title" aria-hidden="true" inert>
+      <header class="sidebar-header">
+        <div>
+          <span class="eyebrow">System View</span>
+          <h1 id="editor-title" class="panel-title">Design</h1>
+        </div>
+        <button id="panel-close" class="icon-button" type="button" aria-label="Close design sidebar">×</button>
+      </header>
+      <div class="sidebar-body">
+        <p class="scene-meta"><span id="scene-title"></span><span id="scene-count"></span></p>
+
+        <section class="section">
+          <div class="section-label">Appearance</div>
+          <label class="field" for="theme">
+            <span>Theme</span>
+            <select id="theme">
+              <option value="system">System</option>
+              <option value="dark">Dark</option>
+              <option value="light">Light</option>
+            </select>
+          </label>
+        </section>
+
+        <section class="section">
+          <div class="section-label">View</div>
+          <div class="view-controls" aria-label="View controls">
+            <button id="zoom-out" type="button" aria-label="Zoom out">−</button>
+            <button id="fit" type="button">Fit</button>
+            <button id="zoom-in" type="button" aria-label="Zoom in">+</button>
+          </div>
+          <p class="view-hint">Scroll to zoom · drag to move</p>
+        </section>
+
+        <section class="section">
+          <div class="section-label"><span>JSON design</span><span class="hint">⌘↵ apply</span></div>
+          <label class="sr-only" for="source">System design JSON</label>
+          <textarea id="source" spellcheck="false" autocapitalize="off" autocomplete="off" aria-describedby="message"></textarea>
+          <div class="editor-actions">
+            <button id="reset" class="btn" type="button">Reset</button>
+            <button id="apply" class="btn btn-primary" type="button">Apply</button>
+          </div>
+          <p id="message" class="message" role="status" aria-live="polite"></p>
+        </section>
+
+        <section class="section schema-note">
+          <div class="section-label">Database rack</div>
+          <code>type: "database-rack"<br>position: { x, y, z }<br>color: "#ff9d52"</code>
+          <p>Positions are world units. Links reference node IDs. The rack faces are decorative.</p>
+        </section>
       </div>
-      <footer class="scene-footer"><span id="scene-count"></span><span class="motion-state">COLORED SIGNAL FLOW</span></footer>
-    </section>
-    <aside class="editor-panel" aria-labelledby="editor-title">
-      <header class="editor-header"><div><span class="eyebrow">SOURCE OF TRUTH</span><h2 id="editor-title">Design document</h2></div><span class="file-type">JSON</span></header>
-      <p class="editor-hint">Set object positions, cable colors, and connections. Apply to update the canvas.</p>
-      <label class="sr-only" for="source">System design JSON</label><textarea id="source" spellcheck="false" autocapitalize="off" autocomplete="off" aria-describedby="message"></textarea>
-      <div class="editor-actions"><button id="reset">Load example</button><button id="apply" class="primary">Apply design <span aria-hidden="true">↗</span></button></div>
-      <p id="message" role="status" aria-live="polite"></p>
-      <div class="schema-note"><span>DATABASE RACK CONTRACT</span><code>type: "database-rack"<br>position: { x, y, z }<br>color: "#ff9d52"</code><p>Coordinates are world units. Links reference node IDs. Glass sides, storage caddies, and compute drawers are decorative.</p></div>
+      <footer class="sidebar-footer">
+        <input id="file" type="file" accept=".json,application/json" hidden>
+        <button id="import" class="btn" type="button">Import</button>
+        <button id="export" class="btn" type="button">Export JSON</button>
+      </footer>
     </aside>
-  </main>
-  <footer class="page-footer"><span>BUILT IN SPACE. STORED AS JSON.</span><span>Rack adapted from <a href="https://isoglow.dev/demo/objects#rack" target="_blank" rel="noopener noreferrer">iso-glow · April Zhu ↗</a></span></footer>`;
+  </main>`;
 
 const source = document.querySelector<HTMLTextAreaElement>("#source")!;
 const message = document.querySelector<HTMLParagraphElement>("#message")!;
@@ -45,10 +82,10 @@ function apply(design: Design): void {
   source.value = JSON.stringify(design, null, 2);
   document.querySelector("#scene-title")!.textContent = design.name;
   document.querySelector("#scene-count")!.textContent =
-    `${design.nodes.length.toString().padStart(2, "0")} OBJECTS / ${design.connections.length.toString().padStart(2, "0")} CONNECTIONS`;
+    `${design.nodes.length} racks · ${design.connections.length} links`;
   source.removeAttribute("aria-invalid");
   message.classList.remove("error");
-  message.textContent = "Design applied. Canvas is up to date.";
+  message.textContent = "Canvas is up to date.";
 }
 function showError(error: unknown): void {
   message.textContent =
@@ -66,8 +103,7 @@ document.querySelector("#apply")!.addEventListener("click", () => {
 source.addEventListener("input", () => {
   message.classList.remove("error");
   source.removeAttribute("aria-invalid");
-  message.textContent =
-    "Unapplied changes. Apply to render or export the new design.";
+  message.textContent = "Unapplied changes.";
 });
 source.addEventListener("keydown", (event) => {
   if ((event.ctrlKey || event.metaKey) && event.key === "Enter") {
@@ -105,7 +141,7 @@ document.querySelector("#export")!.addEventListener("click", () => {
   link.download = "system-design.json";
   link.click();
   setTimeout(() => URL.revokeObjectURL(url), 1000);
-  message.textContent = "Exported the applied design as system-design.json.";
+  message.textContent = "Exported system-design.json.";
 });
 const theme = document.querySelector<HTMLSelectElement>("#theme")!;
 theme.addEventListener("change", () => {
@@ -119,6 +155,44 @@ document
   .querySelector("#zoom-out")!
   .addEventListener("click", () => scene.zoomBy(0.8));
 document.querySelector("#fit")!.addEventListener("click", () => scene.fit());
+
+/* The sidebar is an overlay: closed by default, never reserved layout space. */
+const toggle = document.querySelector<HTMLButtonElement>("#panel-toggle")!;
+const sidebar = document.querySelector<HTMLElement>("#sidebar")!;
+const closeButton = document.querySelector<HTMLButtonElement>("#panel-close")!;
+let returnFocus: HTMLElement | null = null;
+function setPanelOpen(open: boolean): void {
+  sidebar.classList.toggle("open", open);
+  toggle.setAttribute("aria-expanded", String(open));
+  if (open) {
+    returnFocus =
+      document.activeElement instanceof HTMLElement
+        ? document.activeElement
+        : toggle;
+    sidebar.inert = false;
+    sidebar.removeAttribute("aria-hidden");
+    closeButton.focus({ preventScroll: true });
+  } else {
+    sidebar.inert = true;
+    sidebar.setAttribute("aria-hidden", "true");
+    if (returnFocus?.isConnected) returnFocus.focus({ preventScroll: true });
+  }
+}
+toggle.addEventListener("click", () => setPanelOpen(true));
+closeButton.addEventListener("click", () => setPanelOpen(false));
+document.addEventListener("keydown", (event) => {
+  if (event.key === "Escape" && sidebar.classList.contains("open"))
+    setPanelOpen(false);
+});
+document.addEventListener("pointerdown", (event) => {
+  const target = event.target as Node;
+  if (
+    sidebar.classList.contains("open") &&
+    !sidebar.contains(target) &&
+    !toggle.contains(target)
+  )
+    setPanelOpen(false);
+});
 // Hidden tabs need no decorative animation work. Reduced motion is handled in CSS.
 document.addEventListener("visibilitychange", () =>
   document.documentElement.classList.toggle("paused", document.hidden),
