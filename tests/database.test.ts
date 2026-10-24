@@ -51,7 +51,7 @@ describe("Database Rack geometry", () => {
     expect(rack.element.querySelector(".node-label")?.textContent).toBe(
       "Database Rack 01",
     );
-    expect(rack.element.querySelector("title")?.textContent).toBe(
+    expect(rack.element.getAttribute("aria-label")).toBe(
       "Database Rack 01 (db-01) · Database Rack",
     );
   });

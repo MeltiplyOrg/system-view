@@ -16,13 +16,28 @@ const MIN_ZOOM = 0.25;
 const MAX_ZOOM = 8;
 
 /**
+ * World-space gap between a cluster footprint and its dashed floor frame.
+ *
+ * The frame is drawn at z=0 while the plinth top is at z=7, so the outline
+ * must clear the platform's side walls to remain visible. One rack-foot
+ * quarter (36 units) reads as a distinct group boundary without crowding the
+ * neighbouring cluster column.
+ */
+const CLUSTER_FRAME_MARGIN = 36;
+
+/** Screen-space gap between a cluster frame's bottom corner and its caption. */
+const CLUSTER_LABEL_GAP = 20;
+
+/**
  * Build the optional cluster captions as one non-interactive SVG group.
  *
  * Labels are centered beneath the projected footprint of their group. The
  * isometric footprint is a diamond, so the caption uses the projected
  * bounding-box center rather than a world-space Y offset; that keeps the text
- * visually attached to the platform at every cluster size. Text is assigned
- * with `textContent`, so imported cluster names cannot inject markup.
+ * visually attached to the platform at every cluster size. The label sits
+ * below the dashed frame's bottom corner so the outline never crosses the
+ * text. Text is assigned with `textContent`, so imported cluster names cannot
+ * inject markup.
  */
 function createClusterLabels(clusters: readonly PlacedCluster[]): SVGGElement {
   const group = document.createElementNS(NS, "g");
@@ -30,10 +45,10 @@ function createClusterLabels(clusters: readonly PlacedCluster[]): SVGGElement {
   for (const cluster of clusters) {
     const { x, y, width, height } = cluster.bounds,
       corners = [
-        project(x, y, 7),
-        project(x + width, y, 7),
-        project(x, y + height, 7),
-        project(x + width, y + height, 7),
+        project(x, y, 0),
+        project(x + width, y, 0),
+        project(x, y + height, 0),
+        project(x + width, y + height, 0),
       ],
       left = Math.min(...corners.map(([cornerX]) => cornerX)),
       right = Math.max(...corners.map(([cornerX]) => cornerX)),
@@ -42,10 +57,53 @@ function createClusterLabels(clusters: readonly PlacedCluster[]): SVGGElement {
     label.classList.add("cluster-label");
     label.dataset.clusterId = cluster.id;
     label.setAttribute("x", ((left + right) / 2).toFixed(1));
-    label.setAttribute("y", (bottom + 22).toFixed(1));
+    label.setAttribute(
+      "y",
+      (bottom + CLUSTER_FRAME_MARGIN + CLUSTER_LABEL_GAP).toFixed(1),
+    );
     label.setAttribute("text-anchor", "middle");
     label.textContent = cluster.label;
     group.append(label);
+  }
+  return group;
+}
+
+/**
+ * Build one dashed floor frame per declared cluster.
+ *
+ * A frame is the cluster's world-space bounds expanded by
+ * `CLUSTER_FRAME_MARGIN` and projected at z=0, so it lies flat on the grid and
+ * follows the isometric axes. The expanded rectangle clears the shared plinth,
+ * Frames highlight in yellow when their cluster is hovered; `data-cluster-id`
+ * ties each frame to its cluster members and caption.
+ */
+function createClusterFrames(clusters: readonly PlacedCluster[]): SVGGElement {
+  const group = document.createElementNS(NS, "g");
+  group.classList.add("cluster-frames");
+  for (const cluster of clusters) {
+    const { x, y, width, height } = cluster.bounds,
+      left = x - CLUSTER_FRAME_MARGIN,
+      top = y - CLUSTER_FRAME_MARGIN,
+      right = x + width + CLUSTER_FRAME_MARGIN,
+      bottom = y + height + CLUSTER_FRAME_MARGIN,
+      corners = [
+        project(left, top, 0),
+        project(right, top, 0),
+        project(right, bottom, 0),
+        project(left, bottom, 0),
+      ];
+    const frame = document.createElementNS(NS, "path");
+    frame.classList.add("cluster-frame");
+    frame.dataset.clusterId = cluster.id;
+    frame.setAttribute(
+      "d",
+      `M${corners
+        .map(([cornerX, cornerY]) =>
+          [cornerX, cornerY].map((n) => n.toFixed(1)).join(" "),
+        )
+        .join("L")}Z`,
+    );
+    group.append(frame);
   }
   return group;
 }
@@ -98,6 +156,9 @@ export class SystemScene {
 
   /** Pending requestAnimationFrame id for coalesced pointer updates. */
   private pointerFrame: number | null = null;
+
+  /** ID of the cluster currently hovered by the pointer, if any. */
+  private hoveredClusterId: string | null = null;
 
   /**
    * @param svg Full-viewport SVG element. The caller should not append other
@@ -195,25 +256,52 @@ export class SystemScene {
     svg.addEventListener("pointerup", stopDragging);
     svg.addEventListener("pointercancel", stopDragging);
     svg.addEventListener("lostpointercapture", stopDragging);
+
+    svg.addEventListener("pointerover", (event) => {
+      const target = (event.target as Element | null)?.closest?.(
+        "[data-cluster-id]",
+      );
+      this.setHoveredCluster(target?.getAttribute("data-cluster-id") ?? null);
+    });
+
+    svg.addEventListener("pointerout", (event) => {
+      const related = (event.relatedTarget as Element | null)?.closest?.(
+        "[data-cluster-id]",
+      );
+      this.setHoveredCluster(related?.getAttribute("data-cluster-id") ?? null);
+    });
+
+    svg.addEventListener("pointerleave", () => {
+      this.setHoveredCluster(null);
+    });
   }
 
   /**
    * Replace the scene content atomically and refit the view.
    *
    * Layout and colors are derived here rather than stored in the document.
-   * Paint order is platforms, cluster captions, links, then racks back-to-front.
-   * Isometric depth is `x + y` (larger is nearer) with `z` as a tie-breaker.
-   * Bounds are taken from this content only, never the regenerating grid, so
-   * fit stays stable.
+   * Paint order is cluster frames, platforms, cluster captions, links, then
+   * racks back-to-front. Isometric depth is `x + y` (larger is nearer) with
+   * `z` as a tie-breaker. Bounds are taken from this content only, never the
+   * regenerating grid, so fit stays stable.
    *
    * @param design - Already validated document. The defensive endpoint check
    *   protects against callers bypassing the parser.
    * @throws Error when a connection references a missing node.
    */
   render(design: Design): void {
+    this.hoveredClusterId = null;
+    const nodeCluster = new Map<string, string>();
+    for (const [index, cluster] of design.clusters.entries()) {
+      const clusterId = cluster.id ?? `cluster-${index + 1}`;
+      for (const nodeId of cluster.nodes) {
+        nodeCluster.set(nodeId, clusterId);
+      }
+    }
     const layout = layoutDesign(design),
       layer = document.createElementNS(NS, "g");
     layer.append(
+      createClusterFrames(layout.clusters),
       createPlatforms(layout.nodes),
       createClusterLabels(layout.clusters),
     );
@@ -245,11 +333,11 @@ export class SystemScene {
       group.dataset.connectionId = connectionId;
       group.style.setProperty("--cable-color", from.color);
       group.innerHTML = `<path class="wire-glow" d="${d}"/><path class="wire" d="${d}"/><path class="pulse" pathLength="100" style="--duration:3s;--delay:${-index * 0.6}s" d="${d}"/>`;
-      const title = document.createElementNS(NS, "title");
-      title.textContent = `${connectionId}: ${from.label} → ${to.label}${
-        link.relation ? ` · ${link.relation}` : ""
-      }`;
-      group.prepend(title);
+      const fromCluster = nodeCluster.get(from.id),
+        toCluster = nodeCluster.get(to.id);
+      if (fromCluster && fromCluster === toCluster) {
+        group.dataset.clusterId = fromCluster;
+      }
       layer.append(group);
     }
 
@@ -267,6 +355,10 @@ export class SystemScene {
         "transform",
         `translate(${p[0] - DATABASE_ANCHOR[0]} ${p[1] - DATABASE_ANCHOR[1]})`,
       );
+      const clusterId = nodeCluster.get(node.id);
+      if (clusterId) {
+        object.element.dataset.clusterId = clusterId;
+      }
       layer.append(object.element);
     }
 
@@ -283,6 +375,17 @@ export class SystemScene {
       height: Math.max(200, bounds.height + 2 * pad),
     };
     this.fit();
+  }
+
+  /** Highlight the frame of the hovered cluster. */
+  private setHoveredCluster(clusterId: string | null): void {
+    if (this.hoveredClusterId === clusterId) return;
+    this.hoveredClusterId = clusterId;
+    const frames =
+      this.content.querySelectorAll<SVGPathElement>(".cluster-frame");
+    for (const frame of frames) {
+      frame.classList.toggle("hovered", frame.dataset.clusterId === clusterId);
+    }
   }
 
   /** Reset zoom and pan so the whole design is framed again. */
