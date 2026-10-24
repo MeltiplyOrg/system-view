@@ -262,7 +262,6 @@ a {
 .section-label .hint {
   letter-spacing: 0;
   text-transform: none;
-  opacity: 0.6;
 }
 .field {
   display: flex;
@@ -314,7 +313,6 @@ select:hover {
   margin: 9px 0 0;
   color: var(--muted);
   font-size: 10px;
-  opacity: 0.75;
 }
 textarea {
   width: 100%;
