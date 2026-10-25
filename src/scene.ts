@@ -1,5 +1,5 @@
 import { createDatabaseDefinitions, project } from "./database";
-import type { Design, PlacedInstance } from "./design";
+import type { Connection, Design, PlacedInstance } from "./design";
 import { instanceFootprint, layoutDesign } from "./layout";
 import type { Layout, PlacedCluster } from "./layout";
 import { createPlatforms } from "./platform";
@@ -405,15 +405,81 @@ export interface ClusterPort {
   edge: ClusterEdge;
 }
 
+/** One resolved connection before its ports are distributed. */
+interface LinkPlan {
+  link: Connection;
+  index: number;
+  connectionId: string;
+  from: PlacedInstance;
+  to: PlacedInstance;
+  fromCluster: string | undefined;
+  toCluster: string | undefined;
+  internal: boolean;
+  fromFrame: PlacedCluster | undefined;
+  toFrame: PlacedCluster | undefined;
+  fromPort: ClusterPort | undefined;
+  toPort: ClusterPort | undefined;
+}
+
+/** One endpoint competing for a slot on a frame side. */
+interface PortUse {
+  plan: LinkPlan;
+  side: "from" | "to";
+  edge: Exclude<ClusterEdge, null>;
+  /** Far endpoint in world coordinates; its edge-axis position sets the slot. */
+  other: { x: number; y: number };
+}
+
+/**
+ * Place one of several ports along a frame edge.
+ *
+ * The edge is divided into equal segments and the port sits at the midpoint of
+ * its segment. A group of ports is therefore evenly spaced and centered on the
+ * side: one port centers, two sit at the quarter points, and every count keeps
+ * the same middle. Callers pass a stable, deduplicated endpoint list; the
+ * index is clamped to the valid range.
+ *
+ * @param cluster - Placed cluster or standalone frame supplying the boundary.
+ * @param edge - Side chosen by `clusterPort`.
+ * @param index - Zero-based slot among the ports on this side.
+ * @param count - Number of ports sharing this side; values below one are one.
+ * @returns The port point on that edge, in world units.
+ */
+export function clusterPortSlot(
+  cluster: PlacedCluster,
+  edge: Exclude<ClusterEdge, null>,
+  index: number,
+  count: number,
+): ClusterPort {
+  const frame = clusterFrameRect(cluster),
+    left = frame.x,
+    right = frame.x + frame.width,
+    top = frame.y,
+    bottom = frame.y + frame.height,
+    slots = Math.max(1, Math.floor(count)),
+    slot = Math.min(slots - 1, Math.max(0, Math.floor(index))),
+    t = (slot + 0.5) / slots;
+  switch (edge) {
+    case "left":
+      return { x: left, y: top + (bottom - top) * t, edge };
+    case "right":
+      return { x: right, y: top + (bottom - top) * t, edge };
+    case "top":
+      return { x: left + (right - left) * t, y: top, edge };
+    case "bottom":
+      return { x: left + (right - left) * t, y: bottom, edge };
+  }
+}
+
 /**
  * Point where a link meets a cluster boundary on its way to another node.
  *
  * Links keep addressing the specific member recorded in the document, but an
  * external link attaches to the replica set as a whole. The ray from that
- * member to the other endpoint chooses the facing frame edge, and the port is
- * that edge's midpoint so wires do not meet the border off-center. Links whose
- * two endpoints share a cluster bypass this helper and keep their rack-to-rack
- * endpoints.
+ * member to the other endpoint chooses the facing frame edge; a single link
+ * uses that edge's midpoint. Callers with several links on one edge replace
+ * this base port with `clusterPortSlot`. Links whose two endpoints share a
+ * cluster bypass this helper and keep their rack-to-rack endpoints.
  *
  * @param cluster - Placed cluster whose expanded frame supplies the boundary.
  * @param member - The endpoint instance's world position.
@@ -428,10 +494,11 @@ export function clusterPort(
   member: { x: number; y: number },
   target: { x: number; y: number },
 ): ClusterPort {
-  const left = cluster.bounds.x - CLUSTER_FRAME_MARGIN,
-    right = cluster.bounds.x + cluster.bounds.width + CLUSTER_FRAME_MARGIN,
-    top = cluster.bounds.y - CLUSTER_FRAME_MARGIN,
-    bottom = cluster.bounds.y + cluster.bounds.height + CLUSTER_FRAME_MARGIN,
+  const frame = clusterFrameRect(cluster),
+    left = frame.x,
+    right = frame.x + frame.width,
+    top = frame.y,
+    bottom = frame.y + frame.height,
     dx = target.x - member.x,
     dy = target.y - member.y;
   let scale = Infinity;
@@ -458,20 +525,7 @@ export function clusterPort(
   }
   if (!edge || !Number.isFinite(scale) || scale < 0)
     return { x: member.x, y: member.y, edge: null };
-  // A valid external target makes the ray leave through this edge. The port
-  // still centers on the edge when unvalidated groups overlap the target.
-  const centerX = (left + right) / 2,
-    centerY = (top + bottom) / 2;
-  switch (edge) {
-    case "left":
-      return { x: left, y: centerY, edge };
-    case "right":
-      return { x: right, y: centerY, edge };
-    case "top":
-      return { x: centerX, y: top, edge };
-    case "bottom":
-      return { x: centerX, y: bottom, edge };
-  }
+  return clusterPortSlot(cluster, edge, 0, 1);
 }
 
 /**
@@ -1153,26 +1207,14 @@ export class SystemScene {
     const byId = new Map(
       layout.instances.map((instance) => [instance.id, instance]),
     );
-    // Links share one projected path when they land on the same cluster port,
-    // not only when they repeat an endpoint pair. Keying the lane on the drawn
-    // route therefore stacks every caption that would otherwise overprint.
-    const labelLanes = new Map<string, number>();
-    for (const [index, link] of design.connections.entries()) {
+    const linkPlans: LinkPlan[] = design.connections.map((link, index) => {
       const from = byId.get(link.from),
-        to = byId.get(link.to);
-      const connectionId = link.id ?? `${link.from}->${link.to}`;
+        to = byId.get(link.to),
+        connectionId = link.id ?? `${link.from}->${link.to}`;
       if (!from || !to)
         throw new Error(
           `Connection ${connectionId} references an unknown instance.`,
         );
-
-      // External links attach at a port on the node's border instead of
-      // burying their ends under artwork. A member of a declared cluster
-      // ports through the group border; a standalone instance ports through
-      // its own border. Internal links (replication inside a cluster) keep
-      // both rack endpoints so replication stays inside the group. The far
-      // endpoint's position sets the side of the border the cable approaches
-      // from.
       const fromCluster = this.instanceCluster.get(from.id),
         toCluster = this.instanceCluster.get(to.id),
         internal = fromCluster !== undefined && fromCluster === toCluster,
@@ -1181,13 +1223,96 @@ export class SystemScene {
           : this.borderFrames.get(fromCluster ?? `${INSTANCE_KEY}${from.id}`),
         toFrame = internal
           ? undefined
-          : this.borderFrames.get(toCluster ?? `${INSTANCE_KEY}${to.id}`),
-        fromPort = fromFrame
+          : this.borderFrames.get(toCluster ?? `${INSTANCE_KEY}${to.id}`);
+      return {
+        link,
+        index,
+        connectionId,
+        from,
+        to,
+        fromCluster,
+        toCluster,
+        internal,
+        fromFrame,
+        toFrame,
+        fromPort: fromFrame
           ? clusterPort(fromFrame, from.position, to.position)
           : undefined,
-        toPort = toFrame
+        toPort: toFrame
           ? clusterPort(toFrame, to.position, from.position)
           : undefined,
+      };
+    });
+
+    // Fan multiple cables across a shared frame side. Group by frame object and
+    // edge, order by the far endpoint's coordinate along that edge to avoid
+    // crossings, then replace the centered base port with a slot midpoint.
+    // Slot midpoints keep the fan equally spaced and centered on the side.
+    const portUses = new Map<
+      PlacedCluster,
+      Map<Exclude<ClusterEdge, null>, PortUse[]>
+    >();
+    const addPortUse = (
+      plan: LinkPlan,
+      side: "from" | "to",
+      frame: PlacedCluster | undefined,
+      port: ClusterPort | undefined,
+      other: { x: number; y: number },
+    ): void => {
+      if (!frame || !port?.edge) return;
+      let edges = portUses.get(frame);
+      if (!edges) {
+        edges = new Map();
+        portUses.set(frame, edges);
+      }
+      let uses = edges.get(port.edge);
+      if (!uses) {
+        uses = [];
+        edges.set(port.edge, uses);
+      }
+      uses.push({ plan, side, edge: port.edge, other });
+    };
+    for (const plan of linkPlans) {
+      addPortUse(plan, "from", plan.fromFrame, plan.fromPort, plan.to.position);
+      addPortUse(plan, "to", plan.toFrame, plan.toPort, plan.from.position);
+    }
+    for (const [frame, edges] of portUses) {
+      for (const [edge, uses] of edges) {
+        const alongY = edge === "left" || edge === "right";
+        uses.sort((a, b) => {
+          const aAlong = alongY ? a.other.y : a.other.x,
+            bAlong = alongY ? b.other.y : b.other.x;
+          return (
+            aAlong - bAlong ||
+            a.plan.index - b.plan.index ||
+            (a.side === b.side ? 0 : a.side === "from" ? -1 : 1)
+          );
+        });
+        for (const [slot, use] of uses.entries()) {
+          const port = clusterPortSlot(frame, edge, slot, uses.length);
+          if (use.side === "from") use.plan.fromPort = port;
+          else use.plan.toPort = port;
+        }
+      }
+    }
+
+    // Caption lanes still stack links whose drawn route coincides.
+    const labelLanes = new Map<string, number>();
+    for (const plan of linkPlans) {
+      const {
+        link,
+        index,
+        connectionId,
+        from,
+        to,
+        fromCluster,
+        toCluster,
+        internal,
+        fromFrame,
+        toFrame,
+      } = plan;
+      const fromPort = plan.fromPort,
+        toPort = plan.toPort,
         fromPoint = fromPort ?? from.position,
         toPoint = toPort ?? to.position;
 
