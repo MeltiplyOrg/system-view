@@ -119,8 +119,10 @@ export const example: Design = {
 
 /**
  * Editable three-tier application: a browser frontend calls an API server,
- * which reads and writes the database. Prefixes select visuals; connections
- * describe requests, not replica membership.
+ * which reads and writes through a cache server. On a cache miss the cache
+ * server loads from the database itself, so the backend never talks to the
+ * database directly. Prefixes select visuals; connections describe requests,
+ * not replica membership.
  */
 export const webAppExample: Design = {
   version: 1,
@@ -136,25 +138,25 @@ export const webAppExample: Design = {
       id: "compute-api",
       label: "Backend API",
       description:
-        "Handles application requests and business logic, then reads and writes data using SQL.",
+        "Handles application requests and business logic. Every read and write goes through the cache server.",
     },
     {
-      id: "cache-app",
-      label: "Application cache",
+      id: "cache-server",
+      label: "Cache server",
       description:
-        "Keeps frequently requested data in memory. The backend reads the database on cache misses.",
+        "Keeps frequently requested data in memory. On a cache miss it queries the database itself and stores the result.",
     },
     {
       id: "db-app",
       label: "Application database",
       description:
-        "Persists application data. Accessed by the backend, not directly by the browser.",
+        "Persists application data. Only the cache server connects to it; the backend never queries it directly.",
     },
   ],
   connections: [
     { from: "web-frontend", to: "compute-api", relation: "HTTPS / JSON" },
-    { from: "compute-api", to: "db-app", relation: "SQL" },
-    { from: "compute-api", to: "cache-app", relation: "GET / SET" },
+    { from: "compute-api", to: "cache-server", relation: "GET / SET" },
+    { from: "cache-server", to: "db-app", relation: "SQL on miss" },
   ],
   clusters: [],
 };
