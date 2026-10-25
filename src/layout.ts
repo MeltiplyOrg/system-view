@@ -92,38 +92,45 @@ export function inferInstanceType(id: string): PlacedInstance["type"] {
     : "database-rack";
 }
 
-/**
- * World-space distance between instances in one cluster.
- *
- * The 176-unit step clears the 150-unit foot depth, so every instance keeps
- * its own platform. Replicas are independent hosts: sharing a plinth would
- * draw them co-located on one machine.
- */
-const RACK_SPACING = 176;
-
-/** Overflow rows step along negative X (behind), clearing the 288-unit foot. */
-const ROW_SPACING = 332;
-const REPLICAS_PER_ROW = 5;
-
-/** World-space gap between cluster columns. */
-const CLUSTER_GAP = 420;
-
-/**
- * Extra world-space clearance per overflow row, added on both sides of a
- * group.
- *
- * The base `CLUSTER_GAP` keeps single-row groups at the historic 420-unit
- * pitch, so existing scenes do not move. Every row beyond the first five
- * replicas means a wider, taller cluster whose dashed frame crowds its
- * neighbors, so each overflow row spreads the gaps to the adjacent groups by
- * one rack spacing (both sides contribute, so two many-replica clusters
- * separate by the sum).
- */
-const CLUSTER_GAP_PER_ROW = RACK_SPACING;
-
 /** Half-width and half-depth of the 288 × 150 rack foot. */
 export const RACK_HALF_WIDTH = 144,
   RACK_HALF_DEPTH = 75;
+
+/**
+ * Clearance between replica platforms along a cluster column.
+ *
+ * The historic 332-unit pitch was the 288-unit rack foot plus 44 units of
+ * air. Deriving clearance from the actual footprint keeps a small provider
+ * base (the Redis cache is 168 square) just as tight: a fixed 332-unit step
+ * left 164 units of empty space beside every Redis replica, which made ten
+ * replicas look scattered across the stage.
+ */
+const REPLICA_COLUMN_GAP = 44;
+
+/**
+ * Clearance between replica platforms along a cluster row.
+ *
+ * The historic 176-unit pitch was the 150-unit rack foot plus 26 units. A
+ * provider footprint deeper than a rack therefore grows the step instead of
+ * collapsing the gap between platforms.
+ */
+const REPLICA_ROW_GAP = 26;
+
+/** Members per column before an overflow column starts behind it. */
+const REPLICAS_PER_ROW = 5;
+
+/**
+ * Historic center-to-center pitch between adjacent groups.
+ *
+ * It includes a rack foot on each side, so the drawn frames (footprint plus
+ * 36-unit margin) sit 60 world units apart. Group placement uses the derived
+ * edge clearance below, which preserves that pitch for racks and tightens it
+ * for smaller provider platforms.
+ */
+const CLUSTER_GAP = 420;
+
+/** Empty space between adjacent group footprints; frames sit 60 units apart. */
+const CLUSTER_CLEARANCE = CLUSTER_GAP - RACK_HALF_WIDTH * 2;
 
 /** Half extents of one instance's ground footprint in world units. */
 export type InstanceFootprint = ProviderFootprint;
@@ -210,16 +217,15 @@ function layoutGroups(design: Design): LayoutGroup[] {
 /**
  * Derive all render-only fields from a validated design.
  *
- * Layout is deterministic: each row holds at most five members along Y at
- * 176-unit intervals. Overflow rows step backwards along negative X and add
- * one rack spacing of gap on each side of their group, so many-replica
- * clusters keep clearance from their neighbors while single-row scenes keep
- * the historic 420-unit pitch. Groups reserve their complete footprint so a
- * back row cannot overlap its neighbor. The original row stays anchored when
- * its group gains a back row. A cluster is emitted at its first declared
- * member's slot, so promoting an instance never reorders the surrounding
- * scene. Existing positions are never read, which makes the imported document
- * the single source of truth.
+ * Layout is deterministic. Each column holds at most five members along Y,
+ * overflow columns step backwards along negative X, and both steps are
+ * derived from the cluster's largest footprint plus a fixed air gap. Groups
+ * are packed from their real content edges: a back column extends away from
+ * the next group, so only that next group's back width is reserved. A
+ * multi-replica cluster therefore never adds phantom space to its own sides.
+ * A cluster is emitted at its first declared member's slot, so promoting an
+ * instance never reorders the surrounding scene. Existing positions are never
+ * read, which makes the imported document the single source of truth.
  *
  * Colors are normalized per renderer type and provider skin so replicas share
  * rasterized geometry; changing declaration order or cluster membership never
@@ -239,25 +245,57 @@ export function layoutDesign(design: Design): Layout {
   );
   const placed: PlacedInstance[] = [];
   const clusters: PlacedCluster[] = [];
-  let nextX = 0;
 
-  for (const [groupIndex, group] of layoutGroups(design).entries()) {
-    const rows = Math.ceil(group.instanceIds.length / REPLICAS_PER_ROW);
-    const backWidth = Math.max(0, rows - 1) * ROW_SPACING;
-    // Overflow rows widen the gap on both sides of this group: the shift
-    // clears the previous group before the back rows extend left, and the
-    // reservation below leaves room for the next group to do the same.
-    const spread = (rows - 1) * CLUSTER_GAP_PER_ROW;
-    const x = groupIndex === 0 ? 0 : nextX + backWidth + spread;
-    nextX = x + CLUSTER_GAP + spread;
+  // Resolve members and extents before placing anything: the next group's
+  // back-row width and the shared replica pitch both depend on footprints.
+  const plans = layoutGroups(design).map((group) => {
     const members = group.instanceIds.map((id) => {
       const entry = indexed.get(id);
       if (!entry)
         throw new Error(
           `Layout cluster ${group.id} references unknown instance ${id}.`,
         );
-      return entry;
+      const type = inferInstanceType(entry.id);
+      return {
+        entry,
+        type,
+        footprint: instanceFootprint(type, entry.provider),
+      };
     });
+    const halfWidth = Math.max(
+        0,
+        ...members.map(({ footprint }) => footprint.halfWidth),
+      ),
+      halfDepth = Math.max(
+        0,
+        ...members.map(({ footprint }) => footprint.halfDepth),
+      ),
+      rows = Math.ceil(members.length / REPLICAS_PER_ROW),
+      columnStep = halfWidth * 2 + REPLICA_COLUMN_GAP,
+      rowStep = halfDepth * 2 + REPLICA_ROW_GAP;
+    return {
+      group,
+      members,
+      halfWidth,
+      columnStep,
+      rowStep,
+      backWidth: Math.max(0, rows - 1) * columnStep,
+    };
+  });
+
+  let previousX = 0,
+    previousHalfWidth = 0;
+  for (const [groupIndex, plan] of plans.entries()) {
+    const x =
+      groupIndex === 0
+        ? 0
+        : previousX +
+          previousHalfWidth +
+          CLUSTER_CLEARANCE +
+          plan.backWidth +
+          plan.halfWidth;
+    previousX = x;
+    previousHalfWidth = plan.halfWidth;
 
     let clusterBounds: {
       minX: number;
@@ -265,22 +303,22 @@ export function layoutDesign(design: Design): Layout {
       maxX: number;
       maxY: number;
     } | null = null;
-    for (const [memberIndex, instance] of members.entries()) {
-      const type = inferInstanceType(instance.id),
-        footprint = instanceFootprint(type, instance.provider),
-        px = x - Math.floor(memberIndex / REPLICAS_PER_ROW) * ROW_SPACING,
-        py = (memberIndex % REPLICAS_PER_ROW) * RACK_SPACING;
+    for (const [
+      memberIndex,
+      { entry, type, footprint },
+    ] of plan.members.entries()) {
+      const px =
+          x - Math.floor(memberIndex / REPLICAS_PER_ROW) * plan.columnStep,
+        py = (memberIndex % REPLICAS_PER_ROW) * plan.rowStep;
       placed.push({
-        id: instance.id,
+        id: entry.id,
         type,
-        label: instance.label ?? instance.id,
+        label: entry.label ?? entry.id,
         position: { x: px, y: py, z: 0 },
-        color: instanceColor(type, instance.provider),
-        ...(instance.provider === undefined
-          ? {}
-          : { provider: instance.provider }),
+        color: instanceColor(type, entry.provider),
+        ...(entry.provider === undefined ? {} : { provider: entry.provider }),
       });
-      if (!group.caption) continue;
+      if (!plan.group.caption) continue;
       // The frame wraps the real footprints, which lets a provider with a
       // square platform keep a square group border.
       const left = px - footprint.halfWidth,
@@ -301,8 +339,8 @@ export function layoutDesign(design: Design): Layout {
     // one-instance layout group without a visible group name.
     if (clusterBounds) {
       clusters.push({
-        id: group.id,
-        label: group.label ?? group.id,
+        id: plan.group.id,
+        label: plan.group.label ?? plan.group.id,
         bounds: {
           x: clusterBounds.minX,
           y: clusterBounds.minY,

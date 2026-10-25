@@ -154,6 +154,74 @@ describe("automatic layout", () => {
       }
   });
 
+  test("packs a multi-row group without phantom side clearance", () => {
+    const instances = [
+      ...Array.from({ length: 10 }, (_, index) => ({ id: `db-${index}` })),
+      { id: "db-solo" },
+    ];
+    const layout = layoutDesign(
+      design(instances, [
+        { instances: instances.slice(0, 10).map(({ id }) => id) },
+        { instances: ["db-solo"] },
+      ]),
+    );
+    // The first group's back column extends left, away from the next group,
+    // so the second group only needs the 132-unit footprint clearance.
+    expect(layout.instances[10].position.x).toBe(420);
+    const [left, right] = layout.clusters.map(({ bounds }) => bounds);
+    expect(right.x - (left.x + left.width)).toBe(132);
+  });
+
+  test("derives replica pitch from the provider footprint", () => {
+    const instances = Array.from({ length: 10 }, (_, index) => ({
+      id: `cache-${index}`,
+      provider: "redis",
+    }));
+    const layout = layoutDesign(
+      design(instances, [{ instances: instances.map(({ id }) => id) }]),
+    );
+    expect(
+      layout.instances.map(({ position }) => [position.x, position.y]),
+    ).toEqual([
+      [0, 0],
+      [0, 194],
+      [0, 388],
+      [0, 582],
+      [0, 776],
+      [-212, 0],
+      [-212, 194],
+      [-212, 388],
+      [-212, 582],
+      [-212, 776],
+    ]);
+    // A 168-unit square base plus the shared air gaps, not the rack pitch.
+    expect(layout.clusters[0].bounds).toEqual({
+      x: -296,
+      y: -84,
+      width: 380,
+      height: 944,
+    });
+  });
+
+  test("tightens a small provider cluster against its neighbor", () => {
+    const instances = [
+      ...Array.from({ length: 10 }, (_, index) => ({
+        id: `cache-${index}`,
+        provider: "redis",
+      })),
+      { id: "cache-solo", provider: "redis" },
+    ];
+    const layout = layoutDesign(
+      design(instances, [
+        { instances: instances.slice(0, 10).map(({ id }) => id) },
+        { instances: ["cache-solo"] },
+      ]),
+    );
+    expect(layout.instances[10].position.x).toBe(300);
+    const [left, right] = layout.clusters.map(({ bounds }) => bounds);
+    expect(right.x - (left.x + left.width)).toBe(132);
+  });
+
   test("normalizes one color per renderer type", () => {
     const types = [
       "database-rack",
