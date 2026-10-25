@@ -5,6 +5,8 @@ import type { Layout, PlacedCluster } from "./layout";
 import { createPlatforms } from "./platform";
 import { componentHeight, createComponent } from "./components";
 import { ComponentRasterCache } from "./component-raster";
+import { routeOrthogonal } from "./routing";
+import type { RoutePoint, RouteRect } from "./routing";
 
 const NS = "http://www.w3.org/2000/svg";
 
@@ -41,6 +43,16 @@ const CLUSTER_FRAME_MARGIN = 36;
 
 /** Screen-space gap between a cluster frame's bottom corner and its caption. */
 const CLUSTER_LABEL_GAP = 20;
+
+/**
+ * Distance a cable travels straight out of a cluster port before it may turn.
+ *
+ * Adjacent cluster frames are always 60 world units apart (420 column pitch
+ * minus two 180-unit frame halves), so a 30-unit stub stays in the gap and
+ * still leaves room on both sides. The fixed outward leg also guarantees the
+ * cable meets the border at a right angle instead of riding along it.
+ */
+const CLUSTER_PORT_STUB = 30;
 
 /**
  * Gap between a cable's centerline and its relation caption, in SVG units.
@@ -166,6 +178,129 @@ export function cableLabelPoint(
     return [x + normalX * offset, y + normalY * offset];
   }
   return null;
+}
+
+/** Frame edge a cluster port sits on; null for the degenerate fallback. */
+export type ClusterEdge = "left" | "right" | "top" | "bottom" | null;
+
+/** Port where a link meets a cluster frame. */
+export interface ClusterPort {
+  x: number;
+  y: number;
+  edge: ClusterEdge;
+}
+
+/**
+ * Point where a link meets a cluster boundary on its way to another node.
+ *
+ * Links keep addressing the specific member recorded in the document, but an
+ * external link attaches to the replica set as a whole. The ray from that
+ * member to the other endpoint chooses the facing frame edge, and the port is
+ * that edge's midpoint so wires do not meet the border off-center. Links whose
+ * two endpoints share a cluster bypass this helper and keep their rack-to-rack
+ * endpoints.
+ *
+ * @param cluster - Placed cluster whose expanded frame supplies the boundary.
+ * @param member - The endpoint instance's world position.
+ * @param target - The other endpoint's world position.
+ * @returns The midpoint of the frame edge the ray leaves through and the edge
+ *   it belongs to. A degenerate ray returns the member with no edge;
+ *   unvalidated geometry that puts the member outside the frame on the far side
+ *   also falls back to the member.
+ */
+export function clusterPort(
+  cluster: PlacedCluster,
+  member: { x: number; y: number },
+  target: { x: number; y: number },
+): ClusterPort {
+  const left = cluster.bounds.x - CLUSTER_FRAME_MARGIN,
+    right = cluster.bounds.x + cluster.bounds.width + CLUSTER_FRAME_MARGIN,
+    top = cluster.bounds.y - CLUSTER_FRAME_MARGIN,
+    bottom = cluster.bounds.y + cluster.bounds.height + CLUSTER_FRAME_MARGIN,
+    dx = target.x - member.x,
+    dy = target.y - member.y;
+  let scale = Infinity;
+  let edge: Exclude<ClusterEdge, null> | undefined;
+  if (dx > 0) {
+    scale = (right - member.x) / dx;
+    edge = "right";
+  } else if (dx < 0) {
+    scale = (left - member.x) / dx;
+    edge = "left";
+  }
+  if (dy > 0) {
+    const next = (bottom - member.y) / dy;
+    if (next < scale) {
+      scale = next;
+      edge = "bottom";
+    }
+  } else if (dy < 0) {
+    const next = (top - member.y) / dy;
+    if (next < scale) {
+      scale = next;
+      edge = "top";
+    }
+  }
+  if (!edge || !Number.isFinite(scale) || scale < 0)
+    return { x: member.x, y: member.y, edge: null };
+  // A valid external target makes the ray leave through this edge. The port
+  // still centers on the edge when unvalidated groups overlap the target.
+  const centerX = (left + right) / 2,
+    centerY = (top + bottom) / 2;
+  switch (edge) {
+    case "left":
+      return { x: left, y: centerY, edge };
+    case "right":
+      return { x: right, y: centerY, edge };
+    case "top":
+      return { x: centerX, y: top, edge };
+    case "bottom":
+      return { x: centerX, y: bottom, edge };
+  }
+}
+
+/**
+ * Anchor a ported cable just outside the cluster frame.
+ *
+ * Routing starts and ends at these anchors, then the scene prepends/appends
+ * the port itself. The fixed outward leg is what keeps the final approach
+ * perpendicular to the border.
+ */
+function clusterPortStub(port: ClusterPort): RoutePoint {
+  switch (port.edge) {
+    case "left":
+      return { x: port.x - CLUSTER_PORT_STUB, y: port.y };
+    case "right":
+      return { x: port.x + CLUSTER_PORT_STUB, y: port.y };
+    case "top":
+      return { x: port.x, y: port.y - CLUSTER_PORT_STUB };
+    case "bottom":
+      return { x: port.x, y: port.y + CLUSTER_PORT_STUB };
+    default:
+      return { x: port.x, y: port.y };
+  }
+}
+
+/** World-space rectangle covered by a cluster's dashed frame. */
+function clusterFrameRect(cluster: PlacedCluster): RouteRect {
+  return {
+    x: cluster.bounds.x - CLUSTER_FRAME_MARGIN,
+    y: cluster.bounds.y - CLUSTER_FRAME_MARGIN,
+    width: cluster.bounds.width + CLUSTER_FRAME_MARGIN * 2,
+    height: cluster.bounds.height + CLUSTER_FRAME_MARGIN * 2,
+  };
+}
+
+/** World-space rectangle covered by one instance's platform. */
+function instanceRect(instance: {
+  position: { x: number; y: number };
+}): RouteRect {
+  return {
+    x: instance.position.x - RACK_HALF_WIDTH,
+    y: instance.position.y - RACK_HALF_DEPTH,
+    width: RACK_HALF_WIDTH * 2,
+    height: RACK_HALF_DEPTH * 2,
+  };
 }
 
 /**
@@ -563,8 +698,12 @@ export class SystemScene {
     const byId = new Map(
       layout.instances.map((instance) => [instance.id, instance]),
     );
-    // Duplicate links between the same endpoints share one projected path;
-    // their captions stack so each relation remains readable.
+    const clusterById = new Map(
+      layout.clusters.map((cluster) => [cluster.id, cluster]),
+    );
+    // Links share one projected path when they land on the same cluster port,
+    // not only when they repeat an endpoint pair. Keying the lane on the drawn
+    // route therefore stacks every caption that would otherwise overprint.
     const labelLanes = new Map<string, number>();
     for (const [index, link] of design.connections.entries()) {
       const from = byId.get(link.from),
@@ -575,36 +714,88 @@ export class SystemScene {
           `Connection ${connectionId} references an unknown instance.`,
         );
 
-      // Cables follow world X/Y axes with sharp projected corners. Same-row
-      // links that skip a component use a parallel lane beyond its footprint,
-      // so a bypass never reads as a connection through that component.
-      const a = project(from.position.x, from.position.y, from.position.z + 4);
-      const b = project(to.position.x, to.position.y, to.position.z + 4);
-      const crossesInstance =
-        from.position.y === to.position.y &&
-        layout.instances.some(
-          (instance) =>
-            instance.position.y === from.position.y &&
-            instance.position.x > Math.min(from.position.x, to.position.x) &&
-            instance.position.x < Math.max(from.position.x, to.position.x),
-        );
-      const route = crossesInstance
-        ? [
-            project(
-              from.position.x,
-              from.position.y + RACK_HALF_DEPTH * 2,
-              from.position.z + 4,
-            ),
-            project(
-              to.position.x,
-              from.position.y + RACK_HALF_DEPTH * 2,
-              to.position.z + 4,
-            ),
-          ]
-        : [project(to.position.x, from.position.y, from.position.z + 4)];
-      const d = `M${a.join(" ")}${route
+      // Boundary-crossing links attach to the cluster frame, not the member
+      // rack. Internal links keep both rack endpoints so replication stays
+      // inside the group. The far endpoint's position sets the side of the
+      // frame the cable approaches from.
+      const fromCluster = instanceCluster.get(from.id),
+        toCluster = instanceCluster.get(to.id),
+        fromFrame =
+          fromCluster === undefined || fromCluster === toCluster
+            ? undefined
+            : clusterById.get(fromCluster),
+        toFrame =
+          toCluster === undefined || toCluster === fromCluster
+            ? undefined
+            : clusterById.get(toCluster),
+        fromPort = fromFrame
+          ? clusterPort(fromFrame, from.position, to.position)
+          : undefined,
+        toPort = toFrame
+          ? clusterPort(toFrame, to.position, from.position)
+          : undefined,
+        fromPoint = fromPort ?? from.position,
+        toPoint = toPort ?? to.position;
+
+      // Cables follow world X/Y axes with sharp projected corners. External
+      // routes detour around cluster frames and unclustered platforms so a
+      // cable is not hidden behind artwork for most of its length. Same-cluster
+      // replication stays rack-to-rack, with the existing parallel lane for a
+      // member skipped in the same row.
+      const internal = fromCluster !== undefined && fromCluster === toCluster;
+      let worldPath: RoutePoint[];
+      if (internal) {
+        const crossesInstance =
+          fromPoint.y === toPoint.y &&
+          layout.instances.some(
+            (instance) =>
+              instance.position.y === fromPoint.y &&
+              instance.position.x > Math.min(fromPoint.x, toPoint.x) &&
+              instance.position.x < Math.max(fromPoint.x, toPoint.x),
+          );
+        const laneY = fromPoint.y + RACK_HALF_DEPTH * 2;
+        worldPath = crossesInstance
+          ? [
+              fromPoint,
+              { x: fromPoint.x, y: laneY },
+              { x: toPoint.x, y: laneY },
+              toPoint,
+            ]
+          : [fromPoint, { x: toPoint.x, y: fromPoint.y }, toPoint];
+      } else {
+        // Ported endpoints leave/enter on a fixed outward stub. Routing
+        // between the stubs (rather than the ports) keeps the final leg
+        // perpendicular to the border while the router works in open space.
+        const fromAnchor = fromPort ? clusterPortStub(fromPort) : fromPoint,
+          toAnchor = toPort ? clusterPortStub(toPort) : toPoint;
+        // Clustered racks are covered by their frame; unclustered platform
+        // footprints stay obstacles so a cable cannot disappear under a
+        // standalone cache or database.
+        const obstacles: RouteRect[] = [
+          ...layout.clusters.map(clusterFrameRect),
+          ...layout.instances
+            .filter(
+              (instance) =>
+                !instanceCluster.has(instance.id) &&
+                instance.id !== from.id &&
+                instance.id !== to.id,
+            )
+            .map(instanceRect),
+        ];
+        const route = routeOrthogonal(fromAnchor, toAnchor, obstacles);
+        worldPath = [
+          ...(fromPort ? [fromPoint] : []),
+          ...route,
+          ...(toPort ? [toPoint] : []),
+        ];
+      }
+      const projected = worldPath.map((point) =>
+        project(point.x, point.y, from.position.z + 4),
+      );
+      const d = `M${projected[0].join(" ")}${projected
+        .slice(1)
         .map((point) => `L${point.join(" ")}`)
-        .join("")}L${b.join(" ")}`;
+        .join("")}`;
 
       const group = document.createElementNS(NS, "g");
       group.classList.add("connection");
@@ -612,11 +803,10 @@ export class SystemScene {
       group.style.setProperty("--cable-color", from.color);
       group.innerHTML = `<path class="wire-glow" d="${d}"/><path class="wire" d="${d}"/><path class="pulse" pathLength="100" style="--duration:3s;--delay:${-index * 0.6}s" d="${d}"/>`;
       if (link.relation) {
-        const pairKey = JSON.stringify([link.from, link.to].sort()),
-          lane = labelLanes.get(pairKey) ?? 0;
-        labelLanes.set(pairKey, lane + 1);
+        const lane = labelLanes.get(d) ?? 0;
+        labelLanes.set(d, lane + 1);
         const point = cableLabelPoint(
-          [a, ...route, b],
+          projected,
           CABLE_LABEL_OFFSET + lane * CABLE_LABEL_STACK,
         );
         if (point) {
@@ -636,11 +826,13 @@ export class SystemScene {
           group.append(label);
         }
       }
-      const fromCluster = instanceCluster.get(from.id),
-        toCluster = instanceCluster.get(to.id);
       if (fromCluster && fromCluster === toCluster) {
         group.dataset.clusterId = fromCluster;
       }
+      // Ported endpoints are observable without re-deriving geometry in tests
+      // and debugging; internal links only carry the shared cluster id above.
+      if (fromFrame) group.dataset.fromCluster = fromFrame.id;
+      if (toFrame) group.dataset.toCluster = toFrame.id;
       layer.append(group);
     }
 

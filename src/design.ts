@@ -63,6 +63,8 @@ export interface Connection {
  *
  * `id` and `label` are optional. The layout pass derives a stable fallback from
  * the declaration order and uses the label for the on-canvas group caption.
+ * Links that cross the group boundary attach to its dashed frame; links
+ * between members stay rack-to-rack so replication remains internal.
  */
 export interface Cluster {
   id?: string;
