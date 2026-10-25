@@ -236,14 +236,24 @@ test.describe("minimal isometric canvas", () => {
     expect(cardBox.left).toBeGreaterThan(pointer.x);
     expect(cardBox.bottom).toBeLessThan(pointer.y);
 
-    // Moving inside the same cluster carries the card with the cursor.
+    // The anchor follows the pointer; the card may travel less at a viewport clamp.
     const movedPointer = { x: pointer.x + 20, y: pointer.y + 10 };
     await page.mouse.move(movedPointer.x, movedPointer.y);
     const movedCard = await card.evaluate((element) =>
       element.getBoundingClientRect().toJSON(),
     );
-    expect(Math.abs(movedCard.x - (cardBox.x + 20))).toBeLessThan(1.5);
-    expect(Math.abs(movedCard.y - (cardBox.y + 10))).toBeLessThan(1.5);
+    const movedAnchor = await tip.evaluate((element) =>
+      element.getBoundingClientRect().toJSON(),
+    );
+    expect(Math.abs(movedAnchor.left - movedPointer.x)).toBeLessThan(1.5);
+    expect(Math.abs(movedAnchor.top - movedPointer.y)).toBeLessThan(1.5);
+    const stage = await page
+      .locator(".stage")
+      .evaluate((element) => element.getBoundingClientRect().toJSON());
+    expect(movedCard.left).toBeGreaterThanOrEqual(stage.left);
+    expect(movedCard.top).toBeGreaterThanOrEqual(stage.top);
+    expect(movedCard.right).toBeLessThanOrEqual(stage.right);
+    expect(movedCard.bottom).toBeLessThanOrEqual(stage.bottom);
 
     // The leader ends on the card corner nearest the cursor.
     const corners = [

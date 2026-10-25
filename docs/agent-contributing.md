@@ -231,7 +231,8 @@ Notes:
 - E2E defaults to reduced motion. A transition test opts out with
   `test.use({ reducedMotion: "no-preference" })`.
 - Callout geometry checks wait for `document.fonts.ready` and assert placement,
-  pointer tracking, and leader endpoints. Do not pin cosmetic offsets, stroke
+  pointer tracking, viewport bounds, and leader endpoints. A clamped card need
+  not travel by the pointer's exact delta. Do not pin cosmetic offsets, stroke
   widths, or bracket-border pixel defaults in interaction tests.
 - Unit coverage gates deterministic geometry, validation, replica edits and
   `assembly.ts` timing. Browser-only scene, cache, assembly rendering and
