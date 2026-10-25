@@ -1,8 +1,9 @@
 {
   "name": "system-view",
-  "license": "Apache-2.0",
   "version": "1.0.0",
   "private": true,
+  "license": "Apache-2.0",
+  "author": "tmih06 <tmih.real@gmail.com>",
   "type": "module",
   "scripts": {
     "dev": "bun run --parallel 'vp dev' 'cloudflared tunnel --url http://localhost:5173'",
