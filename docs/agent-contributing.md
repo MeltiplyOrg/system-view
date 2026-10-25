@@ -98,6 +98,17 @@ One pass explains where most edits belong:
   on the object. Reuse `REDIS_LOGO_ART` for printed badges instead of redrawing
   a logo.
 
+### Wires
+
+- External links attach to a frame side chosen by the ray from the endpoint
+  member to the far endpoint. One cable uses the side midpoint.
+- Several cables on one side divide it into equal segments and attach at each
+  segment's midpoint. Ordering by the far endpoint's coordinate along that side
+  keeps the fan centered and reduces crossings.
+- Ports leave and enter on a fixed outward stub. The router avoids frame
+  rectangles, and the final leg meets the border perpendicular. Internal
+  same-cluster links stay rack-to-rack and have no border port.
+
 ### Raster cache
 
 - The raster cache discovers a geometry root by `data-renderer-type` and a
@@ -171,16 +182,16 @@ One pass explains where most edits belong:
 
 ## Proof matrix
 
-| Surface                                  | Fast proof                                                | Browser proof                                    |
-| ---------------------------------------- | --------------------------------------------------------- | ------------------------------------------------ |
-| Validation, limits, references           | `tests/design.test.ts`                                    | apply/import/export in `e2e/app.spec.ts`         |
-| Placement, pitch, cluster bounds, colors | `tests/layout.test.ts`                                    | replica and provider paths in `e2e/app.spec.ts`  |
-| Platform topology and markup             | `tests/platform.test.ts`, `tests/platform-render.test.ts` | boot scene render in `e2e/app.spec.ts`           |
-| Cable routing and cluster ports          | `tests/routing.test.ts`, `tests/scene-port.test.ts`       | link and zoom tests in `e2e/app.spec.ts`         |
-| Rack geometry and projection             | `tests/database.test.ts`                                  | boot scene and theme switch in `e2e/app.spec.ts` |
-| Replica mutation                         | `tests/replicas.test.ts`                                  | replica stepper and ten-replica layout           |
-| Shell, editor, theme, a11y               | —                                                         | `e2e/app.spec.ts`                                |
-| Canvas, raster, selection, morph         | pure helpers only                                         | `e2e/app.spec.ts`, `e2e/component-cache.spec.ts` |
+| Surface                                  | Fast proof                                                | Browser proof                                                 |
+| ---------------------------------------- | --------------------------------------------------------- | ------------------------------------------------------------- |
+| Validation, limits, references           | `tests/design.test.ts`                                    | apply/import/export in `e2e/app.spec.ts`                      |
+| Placement, pitch, cluster bounds, colors | `tests/layout.test.ts`                                    | replica and provider paths in `e2e/app.spec.ts`               |
+| Platform topology and markup             | `tests/platform.test.ts`, `tests/platform-render.test.ts` | boot scene render in `e2e/app.spec.ts`                        |
+| Cable routing and cluster ports          | `tests/routing.test.ts`, `tests/scene-port.test.ts`       | `e2e/wires.spec.ts`; link and zoom tests in `e2e/app.spec.ts` |
+| Rack geometry and projection             | `tests/database.test.ts`                                  | boot scene and theme switch in `e2e/app.spec.ts`              |
+| Replica mutation                         | `tests/replicas.test.ts`                                  | replica stepper and ten-replica layout                        |
+| Shell, editor, theme, a11y               | —                                                         | `e2e/app.spec.ts`                                             |
+| Canvas, raster, selection, morph         | pure helpers only                                         | `e2e/app.spec.ts`, `e2e/component-cache.spec.ts`              |
 
 Gates: `bun run check` (format, lint, types), `bun run build`, `bun run size`.
 
