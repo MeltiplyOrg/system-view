@@ -85,6 +85,8 @@ test.describe("minimal isometric canvas", () => {
     await expect(page.locator("#scene")).toBeVisible();
     await expect(page.locator(".database-rack")).toHaveCount(3);
     await expect(page.locator(".connection")).toHaveCount(2);
+    await expect(page.locator(".wire-label")).toHaveCount(2);
+    await expect(page.locator(".wire-label").first()).toHaveText("replicates");
     await expect(page.locator(".cluster-label")).toHaveText("Database cluster");
     await expect(page.locator(".cluster-frame")).toHaveCount(1);
     await expect(page.locator(".cluster-frame")).toHaveAttribute(
@@ -94,6 +96,40 @@ test.describe("minimal isometric canvas", () => {
     await expect(page.locator(".space-grid")).toHaveAttribute("d", /M/);
     await expect(page.locator("#sidebar")).toBeHidden();
     await expect(page.getByRole("button", { name: "Design" })).toBeVisible();
+  });
+
+  test("loads reference designs from the example picker", async ({ page }) => {
+    await page.goto("/");
+    await openSidebar(page);
+    const picker = page.locator("#example");
+    await expect(picker).toHaveValue("horizontal-scaling");
+    await expect(page.locator("#example-hint")).toContainText("replication");
+
+    await picker.selectOption("sharding");
+    await expect(page.locator("#scene-title")).toHaveText("Database sharding");
+    await expect(page.locator(".database-rack")).toHaveCount(3);
+    await expect(page.locator(".connection")).toHaveCount(3);
+    await expect(page.locator(".wire-label")).toHaveText([
+      "keys 0-33%",
+      "keys 34-66%",
+      "keys 67-100%",
+    ]);
+    await expect(page.locator("#example-hint")).toContainText("shard");
+
+    await picker.selectOption("microservices");
+    await expect(page.locator("#scene-title")).toHaveText("Microservices");
+    await expect(page.locator(".connection")).toHaveCount(5);
+    await expect(page.locator(".wire-label")).toHaveText([
+      "HTTPS",
+      "gRPC",
+      "gRPC",
+      "SQL",
+      "SQL",
+    ]);
+
+    await page.locator("#reset").click();
+    await expect(picker).toHaveValue("horizontal-scaling");
+    await expect(page.locator("#scene-title")).toHaveText("Horizontal scaling");
   });
 
   test("hovering an instance raises a corner-bracketed callout", async ({
@@ -306,6 +342,7 @@ test.describe("minimal isometric canvas", () => {
     await page.locator("#source").fill(JSON.stringify(oneInstance));
     await page.getByRole("button", { name: "Apply", exact: true }).click();
     await expect(page.locator(".database-rack")).toHaveCount(1);
+    await expect(page.locator("#example")).toHaveValue("");
     await expect(page.locator(".cluster-label")).toHaveCount(0);
     await expect(page.locator(".cluster-frame")).toHaveCount(0);
     await expect(page.locator("#scene-title")).toHaveText("Single rack");
@@ -317,6 +354,7 @@ test.describe("minimal isometric canvas", () => {
     });
     await expect(page.locator(".database-rack")).toHaveCount(2);
     await expect(page.locator(".connection")).toHaveCount(1);
+    await expect(page.locator(".wire-label")).toHaveText("copies");
     await expect(page.locator(".cluster-label")).toHaveText("Imported cluster");
     await expect(page.locator(".cluster-frame")).toHaveCount(1);
     await expect(page.locator(".cluster-frame")).toHaveAttribute(
@@ -421,6 +459,9 @@ test.describe("instance selection", () => {
   test("clicking a target pins the callout, opens details, and pans the camera", async ({
     page,
   }) => {
+    const start = new Date("2026-01-01T00:00:00Z");
+    await page.clock.install({ time: start });
+    await page.clock.pauseAt(start);
     await page.goto("/");
     const point = await rackPoint(page);
     if (!point) throw new Error("No rack point found.");
@@ -436,24 +477,16 @@ test.describe("instance selection", () => {
 
     // Sample the viewBox across the transition: a smooth pan produces several
     // distinct frames instead of one jump.
-    const frames = await page.evaluate(async () => {
-      const scene = document.querySelector("#scene");
-      const values = new Set<string>();
-      const start = performance.now();
-      const { promise, resolve } = Promise.withResolvers<void>();
-      const tick = () => {
-        values.add(scene?.getAttribute("viewBox") ?? "");
-        if (performance.now() - start < 220) requestAnimationFrame(tick);
-        else resolve();
-      };
-      requestAnimationFrame(tick);
-      await promise;
-      return values.size;
-    });
-    expect(frames).toBeGreaterThan(2);
+    const values = new Set<string>();
+    for (let frame = 0; frame < 14; frame++) {
+      await page.clock.runFor(16);
+      values.add((await page.locator("#scene").getAttribute("viewBox")) ?? "");
+    }
+    expect(values.size).toBeGreaterThan(2);
     await expect
       .poll(() => page.locator("#scene").getAttribute("viewBox"))
       .not.toBe(initial);
+    await page.clock.runFor(1600);
 
     // The target settles left of the panel.
     const geometry = await page.evaluate(() => ({
@@ -465,17 +498,355 @@ test.describe("instance selection", () => {
     expect(geometry.calloutX).toBeLessThan(geometry.detailLeft! - 100);
 
     // The pinned callout ignores pointer movement inside the target.
-    await page.waitForTimeout(700);
+    await page.clock.runFor(700);
     const pinned = await page
       .locator("#callout")
       .evaluate((element) => element.style.transform);
     await page.mouse.move(point.x + 20, point.y + 10);
-    await page.waitForTimeout(120);
+    await page.clock.runFor(120);
     expect(
       await page
         .locator("#callout")
         .evaluate((element) => element.style.transform),
     ).toBe(pinned);
+  });
+
+  test("rapid replica edits preserve in-flight drops and remove replicas immediately", async ({
+    page,
+  }) => {
+    await page.goto("/");
+    const point = await rackPoint(page);
+    if (!point) throw new Error("No rack point found.");
+    await page.mouse.click(point.x, point.y);
+    const result = await page.evaluate(() => {
+      const increase =
+        document.querySelector<HTMLButtonElement>("#replica-increase")!;
+      const decrease =
+        document.querySelector<HTMLButtonElement>("#replica-decrease")!;
+      increase.click();
+      const entry = document.querySelector(".instance-enter")!;
+      const replica = entry.querySelector<SVGGElement>(".scene-instance")!;
+      const id = replica.dataset.instanceId;
+      const animation = entry.getAnimations()[0];
+      animation.pause();
+      animation.currentTime = 120;
+      increase.click();
+      const current = [
+        ...document.querySelectorAll<SVGGElement>(".scene-instance"),
+      ].find((element) => element.dataset.instanceId === id);
+      const preserved =
+        current === replica &&
+        entry.getAnimations()[0] === animation &&
+        animation.currentTime === 120;
+      const consistent = () =>
+        document.querySelectorAll(".scene-instance").length ===
+        JSON.parse(
+          document.querySelector<HTMLTextAreaElement>("#source")!.value,
+        ).instances.length;
+      let countsMatch = consistent();
+      for (let i = 0; i < 12; i++) {
+        increase.click();
+        countsMatch &&= consistent();
+      }
+      const maximum = document.querySelector("#detail-count")!.textContent;
+      for (let i = 0; i < 12; i++) {
+        decrease.click();
+        countsMatch &&= consistent();
+      }
+      return {
+        preserved,
+        countsMatch,
+        maximum,
+        minimum: document.querySelector("#detail-count")!.textContent,
+        kind: document.querySelector("#detail-kind")!.textContent,
+        removed: !replica.isConnected,
+      };
+    });
+    expect(result).toEqual({
+      preserved: true,
+      countsMatch: true,
+      maximum: "10",
+      minimum: "1",
+      kind: "Instance",
+      removed: true,
+    });
+  });
+
+  test("rapid focus updates keep camera momentum instead of restarting ease-in", async ({
+    page,
+  }) => {
+    const start = new Date("2026-01-01T00:00:00Z");
+    await page.clock.install({ time: start });
+    await page.clock.pauseAt(start);
+    await page.goto("/");
+    const point = await rackPoint(page);
+    if (!point) throw new Error("No rack point found.");
+    await page.mouse.click(point.x, point.y);
+    await page.clock.runFor(1600);
+    const increase = page.locator("#replica-increase");
+    await increase.evaluate((button) => (button as HTMLButtonElement).click());
+    await page.clock.runFor(160);
+    const logWidth = () =>
+      page
+        .locator("#scene")
+        .evaluate((scene) =>
+          Math.log(Number(scene.getAttribute("viewBox")!.split(" ")[2])),
+        );
+    const before = await logWidth();
+    await page.clock.runFor(16);
+    const atRetarget = await logWidth();
+    await increase.evaluate((button) => (button as HTMLButtonElement).click());
+    await page.clock.runFor(16);
+    const after = await logWidth();
+    expect(atRetarget - before).toBeGreaterThan(0);
+    expect(after - atRetarget).toBeGreaterThan((atRetarget - before) * 0.5);
+    await page.clock.runFor(3000);
+    const settled = await page.locator("#scene").getAttribute("viewBox");
+    await page.clock.runFor(1000);
+    expect(await page.locator("#scene").getAttribute("viewBox")).toBe(settled);
+    await increase.evaluate((button) => (button as HTMLButtonElement).click());
+    await page.clock.runFor(80);
+    await page.mouse.move(300, 300);
+    await page.mouse.wheel(0, -100);
+    await page.clock.runFor(32);
+    const manual = await page.locator("#scene").getAttribute("viewBox");
+    await page.clock.runFor(1000);
+    expect(await page.locator("#scene").getAttribute("viewBox")).toBe(manual);
+  });
+
+  test("ten-rack overview restores fine cable detail when zoomed in", async ({
+    page,
+  }) => {
+    await page.emulateMedia({ reducedMotion: "reduce" });
+    await page.goto("/");
+    const point = await rackPoint(page);
+    if (!point) throw new Error("No rack point found.");
+    await page.mouse.click(point.x, point.y);
+    await page.locator("#replica-increase").evaluate((button) => {
+      for (let index = 0; index < 7; index++)
+        (button as HTMLButtonElement).click();
+    });
+    await expect(page.locator(".scene-instance")).toHaveCount(10);
+    const rackTraffic = page.locator(".database-rack .pulse").first();
+    await expect(rackTraffic).toHaveCSS("display", "none");
+    await expect(page.locator(".connection .pulse").first()).not.toHaveCSS(
+      "display",
+      "none",
+    );
+    await page.mouse.move(400, 400);
+    await page.mouse.wheel(0, -1400);
+    await expect(rackTraffic).not.toHaveCSS("display", "none");
+    const rackMarks = page.locator("#rack-front .detail").first();
+    await expect(rackMarks).not.toHaveCSS("display", "none");
+    await expect(rackMarks).toHaveCSS("visibility", "visible");
+    await expect(rackMarks).toHaveCSS("opacity", "1");
+    await page.mouse.wheel(0, 1400);
+    await expect(rackTraffic).toHaveCSS("display", "none");
+    await expect(page.locator(".scene-instance")).toHaveCount(10);
+  });
+
+  test("prewarms overview racks and keeps their images through the first zoom", async ({
+    page,
+  }) => {
+    await page.emulateMedia({ reducedMotion: "reduce" });
+    await page.goto("/");
+    const point = await rackPoint(page);
+    if (!point) throw new Error("No rack point found.");
+    await page.mouse.click(point.x, point.y);
+    await page.locator("#replica-increase").evaluate((button) => {
+      for (let index = 0; index < 7; index++)
+        (button as HTMLButtonElement).click();
+    });
+    await expect(page.locator("#scene")).toHaveClass(/rack-overview/);
+    await expect(
+      page.locator('.database-rack[data-raster-ready="true"]'),
+    ).toHaveCount(10);
+    const result = await page.evaluate(() => {
+      const rack = document.querySelector(
+        '.database-rack[data-raster-ready="true"]',
+      )!;
+      const images = [...rack.querySelectorAll(".component-raster")];
+      const hrefs = images.map((image) => image.getAttribute("href"));
+      document.querySelector("#scene")!.dispatchEvent(
+        new WheelEvent("wheel", {
+          deltaY: -1000,
+          clientX: 400,
+          clientY: 400,
+          bubbles: true,
+          cancelable: true,
+        }),
+      );
+      const beforeRemoval = {
+        reused: images.every(
+          (image, index) =>
+            image.isConnected && image.getAttribute("href") === hrefs[index],
+        ),
+        vectorCopies: rack.querySelectorAll(".rack-static").length,
+        label: rack.querySelector(".instance-label")?.textContent,
+      };
+      const sourceUrls = new Set(
+        [...document.querySelectorAll(".component-raster")].map((image) =>
+          image.getAttribute("href"),
+        ),
+      );
+      const decrease =
+        document.querySelector<HTMLButtonElement>("#replica-decrease")!;
+      const increase =
+        document.querySelector<HTMLButtonElement>("#replica-increase")!;
+      for (let count = 10; count > 1; count--) decrease.click();
+      for (let count = 1; count < 10; count++) increase.click();
+      return {
+        ...beforeRemoval,
+        sharedImages: sourceUrls.size,
+        readdedReady: document.querySelectorAll('[data-raster-ready="true"]')
+          .length,
+        readdedReuse: [...document.querySelectorAll(".component-raster")].every(
+          (image) => sourceUrls.has(image.getAttribute("href")),
+        ),
+      };
+    });
+    expect(result).toEqual({
+      reused: true,
+      vectorCopies: 0,
+      label: "Database Rack 01",
+      sharedImages: 2,
+      readdedReady: 10,
+      readdedReuse: true,
+    });
+  });
+
+  test("close-range navigation culls offscreen racks without losing them", async ({
+    page,
+  }) => {
+    await page.emulateMedia({ reducedMotion: "reduce" });
+    await page.goto("/");
+    const point = await rackPoint(page);
+    if (!point) throw new Error("No rack point found.");
+    await page.mouse.click(point.x, point.y);
+    await page.locator("#replica-increase").evaluate((button) => {
+      for (let index = 0; index < 7; index++)
+        (button as HTMLButtonElement).click();
+    });
+    await page.mouse.move(400, 400);
+    await page.mouse.wheel(0, -1800);
+    await expect
+      .poll(() =>
+        page
+          .locator(".instance-placement")
+          .evaluateAll(
+            (roots) =>
+              roots.filter(
+                (root) => getComputedStyle(root).visibility === "hidden",
+              ).length,
+          ),
+      )
+      .toBeGreaterThan(0);
+    await expect(page.locator(".scene-instance")).toHaveCount(10);
+    await page.mouse.wheel(0, 1800);
+    await expect
+      .poll(() =>
+        page
+          .locator(".instance-placement")
+          .evaluateAll(
+            (roots) =>
+              roots.filter(
+                (root) => getComputedStyle(root).visibility !== "hidden",
+              ).length,
+          ),
+      )
+      .toBe(10);
+    await expect(page.locator(".scene-instance")).toHaveCount(10);
+  });
+
+  test("cached rack geometry changes palette with the theme and keeps labels live", async ({
+    page,
+  }) => {
+    await page.emulateMedia({ reducedMotion: "reduce" });
+    await page.goto("/");
+    const point = await rackPoint(page);
+    if (!point) throw new Error("No rack point found.");
+    await page.mouse.click(point.x, point.y);
+    await page.locator("#replica-increase").evaluate((button) => {
+      for (let index = 0; index < 7; index++)
+        (button as HTMLButtonElement).click();
+    });
+    await page.mouse.move(400, 400);
+    await page.mouse.wheel(0, -1000);
+    const instanceId = await page
+      .locator(".instance-placement")
+      .evaluateAll(
+        (roots) =>
+          roots
+            .find((root) => getComputedStyle(root).visibility !== "hidden")
+            ?.querySelector<SVGGElement>(".scene-instance")?.dataset.instanceId,
+      );
+    expect(instanceId).toBeTruthy();
+    const rack = page.locator(
+      `.scene-instance[data-instance-id="${instanceId}"] .database-rack`,
+    );
+    await expect(rack).toHaveAttribute("data-raster-ready", "true");
+    const fingerprint = () =>
+      rack
+        .locator('.component-raster[data-raster-layer="base"]')
+        .evaluate(async (element) => {
+          const source = (element as SVGImageElement).href.baseVal;
+          const image = new Image();
+          image.src = source;
+          await image.decode();
+          const canvas = document.createElement("canvas");
+          canvas.width = 96;
+          canvas.height = 128;
+          const context = canvas.getContext("2d")!;
+          context.drawImage(image, 0, 0, 96, 128);
+          const pixels = context.getImageData(0, 0, 96, 128).data;
+          let red = 0;
+          let green = 0;
+          let blue = 0;
+          let painted = 0;
+          for (let index = 0; index < pixels.length; index += 4) {
+            if (pixels[index + 3] === 0) continue;
+            red += pixels[index];
+            green += pixels[index + 1];
+            blue += pixels[index + 2];
+            painted++;
+          }
+          // Mean paint color survives rerasterization at a different tier,
+          // unlike a pixel-exact hash of antialiased edges.
+          return painted === 0
+            ? { red: 0, green: 0, blue: 0, painted }
+            : {
+                red: red / painted,
+                green: green / painted,
+                blue: blue / painted,
+                painted,
+              };
+        });
+    const dark = await fingerprint();
+    expect(dark.painted).toBeGreaterThan(100);
+    await page.locator("#detail-close").click();
+    await expect(page.locator("#detail")).toBeHidden();
+    await openSidebar(page);
+    await page.selectOption("#theme", "light");
+    await expect(rack).toHaveAttribute("data-raster-ready", "true");
+    const light = await fingerprint();
+    expect(light.red + light.green + light.blue).toBeGreaterThan(
+      dark.red + dark.green + dark.blue + 60,
+    );
+    await expect(page.locator(".scene-instance .instance-label")).toHaveCount(
+      10,
+    );
+    await page.selectOption("#theme", "dark");
+    await expect
+      .poll(async () => {
+        const again = await fingerprint();
+        return (
+          light.red +
+          light.green +
+          light.blue -
+          (again.red + again.green + again.blue)
+        );
+      })
+      .toBeGreaterThan(60);
   });
 
   test("Escape closes the detail panel and releases the callout", async ({

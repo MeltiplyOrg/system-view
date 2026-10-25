@@ -1,9 +1,9 @@
 /**
  * Automatic layout tests. They pin the deterministic placement contract and
- * prove colors are unique and cluster grouping changes the shared footprint.
+ * prove colors normalize per renderer type regardless of declaration order.
  */
 import { describe, expect, test } from "vite-plus/test";
-import type { Design } from "../src/design";
+import type { Design, PlacedInstance } from "../src/design";
 import { example } from "../src/design";
 import { inferInstanceType, layoutDesign, instanceColor } from "../src/layout";
 
@@ -16,7 +16,7 @@ function design(
 }
 
 describe("automatic layout", () => {
-  test("places cluster members in one column with distinct colors", () => {
+  test("places cluster members in one column with a shared database palette", () => {
     const layout = layoutDesign(example);
     expect(layout.instances.map((instance) => instance.position)).toEqual([
       { x: 0, y: 0, z: 0 },
@@ -30,7 +30,7 @@ describe("automatic layout", () => {
     ]);
     expect(
       new Set(layout.instances.map((instance) => instance.color)).size,
-    ).toBe(3);
+    ).toBe(1);
     expect(layout.clusters).toEqual([
       {
         id: "cluster-1",
@@ -75,17 +75,109 @@ describe("automatic layout", () => {
     ]);
   });
 
-  test("assigns a different color to every supported instance", () => {
-    const instances = Array.from({ length: 64 }, (_, index) => ({
+  test("wraps after five replicas into back rows without stretching the first row", () => {
+    for (const count of [5, 6, 10, 11]) {
+      const instances = Array.from({ length: count }, (_, index) => ({
+        id: `db-${index}`,
+      }));
+      const layout = layoutDesign(
+        design(instances, [{ instances: instances.map(({ id }) => id) }]),
+      );
+      const rows = new Map<number, number>();
+      for (const instance of layout.instances) {
+        const { x, y } = instance.position;
+        rows.set(x, (rows.get(x) ?? 0) + 1);
+        const bounds = layout.clusters[0].bounds;
+        expect(x - 144).toBeGreaterThanOrEqual(bounds.x);
+        expect(x + 144).toBeLessThanOrEqual(bounds.x + bounds.width);
+        expect(y - 75).toBeGreaterThanOrEqual(bounds.y);
+        expect(y + 75).toBeLessThanOrEqual(bounds.y + bounds.height);
+      }
+      expect([...rows.values()].every((size) => size <= 5)).toBe(true);
+      expect(rows.size).toBe(Math.ceil(count / 5));
+      const first = layout.instances[0].position;
+      expect(first).toEqual({ x: 0, y: 0, z: 0 });
+      if (count > 5) {
+        const sixth = layout.instances[5].position;
+        expect(sixth.x + 144).toBeLessThan(first.x - 144);
+        expect(sixth.y).toBe(first.y);
+      }
+    }
+  });
+
+  test("reserves back-row space between neighboring clusters", () => {
+    const instances = Array.from({ length: 20 }, (_, index) => ({
       id: `db-${index}`,
     }));
-    const colors = layoutDesign(design(instances)).instances.map(
-      (instance) => instance.color,
+    const layout = layoutDesign(
+      design(instances, [
+        { instances: instances.slice(0, 10).map(({ id }) => id) },
+        { instances: instances.slice(10).map(({ id }) => id) },
+      ]),
     );
-    expect(new Set(colors).size).toBe(64);
-    expect(colors.slice(0, 3)).toEqual(["#ff9d52", "#42d9e8", "#b49aff"]);
-    expect(colors.every((color) => /^#[\da-f]{6}$/.test(color))).toBe(true);
-    expect(instanceColor(64)).toBe(colors[0]);
+    const [left, right] = layout.clusters.map(({ bounds }) => bounds);
+    expect(left.x + left.width).toBeLessThan(right.x);
+    for (let a = 0; a < layout.instances.length; a++)
+      for (let b = a + 1; b < layout.instances.length; b++) {
+        const first = layout.instances[a].position;
+        const second = layout.instances[b].position;
+        expect(
+          Math.abs(first.x - second.x) >= 288 ||
+            Math.abs(first.y - second.y) >= 150,
+        ).toBe(true);
+      }
+  });
+
+  test("normalizes one color per renderer type", () => {
+    const types = [
+      "database-rack",
+      "compute-server",
+      "webpage",
+      "cache",
+    ] as const;
+    expect(types.map(instanceColor)).toEqual([
+      "#42d9e8",
+      "#ff9d52",
+      "#b49aff",
+      "#7ee787",
+    ]);
+    expect(new Set(types.map(instanceColor)).size).toBe(4);
+  });
+
+  test("normalizes aliases regardless of declaration order", () => {
+    const ids = [
+      "compute-api",
+      "cache-primary",
+      "db-01",
+      "web-app",
+      "server-2",
+      "database.replica",
+      "frontend",
+      "rack_main",
+      "api-edge",
+      "webpage.home",
+      "cache_session",
+      "CACHE.sidecar",
+    ];
+    const expected: Record<PlacedInstance["type"], string> = {
+      "database-rack": "#42d9e8",
+      "compute-server": "#ff9d52",
+      webpage: "#b49aff",
+      cache: "#7ee787",
+    };
+    const place = (order: string[]) =>
+      layoutDesign(design(order.map((id) => ({ id })))).instances;
+    const forward = place(ids),
+      reversed = new Map(
+        place(ids.slice().reverse()).map(({ id, color }) => [id, color]),
+      );
+    expect(forward.map(({ color }) => color)).toEqual(
+      ids.map((id) => expected[inferInstanceType(id)]),
+    );
+    for (const { id, type, color } of forward) {
+      expect(color).toBe(expected[type]);
+      expect(reversed.get(id)).toBe(color);
+    }
   });
 
   test("infers types from ID prefixes and keeps unknown IDs renderable", () => {

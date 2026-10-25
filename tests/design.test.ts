@@ -4,7 +4,7 @@
  */
 import { describe, expect, test } from "vite-plus/test";
 import type { Design } from "../src/design";
-import { parseDesign } from "../src/design";
+import { examples, parseDesign } from "../src/design";
 
 /** Connected three-instance fixture, intentionally independent of the default scene. */
 const example: Design = {
@@ -228,5 +228,25 @@ describe("design imports", () => {
         `{"version":1,"name":"Bad","instances":["db-a","db-b"],"connections":[{"from":"db-a","to":"db-b","relation":"${"x".repeat(101)}"}]}`,
       ),
     ).toThrow("relation must contain");
+  });
+});
+
+describe("example catalogue", () => {
+  test("keeps every reference design valid and uniquely labelled", () => {
+    expect(examples.length).toBeGreaterThan(1);
+    expect(new Set(examples.map(({ id }) => id)).size).toBe(examples.length);
+    expect(new Set(examples.map(({ design }) => design.name)).size).toBe(
+      examples.length,
+    );
+    expect(
+      examples.some(({ design }) => design.name === "Horizontal scaling"),
+    ).toBe(true);
+    for (const { id, summary, design } of examples) {
+      expect(id.trim()).not.toBe("");
+      expect(summary.trim()).not.toBe("");
+      expect(design.instances.length).toBeGreaterThan(0);
+      expect(design.connections.length).toBeGreaterThan(0);
+      expect(parseDesign(JSON.stringify(design))).toEqual(design);
+    }
   });
 });

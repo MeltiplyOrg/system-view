@@ -512,6 +512,10 @@ export function componentHeight(type: PlacedInstance["type"]): number {
  * projects straight to the instance position. Colors become `--cable-color`
  * and are inherited by every detail.
  *
+ * Each geometry root exposes `data-renderer-type` for the shared raster cache.
+ * Static artwork sits in one `.component-static-base` group and the live
+ * `.component-label` follows it, so identity never enters cached pixels.
+ *
  * @param instance - Validated, placed instance.
  * @returns Group ready to append to the scene; no event handlers are attached.
  */
@@ -548,12 +552,18 @@ export function createComponent(instance: PlacedInstance): SVGGElement {
   }
 
   element.setAttribute("transform", `translate(${x} ${y})`);
-  element.innerHTML = `<g class="${instance.type}" aria-hidden="true">${COMPONENT_GEOMETRY[instance.type]}</g>`;
+  const geometry = document.createElementNS(NS, "g");
+  geometry.classList.add(instance.type);
+  geometry.dataset.rendererType = instance.type;
+  geometry.setAttribute("aria-hidden", "true");
+  geometry.innerHTML = `<g class="component-static-base">${COMPONENT_GEOMETRY[instance.type]}</g>`;
+  element.append(geometry);
 
   // Identity sits on the server's top rail, cache controller strip, or browser
   // active tab. Text is assigned with textContent so imported
   // names cannot inject markup; long names are condensed rather than clipped.
   const labelGroup = document.createElementNS(NS, "g");
+  labelGroup.classList.add("component-label");
   labelGroup.setAttribute(
     "transform",
     instance.type === "compute-server"
@@ -582,6 +592,6 @@ export function createComponent(instance: PlacedInstance): SVGGElement {
   }
   label.textContent = instance.label;
   labelGroup.append(label);
-  element.append(labelGroup);
+  geometry.append(labelGroup);
   return element;
 }
