@@ -1,5 +1,5 @@
 import { createDatabaseDefinitions, project } from "./database";
-import type { Design } from "./design";
+import type { Design, PlacedInstance } from "./design";
 import { layoutDesign, RACK_HALF_DEPTH, RACK_HALF_WIDTH } from "./layout";
 import type { Layout, PlacedCluster } from "./layout";
 import { createPlatforms } from "./platform";
@@ -9,6 +9,18 @@ import { routeOrthogonal } from "./routing";
 import type { RoutePoint, RouteRect } from "./routing";
 
 const NS = "http://www.w3.org/2000/svg";
+
+/**
+ * Prefix for a single instance's synthetic border key.
+ *
+ * Border keys share one namespace with declared cluster ids. The prefix keeps
+ * an instance border from ever colliding with a cluster id, and lets hover,
+ * selection, and drag strip the id back out of the key.
+ */
+const INSTANCE_KEY = "instance:";
+
+/** Prefix for a declared cluster's focus/border key. */
+const CLUSTER_KEY = "cluster:";
 
 /** One screen-space point from `project`, mutated as [x, y] pairs. */
 type ScreenPoint = [number, number];
@@ -430,25 +442,13 @@ function clusterPortStub(port: ClusterPort): RoutePoint {
   }
 }
 
-/** World-space rectangle covered by a cluster's dashed frame. */
+/** World-space rectangle covered by a node's dashed frame. */
 function clusterFrameRect(cluster: PlacedCluster): RouteRect {
   return {
     x: cluster.bounds.x - CLUSTER_FRAME_MARGIN,
     y: cluster.bounds.y - CLUSTER_FRAME_MARGIN,
     width: cluster.bounds.width + CLUSTER_FRAME_MARGIN * 2,
     height: cluster.bounds.height + CLUSTER_FRAME_MARGIN * 2,
-  };
-}
-
-/** World-space rectangle covered by one instance's platform. */
-function instanceRect(instance: {
-  position: { x: number; y: number };
-}): RouteRect {
-  return {
-    x: instance.position.x - RACK_HALF_WIDTH,
-    y: instance.position.y - RACK_HALF_DEPTH,
-    width: RACK_HALF_WIDTH * 2,
-    height: RACK_HALF_DEPTH * 2,
   };
 }
 
@@ -493,19 +493,27 @@ function createClusterLabels(clusters: readonly PlacedCluster[]): SVGGElement {
 }
 
 /**
- * Build one dashed floor frame per declared cluster.
+ * Build one dashed floor border per draggable node.
  *
- * A frame is the cluster's world-space bounds expanded by
- * `CLUSTER_FRAME_MARGIN` and projected at z=0, so it lies flat on the grid and
- * follows the isometric axes. The expanded rectangle clears the shared plinth,
- * Frames highlight in yellow when their cluster is hovered; `data-cluster-id`
- * ties each frame to its cluster members and caption.
+ * A declared cluster is one group and gets one border around all its members.
+ * Every unclustered instance is its own node and gets a border around its
+ * world-space footprint. Borders expand by `CLUSTER_FRAME_MARGIN` and project
+ * at z=0, so they lie flat on the grid and follow the isometric axes.
+ *
+ * Borders highlight in yellow when their node is hovered. `data-cluster-id`
+ * carries the border key — the declared cluster id, or `instance:<id>` for a
+ * standalone instance — tying each border to its node for hover, selection,
+ * and the anchor handle.
+ *
+ * @param frames - Cluster and standalone-instance borders, clusters first so
+ *   instance borders paint above the group outlines.
+ * @returns Non-interactive group containing every border path.
  */
-function createClusterFrames(clusters: readonly PlacedCluster[]): SVGGElement {
+function createNodeFrames(frames: Iterable<PlacedCluster>): SVGGElement {
   const group = document.createElementNS(NS, "g");
-  group.classList.add("cluster-frames");
-  for (const cluster of clusters) {
-    const { x, y, width, height } = cluster.bounds,
+  group.classList.add("node-frames");
+  for (const frame of frames) {
+    const { x, y, width, height } = frame.bounds,
       left = x - CLUSTER_FRAME_MARGIN,
       top = y - CLUSTER_FRAME_MARGIN,
       right = x + width + CLUSTER_FRAME_MARGIN,
@@ -516,10 +524,13 @@ function createClusterFrames(clusters: readonly PlacedCluster[]): SVGGElement {
         project(right, bottom, 0),
         project(left, bottom, 0),
       ];
-    const frame = document.createElementNS(NS, "path");
-    frame.classList.add("cluster-frame");
-    frame.dataset.clusterId = cluster.id;
-    frame.setAttribute(
+    const border = document.createElementNS(NS, "path");
+    border.classList.add("scene-frame");
+    border.classList.add(
+      frame.id.startsWith(INSTANCE_KEY) ? "instance-frame" : "cluster-frame",
+    );
+    border.dataset.clusterId = frame.id;
+    border.setAttribute(
       "d",
       `M${corners
         .map(([cornerX, cornerY]) =>
@@ -527,7 +538,7 @@ function createClusterFrames(clusters: readonly PlacedCluster[]): SVGGElement {
         )
         .join("L")}Z`,
     );
-    group.append(frame);
+    group.append(border);
   }
   return group;
 }
@@ -556,7 +567,7 @@ export class SystemScene {
       element: SVGGElement;
       origin: readonly [number, number];
       label: string;
-      type: string;
+      type: PlacedInstance["type"];
       /** Cached root visibility so pans only write style on state changes. */
       hidden: boolean;
     }
@@ -612,8 +623,86 @@ export class SystemScene {
   /** Pending requestAnimationFrame id for coalesced pointer updates. */
   private pointerFrame: number | null = null;
 
-  /** ID of the cluster currently hovered by the pointer, if any. */
-  private hoveredClusterId: string | null = null;
+  /**
+   * Border id currently hovered by the pointer, if any.
+   *
+   * Border ids are the `data-cluster-id` values: a declared cluster's id, or
+   * `instance:<id>` for a standalone instance.
+   */
+  private hoveredFrameId: string | null = null;
+
+  /**
+   * Dashed-border frame per draggable node.
+   *
+   * A declared cluster is one group, mapped by its cluster id; every
+   * unclustered instance is its own node, mapped as `instance:<id>` with
+   * bounds equal to its platform footprint (the drawn border expands by
+   * `CLUSTER_FRAME_MARGIN`, and `clusterPort` does the same when picking a
+   * border edge). Built fresh on every render, clusters first so instance
+   * borders paint above the group outlines.
+   *
+   * Routing uses the same set: an external cable to a cluster member attaches
+   * to the group border, and a cable to a standalone instance attaches to its
+   * own border.
+   */
+  private readonly borderFrames = new Map<string, PlacedCluster>();
+
+  /**
+   * Last design passed to `render`.
+   *
+   * The anchor drag re-renders this document with placement offsets applied,
+   * without the shell needing to know a drag is in flight.
+   */
+  private currentDesign: Design | null = null;
+
+  /**
+   * Manual placement offset per standalone instance, in world units.
+   *
+   * View-only state: the document never stores it, so the exported JSON keeps
+   * the derived layout as its single source of truth. Applied after the layout
+   * pass on every render; ids absent from the current layout are inert.
+   */
+  private readonly dragOffsets = new Map<string, { x: number; y: number }>();
+
+  /**
+   * Manual placement offset per declared cluster, in world units.
+   *
+   * A cluster is one draggable group, so its offset applies to every member.
+   * That includes replicas added after the drag: they land in their derived
+   * slot relative to the moved group instead of at the original layout
+   * position. Handed off to/from `dragOffsets` when a replica edit promotes a
+   * standalone instance into a cluster or collapses a cluster back to one.
+   */
+  private readonly clusterOffsets = new Map<string, { x: number; y: number }>();
+
+  /** Cluster id per instance id, rebuilt on every render. */
+  private readonly instanceCluster = new Map<string, string>();
+
+  /** Grab handle for the hovered node, or null when not yet built. */
+  private anchor: SVGGElement | null = null;
+
+  /**
+   * Border id the grab handle is currently hosted for.
+   *
+   * The handle is hosted on the SVG root (outside any instance group) so a
+   * dimmed node can never fade it; `updateAnchorPosition` keeps it glued to
+   * the node's middle across renders.
+   */
+  private anchorKey: string | null = null;
+
+  /** Live anchor drag, or null when the handle is idle. */
+  private anchorDrag: {
+    pointerId: number;
+    /** Pointer position in SVG user units at gesture start. */
+    start: { x: number; y: number };
+    /** Border id of the dragged node: a cluster id or `instance:<id>`. */
+    key: string;
+    /** Pre-drag offset copy for the dragged node. */
+    base: { x: number; y: number };
+  } | null = null;
+
+  /** Focus key the dim set was last computed for, to re-apply after renders. */
+  private focusKey: string | null = null;
 
   /** Projected top-center per hover target key, for the pinned callout. */
   private readonly topPoints = new Map<string, readonly [number, number]>();
@@ -758,30 +847,37 @@ export class SystemScene {
     svg.addEventListener("pointercancel", stopDragging);
     svg.addEventListener("lostpointercapture", stopDragging);
 
+    // Hover drives two coupled readouts: the border highlight and the grab
+    // handle. Both resolve the same border id, and both stand down when an
+    // anchor drag owns the pointer (capture retargets events to the handle,
+    // so hover churn mid-gesture cannot re-host or unhighlight).
+    const hoverUpdate = (element: Element | null): void => {
+      if (this.anchorDrag) return;
+      const frameId = this.frameIdOf(element);
+      this.setHoveredFrame(frameId);
+      this.hostAnchor(frameId);
+    };
     svg.addEventListener("pointerover", (event) => {
-      const target = (event.target as Element | null)?.closest?.(
-        "[data-cluster-id]",
-      );
-      this.setHoveredCluster(target?.getAttribute("data-cluster-id") ?? null);
+      hoverUpdate(event.target as Element | null);
     });
-
     svg.addEventListener("pointerout", (event) => {
-      const related = (event.relatedTarget as Element | null)?.closest?.(
-        "[data-cluster-id]",
-      );
-      this.setHoveredCluster(related?.getAttribute("data-cluster-id") ?? null);
+      hoverUpdate(event.relatedTarget as Element | null);
     });
-
-    svg.addEventListener("pointerleave", () => {
-      this.setHoveredCluster(null);
+    // Re-resolve on free moves as well. A render can replace the frame layer
+    // under a stationary pointer without firing a boundary event, and a pan
+    // captures the pointer, which suppresses over/out churn until release.
+    svg.addEventListener("pointermove", (event) => {
+      if (this.activePointers.size > 0) return;
+      hoverUpdate(event.target as Element | null);
     });
+    svg.addEventListener("pointerleave", () => hoverUpdate(null));
   }
 
   /**
    * Render geometry and reconcile keyed components without interrupting drops.
    *
    * Layout and colors are derived here rather than stored in the document.
-   * Paint order is cluster frames, platforms, cluster captions, links, then
+   * Paint order is node borders, platforms, cluster captions, links, then
    * racks back-to-front. Isometric depth is `x + y` (larger is nearer) with
    * `z` as a tie-breaker. Bounds are taken from this content only, never the
    * regenerating grid, so fit stays stable.
@@ -792,15 +888,41 @@ export class SystemScene {
    * @throws Error when a connection references a missing instance.
    */
   render(design: Design, animate = false): void {
-    this.hoveredClusterId = null;
-    const instanceCluster = new Map<string, string>();
+    this.currentDesign = design;
+    this.hoveredFrameId = null;
+    const previousCluster = new Map(this.instanceCluster);
+    this.instanceCluster.clear();
     for (const [index, cluster] of design.clusters.entries()) {
       const clusterId = cluster.id ?? `cluster-${index + 1}`;
       for (const instanceId of cluster.instances) {
-        instanceCluster.set(instanceId, clusterId);
+        this.instanceCluster.set(instanceId, clusterId);
       }
     }
+    this.reconcileOffsets(previousCluster, design);
     const layout = layoutDesign(design);
+    this.applyDragOffsets(layout);
+
+    // Every draggable node gets a border. A declared cluster is one group
+    // border around all its members; each unclustered instance gets its own.
+    // `borderFrames` insertion order puts clusters first so instance borders
+    // paint above the group outlines.
+    this.borderFrames.clear();
+    for (const cluster of layout.clusters)
+      this.borderFrames.set(cluster.id, cluster);
+    for (const instance of layout.instances) {
+      if (this.instanceCluster.has(instance.id)) continue;
+      const { x, y } = instance.position;
+      this.borderFrames.set(`${INSTANCE_KEY}${instance.id}`, {
+        id: `${INSTANCE_KEY}${instance.id}`,
+        label: instance.label,
+        bounds: {
+          x: x - RACK_HALF_WIDTH,
+          y: y - RACK_HALF_DEPTH,
+          width: RACK_HALF_WIDTH * 2,
+          height: RACK_HALF_DEPTH * 2,
+        },
+      });
+    }
 
     // Top points anchor the pinned callout above the highest member, and
     // target bounds drive the zoom-to-fit on selection.
@@ -816,7 +938,7 @@ export class SystemScene {
     for (const instance of layout.instances) {
       const { x, y, z } = instance.position,
         top = project(x, y, z + componentHeight(instance.type)),
-        key = `instance:${instance.id}`,
+        key = `${INSTANCE_KEY}${instance.id}`,
         bounds = {
           minX: Infinity,
           minY: Infinity,
@@ -838,7 +960,7 @@ export class SystemScene {
       this.targetBounds.set(key, bounds);
       this.silhouettes.set(instance.id, convexHull(corners));
 
-      const clusterId = instanceCluster.get(instance.id);
+      const clusterId = this.instanceCluster.get(instance.id);
       if (!clusterId) continue;
       const currentTop = clusterTops.get(clusterId);
       if (!currentTop || top[1] < currentTop[1])
@@ -853,22 +975,19 @@ export class SystemScene {
       }
     }
     for (const [clusterId, top] of clusterTops)
-      this.topPoints.set(`cluster:${clusterId}`, top);
+      this.topPoints.set(`${CLUSTER_KEY}${clusterId}`, top);
     for (const [clusterId, bounds] of clusterBounds)
-      this.targetBounds.set(`cluster:${clusterId}`, bounds);
+      this.targetBounds.set(`${CLUSTER_KEY}${clusterId}`, bounds);
 
     const layer = document.createElementNS(NS, "g");
     layer.append(
-      createClusterFrames(layout.clusters),
+      createNodeFrames(this.borderFrames.values()),
       createPlatforms(layout.instances),
       createClusterLabels(layout.clusters),
     );
 
     const byId = new Map(
       layout.instances.map((instance) => [instance.id, instance]),
-    );
-    const clusterById = new Map(
-      layout.clusters.map((cluster) => [cluster.id, cluster]),
     );
     // Links share one projected path when they land on the same cluster port,
     // not only when they repeat an endpoint pair. Keying the lane on the drawn
@@ -883,20 +1002,24 @@ export class SystemScene {
           `Connection ${connectionId} references an unknown instance.`,
         );
 
-      // Boundary-crossing links attach to the cluster frame, not the member
-      // rack. Internal links keep both rack endpoints so replication stays
-      // inside the group. The far endpoint's position sets the side of the
-      // frame the cable approaches from.
-      const fromCluster = instanceCluster.get(from.id),
-        toCluster = instanceCluster.get(to.id),
-        fromFrame =
-          fromCluster === undefined || fromCluster === toCluster
-            ? undefined
-            : clusterById.get(fromCluster),
-        toFrame =
-          toCluster === undefined || toCluster === fromCluster
-            ? undefined
-            : clusterById.get(toCluster),
+      // External links attach at a port on the node's border instead of
+      // burying their ends under artwork. A member of a declared cluster
+      // ports through the group border; a standalone instance ports through
+      // its own border. Internal links (replication inside a cluster) keep
+      // both rack endpoints so replication stays inside the group. The far
+      // endpoint's position sets the side of the border the cable approaches
+      // from.
+      const fromCluster = this.instanceCluster.get(from.id),
+        toCluster = this.instanceCluster.get(to.id),
+        internal = fromCluster !== undefined && fromCluster === toCluster,
+        fromFrame = internal
+          ? undefined
+          : this.borderFrames.get(
+              fromCluster ?? `${INSTANCE_KEY}${from.id}`,
+            ),
+        toFrame = internal
+          ? undefined
+          : this.borderFrames.get(toCluster ?? `${INSTANCE_KEY}${to.id}`),
         fromPort = fromFrame
           ? clusterPort(fromFrame, from.position, to.position)
           : undefined,
@@ -907,11 +1030,10 @@ export class SystemScene {
         toPoint = toPort ?? to.position;
 
       // Cables follow world X/Y axes with sharp projected corners. External
-      // routes detour around cluster frames and unclustered platforms so a
-      // cable is not hidden behind artwork for most of its length. Same-cluster
-      // replication stays rack-to-rack, with the existing parallel lane for a
-      // member skipped in the same row.
-      const internal = fromCluster !== undefined && fromCluster === toCluster;
+      // routes detour around node borders so a cable is not hidden behind
+      // artwork for most of its length. Same-cluster replication stays
+      // rack-to-rack, with the existing parallel lane for a member skipped in
+      // the same row.
       let worldPath: RoutePoint[];
       if (internal) {
         const crossesInstance =
@@ -937,19 +1059,24 @@ export class SystemScene {
         // perpendicular to the border while the router works in open space.
         const fromAnchor = fromPort ? clusterPortStub(fromPort) : fromPoint,
           toAnchor = toPort ? clusterPortStub(toPort) : toPoint;
-        // Clustered racks are covered by their frame; unclustered platform
-        // footprints stay obstacles so a cable cannot disappear under a
-        // standalone cache or database.
+        // Cluster borders and standalone node borders are obstacles — the
+        // link's own endpoints are excluded because their port stubs already
+        // start outside the border. Member borders inside a cluster are not
+        // obstacles: external cables approach the group border, not the rack.
         const obstacles: RouteRect[] = [
           ...layout.clusters.map(clusterFrameRect),
           ...layout.instances
             .filter(
               (instance) =>
-                !instanceCluster.has(instance.id) &&
+                !this.instanceCluster.has(instance.id) &&
                 instance.id !== from.id &&
                 instance.id !== to.id,
             )
-            .map(instanceRect),
+            .map((instance) =>
+              clusterFrameRect(
+                this.borderFrames.get(`${INSTANCE_KEY}${instance.id}`)!,
+              ),
+            ),
         ];
         const route = routeOrthogonal(fromAnchor, toAnchor, obstacles);
         worldPath = [
@@ -1003,10 +1130,12 @@ export class SystemScene {
       if (fromCluster && fromCluster === toCluster) {
         group.dataset.clusterId = fromCluster;
       }
-      // Ported endpoints are observable without re-deriving geometry in tests
-      // and debugging; internal links only carry the shared cluster id above.
-      if (fromFrame) group.dataset.fromCluster = fromFrame.id;
-      if (toFrame) group.dataset.toCluster = toFrame.id;
+      // Ported endpoints on declared clusters are observable without
+      // re-deriving geometry in tests and debugging; synthetic single-node
+      // borders keep their diagnostics off so cluster link counting stays
+      // about clusters. Internal links only carry the shared cluster id above.
+      if (fromCluster && fromFrame) group.dataset.fromCluster = fromFrame.id;
+      if (toCluster && toFrame) group.dataset.toCluster = toFrame.id;
       layer.append(group);
     }
 
@@ -1072,7 +1201,7 @@ export class SystemScene {
         "transform",
         `translate(${position[0] - record.origin[0]} ${position[1] - record.origin[1]})`,
       );
-      const clusterId = instanceCluster.get(instance.id);
+      const clusterId = this.instanceCluster.get(instance.id);
       if (clusterId) record.element.dataset.clusterId = clusterId;
       else delete record.element.dataset.clusterId;
       record.element.style.setProperty("--cable-color", instance.color);
@@ -1087,7 +1216,14 @@ export class SystemScene {
     for (let index = orderedRoots.length - 1; index >= 0; index--) {
       const root = orderedRoots[index];
       if (!root.isConnected) this.content.insertBefore(root, next);
-      else if (root.nextSibling !== next) this.content.moveBefore(root, next);
+      else if (root.nextSibling !== next) {
+        // `moveBefore` preserves a live drop animation; older browsers fall
+        // back to a regular move, which may restart that animation but keeps
+        // the drag alive instead of throwing mid-gesture.
+        if (typeof this.content.moveBefore === "function")
+          this.content.moveBefore(root, next);
+        else this.content.insertBefore(root, next);
+      }
       next = root;
     }
     const extent = contentExtent(layout),
@@ -1123,16 +1259,49 @@ export class SystemScene {
     this.componentRaster.setScale(
       (this.viewport.width * this.zoom) / this.base.width,
     );
+    // A manual move can change which nodes cover the focused target's wires;
+    // re-derive the dim set so it tracks the dragged layout.
+    if (this.focusKey) this.setFocus(this.focusKey);
+    // The grab handle is hosted on the SVG root, outside the replaced frame
+    // layer and reordered roots, so it survives this render and keeps pointer
+    // capture. Re-seat it on the new geometry and restore the hover border
+    // that the replaced frame layer lost.
+    if (this.anchorKey) {
+      this.updateAnchorPosition();
+      this.setHoveredFrame(this.anchorKey);
+    }
   }
 
-  /** Highlight the frame of the hovered cluster. */
-  private setHoveredCluster(clusterId: string | null): void {
-    if (this.hoveredClusterId === clusterId) return;
-    this.hoveredClusterId = clusterId;
+  /**
+   * Resolve the hovered element's border id.
+   *
+   * A rack inside a declared cluster resolves to the cluster: the cluster is
+   * one draggable group, so the whole group highlights and moves together. A
+   * standalone instance resolves to its own `instance:<id>` border. Borders
+   * and clustered racks carry `data-cluster-id`; the grab handle itself
+   * resolves to its hosted border so entering the badge never detaches it.
+   *
+   * @param target - Event target (or related target) under the pointer.
+   * @returns The border id, or null when the pointer is over nothing framed.
+   */
+  private frameIdOf(target: Element | null): string | null {
+    if (target?.closest?.(".drag-anchor")) return this.anchorKey;
+    const framed = target?.closest?.("[data-cluster-id]");
+    if (framed) return framed.getAttribute("data-cluster-id");
+    const instance = target
+      ?.closest?.(".scene-instance")
+      ?.getAttribute("data-instance-id");
+    return instance ? `${INSTANCE_KEY}${instance}` : null;
+  }
+
+  /** Highlight the border of the hovered instance or declared cluster. */
+  private setHoveredFrame(frameId: string | null): void {
+    if (this.hoveredFrameId === frameId) return;
+    this.hoveredFrameId = frameId;
     const frames =
-      this.content.querySelectorAll<SVGPathElement>(".cluster-frame");
+      this.content.querySelectorAll<SVGPathElement>(".scene-frame");
     for (const frame of frames) {
-      frame.classList.toggle("hovered", frame.dataset.clusterId === clusterId);
+      frame.classList.toggle("hovered", frame.dataset.clusterId === frameId);
     }
   }
 
@@ -1154,6 +1323,7 @@ export class SystemScene {
    *   null to restore the undimmed scene.
    */
   setFocus(key: string | null): void {
+    this.focusKey = key;
     const dimmed = this.focusCoveredIds(key);
     this.svg.classList.toggle("focus-dim", dimmed.size > 0);
     for (const element of this.content.querySelectorAll<SVGGElement>(
@@ -1182,8 +1352,12 @@ export class SystemScene {
   private focusCoveredIds(key: string | null): Set<string> {
     const covered = new Set<string>();
     if (!key) return covered;
-    const instanceId = key.startsWith("instance:") ? key.slice(9) : null,
-      clusterId = key.startsWith("cluster:") ? key.slice(8) : null;
+    const instanceId = key.startsWith(INSTANCE_KEY)
+        ? key.slice(INSTANCE_KEY.length)
+        : null,
+      clusterId = key.startsWith(CLUSTER_KEY)
+        ? key.slice(CLUSTER_KEY.length)
+        : null;
     const members = new Set<string>();
     for (const element of this.content.querySelectorAll<SVGGElement>(
       ".scene-instance",
@@ -1218,6 +1392,284 @@ export class SystemScene {
       }
     }
     return covered;
+  }
+
+  /**
+   * Forget all manual placement offsets.
+   *
+   * Called when a different design is applied: offsets belong to one scene's
+   * instance and cluster ids and must not leak into another document, whose
+   * ids can repeat with different meaning. Replica edits keep the arrangement,
+   * so they do not call this. The next `render` draws the derived layout
+   * again.
+   */
+  clearOffsets(): void {
+    this.dragOffsets.clear();
+    this.clusterOffsets.clear();
+  }
+
+  /**
+   * Hand manual offsets over when a replica edit changes what owns them.
+   *
+   * Dragging stores one offset per logical node: a cluster id for a group, or
+   * an instance id for a standalone instance. `resizeReplicas` can promote a
+   * standalone instance into a new cluster or collapse a cluster back to one
+   * instance. Without this hand-off the promoted member would snap back to
+   * the derived layout (and the new replica would appear at the original
+   * slot), or the survivor would snap back after reducing to one.
+   *
+   * Runs after `instanceCluster` is rebuilt for the new design and before
+   * `applyDragOffsets`. An existing group offset is kept, so adding a replica
+   * to a moved cluster places it in its derived slot relative to the group.
+   *
+   * @param previousCluster - Instance-to-cluster map from the previous render.
+   * @param design - New document, used to distinguish a surviving instance
+   *   from one that was removed.
+   */
+  private reconcileOffsets(
+    previousCluster: ReadonlyMap<string, string>,
+    design: Design,
+  ): void {
+    const liveClusters = new Set(this.instanceCluster.values());
+    // Standalone -> cluster: hand the instance's offset to the new group so
+    // every member, including replicas added in the same edit, starts there.
+    for (const clusterId of liveClusters) {
+      if (this.clusterOffsets.has(clusterId)) continue;
+      for (const [instanceId, owner] of this.instanceCluster) {
+        if (owner !== clusterId) continue;
+        const offset = this.dragOffsets.get(instanceId);
+        if (!offset) continue;
+        this.clusterOffsets.set(clusterId, { ...offset });
+        break;
+      }
+    }
+    // A grouped instance is positioned by its group offset; a per-instance
+    // entry would be stale and could fight the group after a later collapse.
+    for (const instanceId of this.instanceCluster.keys())
+      this.dragOffsets.delete(instanceId);
+    // Cluster -> standalone: the surviving member inherits the group offset
+    // so reducing to one replica does not jump back to the derived layout.
+    const liveInstances = new Set(
+      design.instances.map((instance) => instance.id),
+    );
+    for (const [instanceId, clusterId] of previousCluster) {
+      if (
+        this.instanceCluster.has(instanceId) ||
+        !liveInstances.has(instanceId)
+      )
+        continue;
+      const offset = this.clusterOffsets.get(clusterId);
+      if (offset) this.dragOffsets.set(instanceId, { ...offset });
+    }
+    // A removed cluster's offset must not leak into a future cluster that
+    // happens to reuse the derived id.
+    for (const clusterId of this.clusterOffsets.keys())
+      if (!liveClusters.has(clusterId)) this.clusterOffsets.delete(clusterId);
+  }
+
+  /**
+   * Shift placed instances by their manual drag offsets.
+   *
+   * Runs after the layout pass and before any geometry is derived, so
+   * platforms, wires, routes, silhouettes, and target bounds all see the
+   * moved positions. A cluster offset moves every member uniformly, which
+   * also places replicas added after the drag in the correct slot relative
+   * to the group; a standalone offset moves only its instance. Cluster bounds
+   * are rebuilt from the member footprints so a dragged group keeps its
+   * dashed frame and caption around the moved racks; for untouched clusters
+   * that reconstruction equals the layout pass's own formula. Skipped
+   * entirely while no offsets exist, keeping undragged scenes on the pure
+   * derived path.
+   *
+   * @param layout - Layout output to mutate in place.
+   */
+  private applyDragOffsets(layout: Layout): void {
+    if (this.dragOffsets.size === 0 && this.clusterOffsets.size === 0) return;
+    for (const instance of layout.instances) {
+      const clusterId = this.instanceCluster.get(instance.id),
+        offset = clusterId
+          ? this.clusterOffsets.get(clusterId)
+          : this.dragOffsets.get(instance.id);
+      if (!offset) continue;
+      instance.position.x += offset.x;
+      instance.position.y += offset.y;
+    }
+    const boxes = new Map<
+      string,
+      { minX: number; minY: number; maxX: number; maxY: number }
+    >();
+    for (const instance of layout.instances) {
+      const clusterId = this.instanceCluster.get(instance.id);
+      if (!clusterId) continue;
+      const { x, y } = instance.position;
+      const box = boxes.get(clusterId);
+      if (!box)
+        boxes.set(clusterId, { minX: x, minY: y, maxX: x, maxY: y });
+      else {
+        box.minX = Math.min(box.minX, x);
+        box.maxX = Math.max(box.maxX, x);
+        box.minY = Math.min(box.minY, y);
+        box.maxY = Math.max(box.maxY, y);
+      }
+    }
+    for (const cluster of layout.clusters) {
+      const box = boxes.get(cluster.id);
+      if (!box) continue;
+      cluster.bounds = {
+        x: box.minX - RACK_HALF_WIDTH,
+        y: box.minY - RACK_HALF_DEPTH,
+        width: box.maxX - box.minX + RACK_HALF_WIDTH * 2,
+        height: box.maxY - box.minY + RACK_HALF_DEPTH * 2,
+      };
+    }
+  }
+
+  /**
+   * Show the grab handle for a node, or detach it.
+   *
+   * The handle is a single reused element hosted directly on the SVG root,
+   * after the scene content, so replacing the frame layer or reordering
+   * instance roots can never detach it or interrupt pointer capture.
+   * `updateAnchorPosition` keeps it glued to the node's middle. Because it
+   * lives outside the instance groups, a focus-dimmed node can never fade it,
+   * and painter reordering can never bury it.
+   *
+   * @param frameId - Border id of the hovered node (`instance:<id>` for a
+   *   standalone instance, the cluster id for a declared cluster), or null
+   *   to detach.
+   */
+  private hostAnchor(frameId: string | null): void {
+    if (this.anchorKey === frameId) return;
+    this.anchorKey = frameId;
+    if (!frameId) {
+      this.anchor?.remove();
+      return;
+    }
+    if (!this.anchor) this.anchor = this.buildAnchor();
+    this.svg.append(this.anchor);
+    this.updateAnchorPosition();
+  }
+
+  /**
+   * Pin the grab handle to the middle of its node.
+   *
+   * The middle is the center of the node's screen-space bounding box (racks
+   * included for clusters, artwork height included for single instances), so
+   * the badge lands on open ground between rows for wide clusters and at
+   * mid-height beside a single rack. Reads the bounds derived by the latest
+   * render; a node that no longer exists detaches the handle, which is how
+   * applying a new design cleans up a stale hover.
+   */
+  private updateAnchorPosition(): void {
+    if (!this.anchor || !this.anchorKey) return;
+    const bounds = this.targetBounds.get(
+      this.anchorKey.startsWith(INSTANCE_KEY)
+        ? this.anchorKey
+        : `${CLUSTER_KEY}${this.anchorKey}`,
+    );
+    if (!bounds) {
+      this.anchorKey = null;
+      this.anchor.remove();
+      return;
+    }
+    this.anchor.setAttribute(
+      "transform",
+      `translate(${((bounds.minX + bounds.maxX) / 2).toFixed(1)} ${(
+        (bounds.minY + bounds.maxY) / 2
+      ).toFixed(1)})`,
+    );
+  }
+
+  /**
+   * Build the anchor grab handle with its drag gesture wired.
+   *
+   * The badge and anchor glyph are pure static markup; the invisible hit
+   * circle roughly triples the grab area beyond the visible badge. Pointerdown
+   * stops propagation so the scene's pan/select path never sees the gesture
+   * (the SVG would otherwise capture the pointer and retarget every later
+   * event away from the handle), and the handle takes its own capture so
+   * the drag survives leaving the SVG. Movement is converted from client
+   * pixels to SVG user units, then inverted through the ground-plane
+   * projection so the node follows the cursor exactly; the whole scene
+   * re-renders per move, which keeps wires re-routed around the dragged
+   * node and cluster frames wrapped around moved members.
+   *
+   * @returns The handle element; listeners are attached once at creation.
+   */
+  private buildAnchor(): SVGGElement {
+    const anchor = document.createElementNS(NS, "g");
+    anchor.classList.add("drag-anchor");
+    anchor.setAttribute("role", "button");
+    anchor.setAttribute("aria-label", "Drag to reposition the node");
+    anchor.innerHTML = `<circle class="anchor-badge" r="13"/><g class="anchor-glyph"><circle cx="0" cy="-5.4" r="2"/><path d="M0 -3.4V6.6M-4.4 -1.6H4.4M-6 2.4Q-6 7 0 7Q6 7 6 2.4"/><path d="M-7.6 1L-6 3.4L-4.4 1M7.6 1L6 3.4L4.4 1"/></g><circle class="anchor-hit" r="22"/>`;
+
+    anchor.addEventListener("pointerdown", (event) => {
+      if (event.button !== 0 || !this.currentDesign || !this.anchorKey) return;
+      event.preventDefault();
+      event.stopPropagation();
+      const start = this.clientToUser(event.clientX, event.clientY);
+      if (!start) return;
+      // The hovered node is one draggable unit: an instance moves alone, a
+      // declared cluster moves every member together, keeping the group's
+      // internal layout intact. Store the offset on the unit, not on each
+      // member, so replicas added later inherit the group's position.
+      const key = this.anchorKey,
+        isInstance = key.startsWith(INSTANCE_KEY),
+        ids = isInstance
+          ? [key.slice(INSTANCE_KEY.length)]
+          : [...this.instanceCluster]
+              .filter(([, cluster]) => cluster === key)
+              .map(([instance]) => instance);
+      if (ids.length === 0) return;
+      const base = isInstance
+        ? (this.dragOffsets.get(ids[0]) ?? { x: 0, y: 0 })
+        : (this.clusterOffsets.get(key) ?? { x: 0, y: 0 });
+      this.anchorDrag = {
+        pointerId: event.pointerId,
+        start,
+        key,
+        base: { ...base },
+      };
+      anchor.setPointerCapture(event.pointerId);
+      anchor.classList.add("dragging");
+    });
+
+    anchor.addEventListener("pointermove", (event) => {
+      const drag = this.anchorDrag;
+      if (!drag || drag.pointerId !== event.pointerId || !this.currentDesign)
+        return;
+      const now = this.clientToUser(event.clientX, event.clientY);
+      if (!now) return;
+      // Ground-plane inverse of `project`: screen right is +x/−y and screen
+      // down is +x/+y in world space, so solving the 2×2 system makes the
+      // node track the cursor one-to-one.
+      const cos = Math.cos(Math.PI / 6),
+        across = (now.x - drag.start.x) / (2 * cos),
+        down = now.y - drag.start.y,
+        offset = {
+          x: drag.base.x + across + down,
+          y: drag.base.y + down - across,
+        };
+      if (drag.key.startsWith(INSTANCE_KEY))
+        this.dragOffsets.set(drag.key.slice(INSTANCE_KEY.length), offset);
+      else this.clusterOffsets.set(drag.key, offset);
+      this.render(this.currentDesign, true);
+    });
+
+    const endDrag = (event: PointerEvent): void => {
+      const drag = this.anchorDrag;
+      if (!drag || drag.pointerId !== event.pointerId) return;
+      this.anchorDrag = null;
+      anchor.classList.remove("dragging");
+      if (anchor.hasPointerCapture(event.pointerId))
+        anchor.releasePointerCapture(event.pointerId);
+    };
+    anchor.addEventListener("pointerup", endDrag);
+    anchor.addEventListener("pointercancel", endDrag);
+    // Capture can disappear if the browser revokes it; end the gesture so
+    // hover resolution and the next drag are not stuck behind `anchorDrag`.
+    anchor.addEventListener("lostpointercapture", endDrag);
+    return anchor;
   }
 
   /**
@@ -1684,7 +2136,7 @@ export class SystemScene {
       right = maxX + INSTANCE_CULL_MARGIN,
       bottom = maxY + INSTANCE_CULL_MARGIN;
     for (const [id, record] of this.renderedInstances) {
-      const bounds = this.targetBounds.get(`instance:${id}`),
+      const bounds = this.targetBounds.get(`${INSTANCE_KEY}${id}`),
         // Missing bounds only happens before the first layout; stay visible.
         hidden =
           bounds !== undefined &&
