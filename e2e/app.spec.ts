@@ -1032,7 +1032,51 @@ test.describe("provider skin transition", () => {
       "data-renderer-provider",
       "redis",
     );
-    await expect(cache.locator('svg[viewBox="0 0 256 220"]')).toHaveCount(1);
+  });
+
+  test("keeps a cluster-wide swap on the whole-skin path", async ({ page }) => {
+    await page.goto("/");
+    const cache = page.locator(
+      '.scene-instance[data-instance-id="cache-server"]',
+    );
+    const box = await cache.boundingBox();
+    if (!box) throw new Error("Cache instance not laid out.");
+    await page.mouse.click(box.x + box.width * 0.35, box.y + box.height * 0.78);
+    await expect(page.locator("#detail-title")).toHaveText("Cache server");
+    await page.locator("#replica-increase").evaluate((button) => {
+      for (let index = 0; index < 9; index++)
+        (button as HTMLButtonElement).click();
+    });
+    await expect(page.locator(".scene-instance")).toHaveCount(13);
+
+    const started = await page.evaluate(() => {
+      const select =
+        document.querySelector<HTMLSelectElement>("#detail-provider")!;
+      select.value = "";
+      select.dispatchEvent(new Event("change", { bubbles: true }));
+      return {
+        parts: document.querySelectorAll(".skin-part").length,
+        ghosts: document.querySelectorAll(".skin-ghost").length,
+        morphing: document.querySelectorAll("[data-skin-morph]").length,
+        caches: document.querySelectorAll(
+          '.scene-instance[data-instance-id^="cache-server"]',
+        ).length,
+      };
+    });
+    // Ten simultaneous skins stay on the whole-object cross-fade: no part
+    // wrappers, one ghost each, and every incoming skin skips raster work
+    // until its rebuild settles.
+    expect(started).toEqual({
+      parts: 0,
+      ghosts: 10,
+      morphing: 10,
+      caches: 10,
+    });
+    await expect(page.locator(".skin-ghost")).toHaveCount(0);
+    await expect(page.locator(".skin-part")).toHaveCount(0);
+    await expect(page.locator("[data-skin-morph]")).toHaveCount(0);
+    await expect(page.locator('[data-renderer-type="cache"]')).toHaveCount(10);
+    await expect(page.locator("#detail-provider")).toHaveValue("");
   });
 });
 

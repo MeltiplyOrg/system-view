@@ -1271,6 +1271,14 @@ aside.detail.open {
 .skin-ghost .component-motion {
   display: none;
 }
+/*
+ * An incoming skin keeps its live detail layer, but the LEDs and packets stay
+ * paused while artwork parts are moving. Resuming them after the rebuild
+ * avoids a second set of per-frame compositor updates on top of the morph.
+ */
+[data-skin-morph] :is(.component-motion, .component-motion *) {
+  animation-play-state: paused;
+}
 @keyframes instance-drop {
   0% {
     transform: translateY(-100px);
