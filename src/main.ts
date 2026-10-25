@@ -1,6 +1,6 @@
 import "./style.css";
 import type { Design } from "./design";
-import { example, parseDesign } from "./design";
+import { example, parseDesign, webAppExample } from "./design";
 import { instanceColor } from "./layout";
 import { SystemScene } from "./scene";
 
@@ -30,13 +30,14 @@ const app = mustQuery<HTMLDivElement>("#app");
 app.innerHTML = `
   <main class="stage">
     <svg id="scene" xmlns="http://www.w3.org/2000/svg" role="img" aria-labelledby="scene-description" preserveAspectRatio="xMidYMid meet">
-      <desc id="scene-description">Isometric grid with three database instances in a cluster and animated connections. Pinch or scroll to zoom, drag to move, or open Design to edit the JSON and switch themes.</desc>
+      <desc id="scene-description">Isometric system diagram with linked components. Pinch or scroll to zoom, drag to move, or open Design to edit JSON and load examples. Select a component to inspect its connections.</desc>
     </svg>
     <div id="callout" class="callout" aria-hidden="true">
       <div class="callout-card">
         <span class="callout-kind"></span>
         <span class="callout-name"></span>
         <span class="callout-meta"></span>
+        <div class="callout-description" hidden></div>
       </div>
     </div>
     <aside id="detail" class="detail" aria-labelledby="detail-title" aria-hidden="true">
@@ -97,6 +98,12 @@ app.innerHTML = `
         </section>
 
         <section class="section">
+          <div class="section-label">Examples</div>
+          <button id="web-app" class="btn" type="button">Load web app</button>
+          <p class="view-hint">Frontend → Backend API → Cache / Database</p>
+        </section>
+
+        <section class="section">
           <div class="section-label"><span>JSON design</span><span class="hint">⌘↵ apply</span></div>
           <label class="sr-only" for="source">System design JSON</label>
           <textarea id="source" spellcheck="false" autocapitalize="off" autocomplete="off" aria-describedby="message"></textarea>
@@ -109,8 +116,8 @@ app.innerHTML = `
 
         <section class="section schema-note">
           <div class="section-label">Dynamic design</div>
-          <code>instances: [{ id, label? }]<br>connections: [{ from, to, relation? }]<br>clusters: [{ label?, instances }]</code>
-          <p>The ID prefix picks the type (db-…). Positions and distinct colors are generated; each cluster member keeps its own platform.</p>
+          <code>instances: [{ id, label?, description? }]<br>connections: [{ from, to, relation? }]<br>clusters: [{ label?, description?, instances }]</code>
+          <p>ID prefixes pick the visual: db- for databases, compute- or server- for backend servers, web- for frontend pages, cache- for in-memory caches. Connect IDs with from/to and describe traffic with relation. Positions and colors are generated; cluster members keep separate platforms.</p>
         </section>
       </div>
       <footer class="sidebar-footer">
@@ -135,6 +142,9 @@ const calloutCard = mustQuery<HTMLElement>("#callout .callout-card");
 const calloutKind = mustQuery<HTMLElement>("#callout .callout-kind");
 const calloutName = mustQuery<HTMLElement>("#callout .callout-name");
 const calloutMeta = mustQuery<HTMLElement>("#callout .callout-meta");
+const calloutDescription = mustQuery<HTMLElement>(
+  "#callout .callout-description",
+);
 
 const detail = mustQuery<HTMLElement>("#detail");
 const detailKind = mustQuery<HTMLElement>("#detail-kind");
@@ -161,6 +171,8 @@ let selectedAnchor: Element | null = null;
 
 /** Card size cached per content change, so pointer moves never read layout. */
 let tipSize = { width: 0, height: 0 };
+/** Replica identity changes descriptions without restarting cluster animation. */
+let tipInstanceId: string | null = null;
 
 /** Preferred card offset from the anchor: above and slightly right. */
 const CALLOUT_OFFSET_X = 41.6;
@@ -200,13 +212,18 @@ function targetIds(anchor: Element | null): TargetIds | null {
 /** Member racks of a target; a standalone instance is its own member. */
 function targetMembers(ids: TargetIds, anchor: Element): SVGGElement[] {
   if (!ids.clusterId) return [anchor as SVGGElement];
-  return [...sceneSvg.querySelectorAll<SVGGElement>(".database-rack")].filter(
+  return [...sceneSvg.querySelectorAll<SVGGElement>(".scene-instance")].filter(
     (rack) => rack.dataset.clusterId === ids.clusterId,
   );
 }
 
 /** Fill the callout with the target summary and cache the card size. */
-function fillCallout(ids: TargetIds, members: SVGGElement[]): void {
+function fillCallout(
+  ids: TargetIds,
+  members: SVGGElement[],
+  restart = true,
+): void {
+  tipInstanceId = ids.instanceId;
   calloutKind.textContent = ids.clusterId ? "Cluster" : "Instance";
   calloutName.textContent = ids.clusterId
     ? (clusterLabel(ids.clusterId) ?? ids.clusterId)
@@ -215,11 +232,25 @@ function fillCallout(ids: TargetIds, members: SVGGElement[]): void {
   calloutMeta.textContent = ids.clusterId
     ? `${members.length} replica${members.length === 1 ? "" : "s"}`
     : ids.instanceId;
+  // Group descriptions take precedence; a replica can supply its own when the
+  // group has none. Frame/caption hovers only have the group's description.
+  const groupDescription = ids.clusterId
+    ? current.clusters.find(
+        (cluster, index) =>
+          (cluster.id ?? `cluster-${index + 1}`) === ids.clusterId,
+      )?.description
+    : undefined;
+  const description =
+    groupDescription ??
+    current.instances.find((instance) => instance.id === ids.instanceId)
+      ?.description;
+  calloutDescription.textContent = description ?? "";
+  calloutDescription.hidden = description === undefined;
   tipSize = {
     width: calloutCard.offsetWidth,
     height: calloutCard.offsetHeight,
   };
-  callout.classList.remove("visible");
+  if (restart) callout.classList.remove("visible");
 }
 
 /** Reveal the callout, replaying the entry animation only when hidden. */
@@ -308,14 +339,15 @@ function showCallout(
     hideCallout();
     return;
   }
-  if (ids.key !== tipKey) {
+  if (ids.key !== tipKey || ids.instanceId !== tipInstanceId) {
+    const restart = ids.key !== tipKey;
     const members = targetMembers(ids, anchor);
     if (members.length === 0) {
       hideCallout();
       return;
     }
     tipKey = ids.key;
-    fillCallout(ids, members);
+    fillCallout(ids, members, restart);
   }
   positionCallout(point);
   revealCallout();
@@ -596,6 +628,9 @@ source.addEventListener("keydown", (event) => {
 
 mustQuery<HTMLButtonElement>("#reset").addEventListener("click", () =>
   apply(example),
+);
+mustQuery<HTMLButtonElement>("#web-app").addEventListener("click", () =>
+  apply(webAppExample),
 );
 
 const file = mustQuery<HTMLInputElement>("#file");

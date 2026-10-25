@@ -3,11 +3,11 @@
  * L-shapes, elevation separation), not only that a path string was emitted.
  */
 import { expect, test } from "vite-plus/test";
-import type { DatabaseInstance } from "../src/design";
+import type { PlacedInstance } from "../src/design";
 import { mergePlatformFootprints } from "../src/platform";
 
 /** Minimal validated instance with a centered 288 × 150 foot. */
-function rack(id: string, x: number, y: number, z = 0): DatabaseInstance {
+function rack(id: string, x: number, y: number, z = 0): PlacedInstance {
   return {
     id,
     type: "database-rack",
@@ -70,7 +70,7 @@ test("an L-shaped group keeps the empty corner and removes shared interior edges
 });
 
 test("a ring retains its hole instead of covering the empty center", () => {
-  const instances: DatabaseInstance[] = [];
+  const instances: PlacedInstance[] = [];
   for (let x = 0; x < 3; x++)
     for (let y = 0; y < 3; y++)
       if (x !== 1 || y !== 1)

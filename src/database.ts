@@ -1,4 +1,4 @@
-import type { DatabaseInstance } from "./design";
+import type { PlacedInstance } from "./design";
 
 const NS = "http://www.w3.org/2000/svg";
 
@@ -408,7 +408,7 @@ export class DatabaseRack {
    *
    * @throws Error indirectly if the DOM or shared defs are unavailable.
    */
-  constructor(instance: DatabaseInstance) {
+  constructor(instance: PlacedInstance) {
     this.element.classList.add("database-rack");
     this.element.dataset.instanceId = instance.id;
     this.element.style.setProperty("--cable-color", instance.color);

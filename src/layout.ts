@@ -1,9 +1,4 @@
-import type {
-  Cluster,
-  DatabaseInstance,
-  Design,
-  DesignInstance,
-} from "./design";
+import type { Cluster, PlacedInstance, Design, DesignInstance } from "./design";
 
 /** One group of instances that shares a platform and column. */
 interface LayoutGroup {
@@ -31,7 +26,7 @@ export interface PlacedCluster {
 
 /** Render-ready output of the automatic layout pass. */
 export interface Layout {
-  instances: DatabaseInstance[];
+  instances: PlacedInstance[];
   clusters: PlacedCluster[];
 }
 
@@ -107,25 +102,31 @@ export function instanceColor(index: number): string {
   return COLORS[index % COLORS.length];
 }
 
-/** Prefixes that identify a database rack from its ID. */
-const INSTANCE_TYPES: Readonly<Record<string, DatabaseInstance["type"]>> = {
+/** Renderer prefixes; unknown IDs retain the original database visual. */
+const INSTANCE_TYPES: Readonly<Record<string, PlacedInstance["type"]>> = {
   db: "database-rack",
   database: "database-rack",
   rack: "database-rack",
+  compute: "compute-server",
+  server: "compute-server",
+  api: "compute-server",
+  web: "webpage",
+  webpage: "webpage",
+  frontend: "webpage",
+  cache: "cache",
 };
 
 /**
  * Infer the renderer type from an ID's leading word.
  *
- * IDs such as `db-01`, `database_primary`, and `rack.main` resolve through the
- * registry. Unknown prefixes fall back to the only renderer implemented today
- * so arbitrary user IDs remain valid; adding a renderer means adding its
- * prefixes here and widening `DatabaseInstance["type"]`.
+ * Database, compute/server/api, web/webpage/frontend, and cache prefixes
+ * select distinct visuals. Unknown prefixes retain the database fallback so
+ * existing documents with arbitrary IDs keep their appearance.
  *
  * @param id - Validated instance ID.
  * @returns The type whose renderer should draw the instance.
  */
-export function inferInstanceType(id: string): DatabaseInstance["type"] {
+export function inferInstanceType(id: string): PlacedInstance["type"] {
   const prefix = /^[a-z]+/i.exec(id)?.[0].toLowerCase();
   return prefix && INSTANCE_TYPES[prefix]
     ? INSTANCE_TYPES[prefix]
@@ -209,7 +210,7 @@ export function layoutDesign(design: Design): Layout {
       { instance, index },
     ]),
   );
-  const placed: DatabaseInstance[] = [];
+  const placed: PlacedInstance[] = [];
   const clusters: PlacedCluster[] = [];
 
   for (const [groupIndex, group] of layoutGroups(design).entries()) {

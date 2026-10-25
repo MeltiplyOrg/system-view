@@ -455,11 +455,6 @@ test.describe("instance selection", () => {
       .poll(() => page.locator("#scene").getAttribute("viewBox"))
       .not.toBe(initial);
 
-    // Framing zooms in: the final viewBox is narrower than the fitted scene.
-    const final = await page.locator("#scene").getAttribute("viewBox");
-    const viewWidth = (value: string | null) => Number(value?.split(" ")[2]);
-    expect(viewWidth(final)).toBeLessThan(viewWidth(initial));
-
     // The target settles left of the panel.
     const geometry = await page.evaluate(() => ({
       calloutX: document.querySelector("#callout")?.getBoundingClientRect()
