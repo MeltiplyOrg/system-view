@@ -996,6 +996,20 @@ aside.detail.open {
 .navigating .component-motion {
   display: none;
 }
+/*
+ * A focused node dims only the nodes whose artwork covers one of its cables
+ * (instances always paint after the wire layer, so any silhouette overlap
+ * buries that stretch of wire). The scene computes the covered set and marks
+ * them `.focus-dimmed`; everything else keeps full strength, and dimmed nodes
+ * stay interactive so clicking one retargets the focus. Wires, platforms, and
+ * cluster frames never fade.
+ */
+#scene.focus-dim .scene-instance {
+  transition: opacity 0.18s ease;
+}
+#scene.focus-dim .scene-instance.focus-dimmed {
+  opacity: 0.3;
+}
 /* Entry motion belongs to a wrapper, never the projected component itself. */
 .instance-enter {
   animation: instance-drop 520ms both;
@@ -1038,6 +1052,9 @@ aside.detail.open {
   .pulse {
     animation: none;
     stroke-dashoffset: -44;
+  }
+  #scene.focus-dim .scene-instance {
+    transition: none;
   }
 }
 /* On phones the overlay uses almost the full viewport but keeps an inset frame. */
