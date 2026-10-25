@@ -4,8 +4,11 @@ import type { Design } from "./design";
  * Resize the logical target containing instanceId to 1–10 members without
  * mutating the applied document. Keep the first member as the stable endpoint;
  * removed members' external links move there, while self/duplicate links drop.
- * New members share presentation, not invented network connections. Explicit
- * cluster IDs preserve other selections when a cluster declaration disappears.
+ * New members share presentation, not invented network connections. The new
+ * cluster is appended after declared clusters, which is the trailing column a
+ * standalone instance already occupied, so existing links keep their flow.
+ * Explicit cluster IDs preserve other selections when a cluster declaration
+ * disappears.
  */
 export function resizeReplicas(
   design: Design,
