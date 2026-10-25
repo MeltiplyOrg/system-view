@@ -41,14 +41,24 @@ describe("Database Rack geometry", () => {
   test("creates a colored rack with shared layers, cables, and an identity plate", () => {
     const rack = new DatabaseRack(placed);
     expect(rack.element.classList.contains("database-rack")).toBe(true);
+    expect(rack.element.dataset.rendererType).toBe("database-rack");
     expect(rack.element.dataset.instanceId).toBe("db-01");
-    expect(rack.element.style.getPropertyValue("--cable-color")).toBe(
-      "#ff9d52",
-    );
+    const base = rack.element.querySelector(".rack-static-base");
+    expect(base?.classList.contains("component-static-base")).toBe(true);
+    expect(base?.querySelector(".instance-label")).toBeNull();
+    const overlay = rack.element.querySelector(".rack-static-roof");
+    expect(overlay?.classList.contains("component-static-overlay")).toBe(true);
+    expect(
+      rack.element
+        .querySelector(".rack-pulses")
+        ?.classList.contains("component-motion"),
+    ).toBe(true);
+    const nameplate = rack.element.querySelector(".rack-nameplate");
+    expect(nameplate?.classList.contains("component-label")).toBe(true);
     expect(rack.element.querySelectorAll("use")).toHaveLength(2);
     expect(rack.element.querySelectorAll(".cable")).toHaveLength(7);
     expect(rack.element.querySelectorAll(".pulse")).toHaveLength(7);
-    expect(rack.element.querySelector(".instance-label")?.textContent).toBe(
+    expect(nameplate?.querySelector(".instance-label")?.textContent).toBe(
       "Database Rack 01",
     );
     expect(rack.element.getAttribute("aria-label")).toBe(

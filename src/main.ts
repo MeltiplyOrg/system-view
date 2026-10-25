@@ -1,7 +1,8 @@
 import "./style.css";
 import type { Design } from "./design";
-import { example, parseDesign, webAppExample } from "./design";
-import { instanceColor } from "./layout";
+import { example, examples, parseDesign } from "./design";
+import { inferInstanceType, instanceColor } from "./layout";
+import { resizeReplicas } from "./replicas";
 import { SystemScene } from "./scene";
 
 /**
@@ -51,7 +52,7 @@ app.innerHTML = `
       <div class="detail-body">
         <dl id="detail-spec" class="detail-spec"></dl>
         <section class="detail-section">
-          <div class="detail-label"><span>Replicas</span><span id="detail-count"></span></div>
+          <div class="detail-label"><span>Replicas</span><span class="replica-stepper"><button id="replica-decrease" type="button" aria-label="Decrease replicas"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="m10 4-4 4 4 4"/></svg></button><span id="detail-count" aria-live="polite"></span><button id="replica-increase" type="button" aria-label="Increase replicas"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="m6 4 4 4-4 4"/></svg></button></span></div>
           <ul id="detail-replicas" class="detail-replicas"></ul>
         </section>
         <section class="detail-section">
@@ -99,8 +100,13 @@ app.innerHTML = `
 
         <section class="section">
           <div class="section-label">Examples</div>
-          <button id="web-app" class="btn" type="button">Load web app</button>
-          <p class="view-hint">Frontend → Backend API → Cache / Database</p>
+          <label class="field" for="example">
+            <span>Reference design</span>
+            <select id="example" aria-describedby="example-hint">
+              <option value="" disabled>Choose an example…</option>
+            </select>
+          </label>
+          <p id="example-hint" class="view-hint" aria-live="polite"></p>
         </section>
 
         <section class="section">
@@ -118,6 +124,8 @@ app.innerHTML = `
           <div class="section-label">Dynamic design</div>
           <code>instances: [{ id, label?, description? }]<br>connections: [{ from, to, relation? }]<br>clusters: [{ label?, description?, instances }]</code>
           <p>ID prefixes pick the visual: db- for databases, compute- or server- for backend servers, web- for frontend pages, cache- for in-memory caches. Connect IDs with from/to and describe traffic with relation. Positions and colors are generated; cluster members keep separate platforms.</p>
+          <p>Select a component and use the replica arrows to scale from 1 to 10. Each row holds at most five replicas; additional rows sit behind it. New replicas drop onto their platforms (unless reduced motion is enabled), and rapid additions keep existing drops running. Multiple replicas become a cluster; returning to one restores an instance. Changes update the JSON. Links on removed replicas move to the surviving instance.</p>
+          <p>Each renderer has one palette: databases cyan, backend servers orange, frontend pages violet, caches green. Every node type shares cached artwork by type, so replicas and repeated designs reuse the same images. Visible nodes are prewarmed while idle, and removing a replica keeps shared images available for re-addition. Zoom reuses the previous image until a sharper tier is ready; labels remain live. Internal cable pulses pause during navigation and resume at rest. Offscreen nodes are culled and return when panned into view. Links between components remain visible.</p>
         </section>
       </div>
       <footer class="sidebar-footer">
@@ -137,6 +145,12 @@ const sceneCount = mustQuery<HTMLElement>("#scene-count");
 const applyButton = mustQuery<HTMLButtonElement>("#apply");
 
 const stage = mustQuery<HTMLElement>(".stage");
+// Camera frames only need the fixed stage's cached rectangle. Reading layout
+// after each viewBox write forces the detailed SVG to synchronously relayout.
+let stageBounds = stage.getBoundingClientRect();
+new ResizeObserver(() => {
+  stageBounds = stage.getBoundingClientRect();
+}).observe(stage);
 const callout = mustQuery<HTMLElement>("#callout");
 const calloutCard = mustQuery<HTMLElement>("#callout .callout-card");
 const calloutKind = mustQuery<HTMLElement>("#callout .callout-kind");
@@ -151,6 +165,8 @@ const detailKind = mustQuery<HTMLElement>("#detail-kind");
 const detailTitle = mustQuery<HTMLElement>("#detail-title");
 const detailSpec = mustQuery<HTMLElement>("#detail-spec");
 const detailCount = mustQuery<HTMLElement>("#detail-count");
+const replicaDecrease = mustQuery<HTMLButtonElement>("#replica-decrease");
+const replicaIncrease = mustQuery<HTMLButtonElement>("#replica-increase");
 const detailLinkCount = mustQuery<HTMLElement>("#detail-link-count");
 const detailReplicas = mustQuery<HTMLUListElement>("#detail-replicas");
 const detailLinks = mustQuery<HTMLUListElement>("#detail-links");
@@ -288,7 +304,7 @@ function clusterLabel(clusterId: string | null): string | null {
  * corner nearest the anchor.
  */
 function positionCallout(point: { clientX: number; clientY: number }): void {
-  const stageBox = stage.getBoundingClientRect(),
+  const stageBox = stageBounds,
     anchorX = point.clientX - stageBox.left,
     anchorY = point.clientY - stageBox.top,
     margin = 12,
@@ -377,7 +393,7 @@ function lockCallout(): void {
  * a smooth pan; the scene owns the interpolation, so the shell only supplies
  * the desired client point.
  */
-function selectTarget(anchor: Element | null): void {
+function selectTarget(anchor: Element | null, preserveCallout = false): void {
   const ids = targetIds(anchor);
   if (!anchor || !ids) {
     clearSelection();
@@ -385,11 +401,14 @@ function selectTarget(anchor: Element | null): void {
   }
   selectedKey = ids.key;
   selectedAnchor = anchor;
-  tipKey = null;
+  if (preserveCallout) {
+    tipKey = ids.key;
+    fillCallout(ids, targetMembers(ids, anchor), false);
+  } else tipKey = null;
   lockCallout();
   openDetail(ids);
 
-  const stageBox = stage.getBoundingClientRect(),
+  const stageBox = stageBounds,
     free = Math.max(220, stageBox.width - detail.offsetWidth - 28),
     margin = 16;
   scene.focus(ids.key, {
@@ -410,7 +429,7 @@ function clearSelection(): void {
   detail.setAttribute("aria-hidden", "true");
 }
 
-/** Populate and open the read-only detail panel. */
+/** Populate the inspector and synchronize its bounded replica controls. */
 function openDetail(ids: TargetIds): void {
   const clusterIndex = ids.clusterId
       ? current.clusters.findIndex(
@@ -425,7 +444,8 @@ function openDetail(ids: TargetIds): void {
       return {
         id,
         label: (index >= 0 && current.instances[index].label) || id,
-        color: index >= 0 ? instanceColor(index) : "var(--line)",
+        color:
+          index >= 0 ? instanceColor(inferInstanceType(id)) : "var(--line)",
       };
     }),
     memberSet = new Set(memberIds),
@@ -441,6 +461,8 @@ function openDetail(ids: TargetIds): void {
       ids.instanceId ??
       "");
   detailCount.textContent = String(memberIds.length);
+  replicaDecrease.disabled = memberIds.length <= 1;
+  replicaIncrease.disabled = memberIds.length >= 10;
   detailLinkCount.textContent = String(links.length);
 
   const specRow = (term: string, value: string) => {
@@ -508,6 +530,35 @@ function openDetail(ids: TargetIds): void {
   detail.classList.add("open");
   detail.removeAttribute("aria-hidden");
 }
+
+/**
+ * Apply a replica edit without closing the inspector or resetting the camera.
+ * Rebind the pinned anchor after reconciling cluster membership and layout.
+ */
+function changeReplicas(delta: number): void {
+  const ids = targetIds(selectedAnchor);
+  if (!ids) return;
+  const cluster = ids.clusterId
+    ? current.clusters.find(
+        (item, index) => (item.id ?? `cluster-${index + 1}`) === ids.clusterId,
+      )
+    : undefined;
+  const memberId = cluster?.instances[0] ?? ids.instanceId;
+  if (!memberId) return;
+  const count = (cluster?.instances.length ?? 1) + delta;
+  if (count < 1 || count > 10) return;
+  const design = resizeReplicas(current, memberId, count);
+  scene.render(design, true);
+  current = design;
+  syncDesign();
+  const anchor = [...sceneSvg.querySelectorAll(".scene-instance")].find(
+    (element) => element.getAttribute("data-instance-id") === memberId,
+  );
+  selectTarget(anchor ?? null, true);
+}
+
+replicaDecrease.addEventListener("click", () => changeReplicas(-1));
+replicaIncrease.addEventListener("click", () => changeReplicas(1));
 
 sceneSvg.addEventListener("pointerover", (event) =>
   showCallout(event.target, event),
@@ -577,6 +628,12 @@ function apply(design: Design): void {
   hideCallout();
   scene.render(design);
   current = design;
+  syncDesign();
+}
+
+/** Keep the JSON editor and scene metadata in sync with every applied edit. */
+function syncDesign(): void {
+  const design = current;
   source.value = JSON.stringify(design, null, 2);
   sceneTitle.textContent = design.name;
   const clusters = design.clusters.length;
@@ -603,10 +660,53 @@ function showError(error: unknown): void {
   source.setAttribute("aria-invalid", "true");
 }
 
+const exampleSelect = mustQuery<HTMLSelectElement>("#example");
+const exampleHint = mustQuery<HTMLElement>("#example-hint");
+
+/**
+ * Explain the selected reference design in the picker's teaching note.
+ *
+ * A null id means the canvas holds a custom or imported document, so the note
+ * falls back to the picker's prompt rather than describing a design that is
+ * no longer loaded.
+ */
+function showExampleSummary(exampleId: string | null): void {
+  exampleHint.textContent =
+    examples.find((item) => item.id === exampleId)?.summary ??
+    "Choose a reference design to load it on the canvas.";
+}
+
+for (const item of examples) {
+  const option = document.createElement("option");
+  option.value = item.id;
+  option.textContent = item.design.name;
+  exampleSelect.append(option);
+}
+
+// The default scene is one of the catalogue entries; selecting it on boot and
+// after Reset keeps the control and the canvas telling the same story.
+const defaultExample = examples.find(({ design }) => design === example);
+if (!defaultExample) throw new Error("Missing default design example.");
+const defaultExampleId = defaultExample.id;
+exampleSelect.value = defaultExampleId;
+showExampleSummary(defaultExampleId);
+
+/**
+ * Apply a document that did not come from the picker.
+ *
+ * Clearing the selection keeps the control from claiming a custom or imported
+ * design is still one of the reference examples.
+ */
+function applyCustom(design: Design): void {
+  apply(design);
+  exampleSelect.value = "";
+  showExampleSummary(null);
+}
+
 applyButton.addEventListener("click", () => {
   // Parse/validate before rendering so a bad document cannot partially apply.
   try {
-    apply(parseDesign(source.value));
+    applyCustom(parseDesign(source.value));
   } catch (error) {
     showError(error);
   }
@@ -626,12 +726,17 @@ source.addEventListener("keydown", (event) => {
   }
 });
 
-mustQuery<HTMLButtonElement>("#reset").addEventListener("click", () =>
-  apply(example),
-);
-mustQuery<HTMLButtonElement>("#web-app").addEventListener("click", () =>
-  apply(webAppExample),
-);
+mustQuery<HTMLButtonElement>("#reset").addEventListener("click", () => {
+  apply(example);
+  exampleSelect.value = defaultExampleId;
+  showExampleSummary(defaultExampleId);
+});
+exampleSelect.addEventListener("change", () => {
+  const selected = examples.find((item) => item.id === exampleSelect.value);
+  if (!selected) return;
+  apply(selected.design);
+  showExampleSummary(selected.id);
+});
 
 const file = mustQuery<HTMLInputElement>("#file");
 mustQuery<HTMLButtonElement>("#import").addEventListener("click", () =>
@@ -642,7 +747,7 @@ file.addEventListener("change", async () => {
   const selected = file.files?.[0];
   if (!selected) return;
   try {
-    apply(parseDesign(await selected.text()));
+    applyCustom(parseDesign(await selected.text()));
   } catch (error) {
     showError(error);
   } finally {

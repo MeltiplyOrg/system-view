@@ -572,7 +572,7 @@ textarea[aria-invalid="true"] {
  * surfaces, and hairline rules keep it in the drawing's technical register;
  * the sidebar it replaces used rounded chrome and drop shadows.
  */
-.detail {
+aside.detail {
   position: fixed;
   z-index: 25;
   top: 14px;
@@ -593,7 +593,7 @@ textarea[aria-invalid="true"] {
     opacity 0.2s ease,
     visibility 0s 0.28s;
 }
-.detail.open {
+aside.detail.open {
   opacity: 1;
   visibility: visible;
   transform: none;
@@ -657,12 +657,55 @@ textarea[aria-invalid="true"] {
 .detail-label {
   display: flex;
   justify-content: space-between;
+  align-items: center;
   gap: 12px;
   margin-bottom: 10px;
   color: var(--muted);
   font: 9px var(--mono);
   letter-spacing: 0.16em;
   text-transform: uppercase;
+}
+.replica-stepper {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+}
+.replica-stepper button {
+  display: grid;
+  place-items: center;
+  width: 32px;
+  height: 32px;
+  padding: 8px;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+}
+.replica-stepper button svg {
+  width: 16px;
+  height: 16px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.5;
+  stroke-linecap: square;
+  stroke-linejoin: miter;
+}
+.replica-stepper button:hover:not(:disabled) {
+  color: var(--fg);
+  background: var(--border);
+}
+.replica-stepper button:disabled {
+  opacity: 0.22;
+  cursor: not-allowed;
+}
+#detail-count {
+  min-width: 2ch;
+  text-align: center;
+  color: var(--fg);
+  font: 14px var(--mono);
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0;
 }
 .detail-replicas,
 .detail-links {
@@ -794,6 +837,24 @@ textarea[aria-invalid="true"] {
   fill: var(--muted);
   font-family: var(--mono);
 }
+/* At overview scale these marks are subpixel noise. Variables inherit through
+ * <use> shadow trees; ancestor selectors cannot reach their shared geometry. */
+#rack-rear :is(.detail, .label, .drawer-pull, .drawer-tray-pull),
+#rack-front .detail {
+  display: var(--rack-fine-detail, inline);
+}
+.rack-overview {
+  --rack-fine-detail: none;
+}
+/* A cold component stays lightweight during navigation; cached images keep
+ * their full detail. The original fine geometry returns when the gesture ends.
+ * Fine detail is rack-specific; other renderers simply inherit an inert var. */
+.navigating :is(.component-static-base, .component-static-overlay) {
+  --rack-fine-detail: none;
+}
+.rack-overview .database-rack :is(.pulse, .wire-glow) {
+  display: none;
+}
 .led {
   fill: var(--cable-color);
   opacity: 0.8;
@@ -878,9 +939,9 @@ textarea[aria-invalid="true"] {
 }
 /*
  * Glow is a second, broad translucent stroke rather than an SVG blur filter.
- * Only 21 rack pulses plus design-link pulses repaint; chassis geometry is
- * shared defs. `pathLength="100"` normalizes the dash distance across cables,
- * so one CSS keyframe serves every length without per-cable JS.
+ * Rack pulses repaint only when their detail is large enough to read; design
+ * links remain animated in overview. `pathLength="100"` normalizes the dash
+ * distance so one CSS keyframe serves every length without per-cable JS.
  */
 .pulse {
   stroke: var(--pulse);
@@ -895,6 +956,26 @@ textarea[aria-invalid="true"] {
 .connection .wire-glow {
   stroke-width: 8;
 }
+/*
+ * Relation captions sit just above their cable. The page-colored halo is drawn
+ * behind the glyphs with `paint-order`, so the grid and any crossing wire are
+ * erased under each letter without an opaque box hiding the drawing. Mono
+ * uppercase matches the inspector's link badges. The fill is mostly body text
+ * with a cable-color tint: full-strength accents do not meet small-text
+ * contrast on the light theme's plinth. Pointer events stay off so a long
+ * caption can never intercept a rack hover or selection.
+ */
+.wire-label {
+  fill: color-mix(in srgb, var(--cable-color) 30%, var(--fg));
+  stroke: var(--page);
+  stroke-width: 2.6px;
+  paint-order: stroke;
+  stroke-linejoin: round;
+  font: 7px var(--mono);
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  pointer-events: none;
+}
 @keyframes traffic {
   from {
     stroke-dashoffset: 12;
@@ -906,14 +987,47 @@ textarea[aria-invalid="true"] {
 .paused .pulse {
   animation-play-state: paused;
 }
+/*
+ * Wheel, drag, pinch, and camera-spring motion mark the scene `.navigating`.
+ * Component-local pulse paint invalidation is hidden and paused for that short
+ * window; the elements stay live and resume at rest. Intercomponent links are
+ * outside the geometry roots and keep flowing.
+ */
+.navigating .component-motion {
+  display: none;
+}
+/* Entry motion belongs to a wrapper, never the projected component itself. */
+.instance-enter {
+  animation: instance-drop 520ms both;
+}
+@keyframes instance-drop {
+  0% {
+    transform: translateY(-100px);
+    animation-timing-function: cubic-bezier(0.32, 0, 0.67, 0);
+  }
+  72% {
+    transform: translateY(0);
+    animation-timing-function: ease-out;
+  }
+  86% {
+    transform: translateY(-5px);
+    animation-timing-function: ease-in;
+  }
+  100% {
+    transform: translateY(0);
+  }
+}
 /* Motion is decorative; disable transitions and cable flow when requested. */
 @media (prefers-reduced-motion: reduce) {
   .panel-toggle,
   .sidebar,
-  .detail,
+  aside.detail,
   .cluster-frame,
   .callout {
     transition: none;
+  }
+  .instance-enter {
+    animation: none;
   }
   .callout.visible .callout-card,
   .callout.visible::before,
@@ -935,7 +1049,7 @@ textarea[aria-invalid="true"] {
     padding: 0 12px;
   }
   .sidebar,
-  .detail {
+  aside.detail {
     top: 8px;
     right: 8px;
     bottom: 8px;

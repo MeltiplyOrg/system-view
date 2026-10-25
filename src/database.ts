@@ -348,8 +348,13 @@ function frontGeometry(): string {
  * vertical run. `pathLength="100"` normalizes dash distance so one CSS
  * dash/gap pattern works for every cable regardless of length. The reversed
  * stack gives stable painter ordering at shared port columns.
+ *
+ * The static wire and the animated pulse are rendered as separate layers: the
+ * raster cache replaces only the static chassis, while every `.pulse` stays a
+ * live vector element in the rack DOM. Keeping pulse timing in the curve data
+ * avoids a second geometry pass when the two layers are built.
  */
-const cables = units
+const cableCurves = units
   .slice()
   .reverse()
   .map((u) => {
@@ -366,9 +371,33 @@ const cables = units
         .map((n) => n.toFixed(2))
         .join(" "),
     );
-    const curve = `M${a}C${b} ${c} ${d}`;
-    return `<g class="cable"><path class="wire-under" d="${curve}"/><path class="wire-glow" d="${curve}"/><path class="wire" d="${curve}"/><path class="pulse" pathLength="100" style="--duration:${1.8 + u.n * 0.17}s;--delay:${-u.n * 0.43}s" d="${curve}"/></g>`;
-  })
+    return {
+      curve: `M${a}C${b} ${c} ${d}`,
+      duration: 1.8 + u.n * 0.17,
+      delay: -u.n * 0.43,
+    };
+  });
+
+/** Static cable bodies; these are safe to replace with one cached image. */
+const cables = cableCurves
+  .map(
+    ({ curve }) =>
+      `<g class="cable"><path class="wire-under" d="${curve}"/><path class="wire-glow" d="${curve}"/><path class="wire" d="${curve}"/></g>`,
+  )
+  .join("");
+
+/**
+ * Live pulse paths, painted between the cached rear and roof layers.
+ *
+ * The original markup placed pulses inside each `.cable` before the roof so
+ * the roof strip occluded their switch ends. `DatabaseRack` preserves that
+ * painter order with two static groups and this overlay between them.
+ */
+const cablePulses = cableCurves
+  .map(
+    ({ curve, duration, delay }) =>
+      `<path class="pulse" pathLength="100" style="--duration:${duration}s;--delay:${delay}s" d="${curve}"/>`,
+  )
   .join("");
 
 /**
@@ -388,10 +417,18 @@ export function createDatabaseDefinitions(): SVGDefsElement {
 /**
  * SVG renderer for one Database Rack.
  *
- * The element is a `<g>` containing shared rear markup, cables, shared front
- * markup, and a per-instance nameplate. It has no event listeners or internal
- * state; the scene owns placement. Instances rely on the IDs produced by
- * `createDatabaseDefinitions`, so that function must run first.
+ * The element is a `<g>` containing two static layers (shared rear markup plus
+ * static cable bodies, then shared roof markup), a live pulse overlay between
+ * them, and a per-instance nameplate. Splitting the static layers around the
+ * pulses preserves the original back-to-front paint order: the roof still
+ * covers cable ends, while the shared raster cache can replace both static
+ * layers with cached images without touching labels or animation. The static
+ * layers carry both the rack-specific and generic cache classes, and the root
+ * exposes `data-renderer-type` for that cache.
+ *
+ * It has no event listeners or internal state; the scene owns placement.
+ * Instances rely on the IDs produced by `createDatabaseDefinitions`, so that
+ * function must run first.
  */
 export class DatabaseRack {
   /** Ready-to-append group; caller applies the scene translation. */
@@ -410,12 +447,14 @@ export class DatabaseRack {
    */
   constructor(instance: PlacedInstance) {
     this.element.classList.add("database-rack");
+    this.element.dataset.rendererType = "database-rack";
     this.element.dataset.instanceId = instance.id;
     this.element.style.setProperty("--cable-color", instance.color);
-    this.element.innerHTML = `<use href="#rack-rear"/>${cables}<use href="#rack-front"/>`;
+    this.element.innerHTML = `<g class="rack-static rack-static-base component-static-base" aria-hidden="true"><use href="#rack-rear"/>${cables}</g><g class="rack-pulses component-motion" aria-hidden="true">${cablePulses}</g><g class="rack-static rack-static-roof component-static-overlay" aria-hidden="true"><use href="#rack-front"/></g>`;
 
     // Plain identity lettering on the top strip of the narrow drawer face.
     const nameplate = document.createElementNS(NS, "g");
+    nameplate.classList.add("rack-nameplate", "component-label");
     nameplate.setAttribute("transform", side(RX + RW, RF, TOPZ));
     const label = document.createElementNS(NS, "text");
     label.setAttribute("x", "8");

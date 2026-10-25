@@ -1,6 +1,6 @@
 import type { Cluster, PlacedInstance, Design, DesignInstance } from "./design";
 
-/** One group of instances that shares a platform and column. */
+/** One logical group of separate platforms, packed into rows of five. */
 interface LayoutGroup {
   id: string;
   label?: string;
@@ -31,75 +31,25 @@ export interface Layout {
 }
 
 /**
- * Curated first colors, ordered to stay distinct next to one another.
+ * Normalized render color for one component type.
  *
- * The first three preserve the palette used by the original example. Beyond
- * this list, `instanceColor` generates additional colors with a golden-angle hue
- * rotation, so even the maximum 64 instances do not repeat within the palette.
- */
-const PALETTE = [
-  "#ff9d52",
-  "#42d9e8",
-  "#b49aff",
-  "#7ee787",
-  "#ff7b9c",
-  "#f2d94e",
-  "#6ea8ff",
-  "#2dd4bf",
-  "#ff6b6b",
-  "#a3e635",
-] as const;
-
-/**
- * Convert an HSL triplet to a six-digit hex color.
+ * The raster cache bakes the color into shared images, so every instance of a
+ * type must use the same value no matter its document position or ID alias.
  *
- * Colors ultimately become CSS custom properties, so the output is restricted
- * to the same format the old imported color field accepted. Hue is wrapped;
- * saturation and lightness are percentages in 0–100.
- */
-function hslToHex(hue: number, saturation: number, lightness: number): string {
-  const h = ((hue % 360) + 360) % 360,
-    s = saturation / 100,
-    l = lightness / 100,
-    chroma = (1 - Math.abs(2 * l - 1)) * s,
-    sector = h / 60,
-    second = chroma * (1 - Math.abs((sector % 2) - 1));
-  let red = 0,
-    green = 0,
-    blue = 0;
-  if (sector < 1) [red, green] = [chroma, second];
-  else if (sector < 2) [red, green] = [second, chroma];
-  else if (sector < 3) [green, blue] = [chroma, second];
-  else if (sector < 4) [green, blue] = [second, chroma];
-  else if (sector < 5) [red, blue] = [second, chroma];
-  else [red, blue] = [chroma, second];
-
-  const offset = l - chroma / 2;
-  return `#${[red, green, blue]
-    .map((channel) =>
-      Math.round((channel + offset) * 255)
-        .toString(16)
-        .padStart(2, "0"),
-    )
-    .join("")}`;
-}
-
-/** Every color handed to an instance; 64 is the document instance limit. */
-const COLORS = [
-  ...PALETTE,
-  ...Array.from({ length: 64 - PALETTE.length }, (_, index) =>
-    hslToHex(17 + index * 137.508, 68, 62),
-  ),
-];
-
-/**
- * Pick a deterministic, visually distinct color for an instance index.
- *
- * @param index - Position in the document's `instances` array, 0–63.
+ * @param type - Renderer type selected by the layout pass.
  * @returns Lowercase six-digit hex suitable for `--cable-color`.
  */
-export function instanceColor(index: number): string {
-  return COLORS[index % COLORS.length];
+export function instanceColor(type: PlacedInstance["type"]): string {
+  switch (type) {
+    case "database-rack":
+      return "#42d9e8";
+    case "compute-server":
+      return "#ff9d52";
+    case "webpage":
+      return "#b49aff";
+    case "cache":
+      return "#7ee787";
+  }
 }
 
 /** Renderer prefixes; unknown IDs retain the original database visual. */
@@ -142,6 +92,10 @@ export function inferInstanceType(id: string): PlacedInstance["type"] {
  */
 const RACK_SPACING = 176;
 
+/** Overflow rows step along negative X (behind), clearing the 288-unit foot. */
+const ROW_SPACING = 332;
+const REPLICAS_PER_ROW = 5;
+
 /** World-space gap between cluster columns. */
 const CLUSTER_GAP = 420;
 
@@ -149,54 +103,74 @@ const CLUSTER_GAP = 420;
 export const RACK_HALF_WIDTH = 144,
   RACK_HALF_DEPTH = 75;
 
-/** Internal lookup entry pairing a persisted instance with its color index. */
-interface IndexedInstance {
-  instance: DesignInstance;
-  index: number;
-}
-
 /**
  * Build the persisted groups in canvas order.
  *
- * Declared clusters come first in document order. Any instance not named by a
- * cluster becomes its own single-instance group, so unrelated racks do not
- * share a platform merely because they were declared next to each other.
+ * A declared cluster occupies the slot of its first member in `instances`,
+ * rather than moving to the front of the scene. Promoting a database to a
+ * replica set therefore keeps its links pointing forward instead of forcing
+ * every client to reach back past the nodes that preceded it.
+ *
+ * Any instance not named by a cluster becomes its own single-instance group,
+ * so unrelated racks do not share a platform merely because they were declared
+ * next to each other. Clusters whose members are all missing from `instances`
+ * are appended last: `layoutDesign` then reports the bad reference instead of
+ * silently dropping the declaration.
  */
 function layoutGroups(design: Design): LayoutGroup[] {
-  const groups: LayoutGroup[] = design.clusters.map(
-    (cluster: Cluster, index) => ({
+  const clusterOf = new Map<string, number>();
+  for (const [index, cluster] of design.clusters.entries()) {
+    for (const instanceId of cluster.instances) {
+      // First membership wins. `parseDesign` rejects overlaps, and keeping the
+      // earliest slot makes unvalidated input deterministic.
+      if (!clusterOf.has(instanceId)) clusterOf.set(instanceId, index);
+    }
+  }
+
+  const groups: LayoutGroup[] = [];
+  const emitted = new Set<number>();
+  const addCluster = (index: number): void => {
+    if (emitted.has(index)) return;
+    emitted.add(index);
+    const cluster = design.clusters[index];
+    groups.push({
       id: cluster.id ?? `cluster-${index + 1}`,
       ...(cluster.label === undefined ? {} : { label: cluster.label }),
       instanceIds: cluster.instances,
       caption: true,
-    }),
-  );
-  const clustered = new Set(
-    design.clusters.flatMap((cluster) => cluster.instances),
-  );
-  for (const instance of design.instances) {
-    if (clustered.has(instance.id)) continue;
-    groups.push({
-      id: `instance:${instance.id}`,
-      instanceIds: [instance.id],
-      caption: false,
     });
+  };
+
+  for (const instance of design.instances) {
+    const index = clusterOf.get(instance.id);
+    if (index !== undefined) addCluster(index);
+    else
+      groups.push({
+        id: `instance:${instance.id}`,
+        instanceIds: [instance.id],
+        caption: false,
+      });
   }
+
+  for (let index = 0; index < design.clusters.length; index++) addCluster(index);
   return groups;
 }
 
 /**
  * Derive all render-only fields from a validated design.
  *
- * Layout is deterministic: clusters occupy successive X columns, members stack
- * along Y at 176-unit intervals, and unclustered instances form their own
- * columns. The step clears the 150-unit-deep feet, so each replica keeps its
- * own platform; the 420-unit column gap keeps clusters separate.
+ * Layout is deterministic: each row holds at most five members along Y at
+ * 176-unit intervals. Overflow rows step backwards along negative X. Groups
+ * reserve their complete footprint so a back row cannot overlap its neighbor.
+ * The original row stays anchored when its group gains a back row. A cluster
+ * is emitted at its first declared member's slot, so promoting an instance
+ * never reorders the surrounding scene.
  * Existing positions are never read, which makes the imported document the
  * single source of truth.
  *
- * Colors are assigned from the document instance order, not cluster order, so
- * moving an instance between clusters does not shuffle unrelated colors.
+ * Colors are normalized per renderer type so replicas share rasterized
+ * geometry; changing declaration order or cluster membership never recolors an
+ * instance.
  *
  * @param design - Validated document; cluster members must reference instances.
  * @returns Placed instances and cluster bounds for captions.
@@ -204,17 +178,21 @@ function layoutGroups(design: Design): LayoutGroup[] {
  *   caller bypassed `parseDesign`.
  */
 export function layoutDesign(design: Design): Layout {
-  const indexed = new Map<string, IndexedInstance>(
-    design.instances.map((instance, index) => [
+  const indexed = new Map(
+    design.instances.map((instance): [string, DesignInstance] => [
       instance.id,
-      { instance, index },
+      instance,
     ]),
   );
   const placed: PlacedInstance[] = [];
   const clusters: PlacedCluster[] = [];
+  let nextX = 0;
 
   for (const [groupIndex, group] of layoutGroups(design).entries()) {
-    const x = groupIndex * CLUSTER_GAP;
+    const rows = Math.ceil(group.instanceIds.length / REPLICAS_PER_ROW);
+    const backWidth = Math.max(0, rows - 1) * ROW_SPACING;
+    const x = nextX + (groupIndex === 0 ? 0 : backWidth);
+    nextX = x + CLUSTER_GAP;
     const members = group.instanceIds.map((id) => {
       const entry = indexed.get(id);
       if (!entry)
@@ -224,27 +202,34 @@ export function layoutDesign(design: Design): Layout {
       return entry;
     });
 
-    for (const [memberIndex, entry] of members.entries()) {
+    for (const [memberIndex, instance] of members.entries()) {
+      const type = inferInstanceType(instance.id);
       placed.push({
-        id: entry.instance.id,
-        type: inferInstanceType(entry.instance.id),
-        label: entry.instance.label ?? entry.instance.id,
-        position: { x, y: memberIndex * RACK_SPACING, z: 0 },
-        color: instanceColor(entry.index),
+        id: instance.id,
+        type,
+        label: instance.label ?? instance.id,
+        position: {
+          x: x - Math.floor(memberIndex / REPLICAS_PER_ROW) * ROW_SPACING,
+          y: (memberIndex % REPLICAS_PER_ROW) * RACK_SPACING,
+          z: 0,
+        },
+        color: instanceColor(type),
       });
     }
 
     // Only declared clusters receive a caption; an unclustered rack is a
     // one-instance layout group without a visible group name.
     if (group.caption) {
-      const height = RACK_HALF_DEPTH * 2 + (members.length - 1) * RACK_SPACING;
+      const height =
+        RACK_HALF_DEPTH * 2 +
+        (Math.min(members.length, REPLICAS_PER_ROW) - 1) * RACK_SPACING;
       clusters.push({
         id: group.id,
         label: group.label ?? group.id,
         bounds: {
-          x: x - RACK_HALF_WIDTH,
+          x: x - backWidth - RACK_HALF_WIDTH,
           y: -RACK_HALF_DEPTH,
-          width: RACK_HALF_WIDTH * 2,
+          width: RACK_HALF_WIDTH * 2 + backWidth,
           height,
         },
       });

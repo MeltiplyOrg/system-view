@@ -4,12 +4,30 @@ import { layoutDesign, RACK_HALF_DEPTH, RACK_HALF_WIDTH } from "./layout";
 import type { Layout, PlacedCluster } from "./layout";
 import { createPlatforms } from "./platform";
 import { componentHeight, createComponent } from "./components";
+import { ComponentRasterCache } from "./component-raster";
 
 const NS = "http://www.w3.org/2000/svg";
 
 /** Zoom bounds chosen to keep the grid usable at both extreme scales. */
 const MIN_ZOOM = 0.25;
 const MAX_ZOOM = 8;
+
+/**
+ * World-space overscan for instance culling.
+ *
+ * The entry drop starts 100 units above the final position, so the upward
+ * margin must cover the whole animation or an entering rack could be hidden
+ * mid-flight. The same margin on the other sides gives a small buffer around
+ * the viewport so ordinary pans do not reveal roots one frame late.
+ */
+const INSTANCE_CULL_MARGIN = 120;
+
+/**
+ * Quiet period after the last manual navigation input before pulses resume.
+ * The spring and pointer gestures clear the navigating state themselves, so
+ * this timer only covers input without an end event (wheel) and safety rails.
+ */
+const NAVIGATION_IDLE_MS = 140;
 
 /**
  * World-space gap between a cluster footprint and its dashed floor frame.
@@ -23,6 +41,26 @@ const CLUSTER_FRAME_MARGIN = 36;
 
 /** Screen-space gap between a cluster frame's bottom corner and its caption. */
 const CLUSTER_LABEL_GAP = 20;
+
+/**
+ * Gap between a cable's centerline and its relation caption, in SVG units.
+ *
+ * Horizontal text is offset along the segment normal toward screen-up, so the
+ * caption clears the wire and its pulse at every isometric angle.
+ */
+const CABLE_LABEL_OFFSET = 10;
+
+/** Extra rise per duplicate link sharing the same projected endpoints. */
+const CABLE_LABEL_STACK = 11;
+
+/**
+ * Relations longer than this condense to `CABLE_LABEL_WIDTH` instead of
+ * growing across neighboring components.
+ */
+const CABLE_LABEL_MAX_CHARS = 36;
+
+/** Width in SVG units used when a relation caption needs condensing. */
+const CABLE_LABEL_WIDTH = 180;
 
 /**
  * Projected bounds of the design content.
@@ -72,6 +110,62 @@ function contentExtent(layout: Layout): {
   return Number.isFinite(minX)
     ? { minX, minY, maxX, maxY }
     : { minX: -100, minY: -100, maxX: 100, maxY: 100 };
+}
+
+/**
+ * Point halfway along a projected polyline, lifted off the cable.
+ *
+ * Length is measured in projected space, so the caption stays centered on the
+ * drawn route rather than drifting toward a corner when the world-space
+ * segments have different lengths. The offset follows the local segment
+ * normal toward screen-up (negative Y), which keeps horizontal text clear of
+ * the wire. Returns null for a degenerate path; real connections always have
+ * a positive projected length because their endpoints differ.
+ *
+ * @param points - Projected path vertices in draw order.
+ * @param offset - Distance from the centerline in SVG user units.
+ * @returns The caption anchor, or null when there is no drawable segment.
+ */
+export function cableLabelPoint(
+  points: readonly (readonly [number, number])[],
+  offset: number,
+): readonly [number, number] | null {
+  const lengths: number[] = [];
+  let total = 0;
+  for (let index = 1; index < points.length; index++) {
+    const length = Math.hypot(
+      points[index][0] - points[index - 1][0],
+      points[index][1] - points[index - 1][1],
+    );
+    lengths.push(length);
+    total += length;
+  }
+  if (total === 0) return null;
+
+  let remaining = total / 2;
+  for (let index = 1; index < points.length; index++) {
+    const length = lengths[index - 1];
+    if (length === 0) continue;
+    if (remaining > length) {
+      remaining -= length;
+      continue;
+    }
+    const start = points[index - 1],
+      end = points[index],
+      t = remaining / length,
+      x = start[0] + (end[0] - start[0]) * t,
+      y = start[1] + (end[1] - start[1]) * t;
+    let normalX = -(end[1] - start[1]) / length,
+      normalY = (end[0] - start[0]) / length;
+    // Two normals exist; pick the one pointing up-screen. A horizontal cable
+    // has no vertical normal and resolves to straight up.
+    if (normalY > 0) {
+      normalX = -normalX;
+      normalY = -normalY;
+    }
+    return [x + normalX * offset, y + normalY * offset];
+  }
+  return null;
 }
 
 /**
@@ -164,11 +258,35 @@ function createClusterFrames(clusters: readonly PlacedCluster[]): SVGGElement {
  * intentionally permanent.
  */
 export class SystemScene {
-  /** Design content group replaced atomically on each render. */
+  /** Static geometry followed by keyed component roots in painter order. */
   private readonly content = document.createElementNS(NS, "g");
 
-  /** Single path regenerated for the currently visible world region. */
+  /** Shared static artwork for every renderer type, keyed by geometry/palette. */
+  private readonly componentRaster: ComponentRasterCache;
+
+  /** Live component DOM survives replica edits, including in-flight CSS drops. */
+  private readonly renderedInstances = new Map<
+    string,
+    {
+      root: SVGGElement;
+      element: SVGGElement;
+      origin: readonly [number, number];
+      label: string;
+      type: string;
+      /** Cached root visibility so pans only write style on state changes. */
+      hidden: boolean;
+    }
+  >();
+
+  /** Overscanned grid path, rebuilt only when its cached coverage runs out. */
   private readonly grid = document.createElementNS(NS, "path");
+  private gridCoverage: {
+    minX: number;
+    maxX: number;
+    minY: number;
+    maxY: number;
+    step: number;
+  } | null = null;
 
   /** Projected design bounds plus breathing room, set by `render`. */
   private contentBounds = { x: -500, y: -350, width: 1000, height: 700 };
@@ -176,8 +294,15 @@ export class SystemScene {
   /** Aspect-matched base viewBox at zoom 1. */
   private base = { width: 1000, height: 700 };
 
-  /** Last CSS-pixel size observed by the ResizeObserver. */
-  private viewport = { width: 1, height: 1 };
+  /**
+   * Last client rectangle observed by the ResizeObserver, in CSS pixels.
+   *
+   * The root SVG is fixed to the full stage and its viewBox aspect is derived
+   * from this same rectangle, so client↔user conversion is pure arithmetic.
+   * Zero width/height means the stage has not been measured yet (or is
+   * detached); conversions report that as invalid.
+   */
+  private viewport = { left: 0, top: 0, width: 0, height: 0 };
 
   /** Current viewBox center in SVG user units. */
   private center: [number, number] = [0, 0];
@@ -218,6 +343,17 @@ export class SystemScene {
   /** Pending requestAnimationFrame id for the camera move, if any. */
   private cameraFrame: number | null = null;
 
+  /** Single idle timer while `.navigating` suppresses per-rack pulses. */
+  private navigationTimer: number | null = null;
+
+  /** One retargetable spring: X/Y in world units, zoom in logarithmic space. */
+  private cameraMotion: {
+    position: [number, number, number];
+    target: [number, number, number];
+    velocity: [number, number, number];
+    time: number;
+  } | null = null;
+
   /** ViewBox subscribers; the shell aligns screen-space overlays. */
   private readonly viewListeners = new Set<() => void>();
 
@@ -234,6 +370,7 @@ export class SystemScene {
     this.grid.classList.add("space-grid");
     // Defs first, grid behind content; painter order is the only depth system.
     svg.append(createDatabaseDefinitions(), this.grid, this.content);
+    this.componentRaster = new ComponentRasterCache(svg);
     new ResizeObserver(() => this.resize()).observe(svg);
 
     svg.addEventListener(
@@ -305,6 +442,7 @@ export class SystemScene {
         this.lastPointer = null;
         this.pinch = null;
         svg.classList.remove("dragging");
+        this.endNavigation();
         return;
       }
 
@@ -341,7 +479,7 @@ export class SystemScene {
   }
 
   /**
-   * Replace the scene content atomically and refit the view.
+   * Render geometry and reconcile keyed components without interrupting drops.
    *
    * Layout and colors are derived here rather than stored in the document.
    * Paint order is cluster frames, platforms, cluster captions, links, then
@@ -351,9 +489,10 @@ export class SystemScene {
    *
    * @param design - Already validated document. The defensive endpoint check
    *   protects against callers bypassing the parser.
+   * @param animate - Preserve live components/camera and drop in new replicas.
    * @throws Error when a connection references a missing instance.
    */
-  render(design: Design): void {
+  render(design: Design, animate = false): void {
     this.hoveredClusterId = null;
     const instanceCluster = new Map<string, string>();
     for (const [index, cluster] of design.clusters.entries()) {
@@ -424,6 +563,9 @@ export class SystemScene {
     const byId = new Map(
       layout.instances.map((instance) => [instance.id, instance]),
     );
+    // Duplicate links between the same endpoints share one projected path;
+    // their captions stack so each relation remains readable.
+    const labelLanes = new Map<string, number>();
     for (const [index, link] of design.connections.entries()) {
       const from = byId.get(link.from),
         to = byId.get(link.to);
@@ -469,6 +611,31 @@ export class SystemScene {
       group.dataset.connectionId = connectionId;
       group.style.setProperty("--cable-color", from.color);
       group.innerHTML = `<path class="wire-glow" d="${d}"/><path class="wire" d="${d}"/><path class="pulse" pathLength="100" style="--duration:3s;--delay:${-index * 0.6}s" d="${d}"/>`;
+      if (link.relation) {
+        const pairKey = JSON.stringify([link.from, link.to].sort()),
+          lane = labelLanes.get(pairKey) ?? 0;
+        labelLanes.set(pairKey, lane + 1);
+        const point = cableLabelPoint(
+          [a, ...route, b],
+          CABLE_LABEL_OFFSET + lane * CABLE_LABEL_STACK,
+        );
+        if (point) {
+          const label = document.createElementNS(NS, "text");
+          label.classList.add("wire-label");
+          label.dataset.connectionId = connectionId;
+          label.setAttribute("x", point[0].toFixed(1));
+          label.setAttribute("y", point[1].toFixed(1));
+          label.setAttribute("text-anchor", "middle");
+          // Match long instance labels: condense rather than clip so the
+          // full relation stays available on the canvas.
+          if (link.relation.length > CABLE_LABEL_MAX_CHARS) {
+            label.setAttribute("textLength", String(CABLE_LABEL_WIDTH));
+            label.setAttribute("lengthAdjust", "spacingAndGlyphs");
+          }
+          label.textContent = link.relation;
+          group.append(label);
+        }
+      }
       const fromCluster = instanceCluster.get(from.id),
         toCluster = instanceCluster.get(to.id);
       if (fromCluster && fromCluster === toCluster) {
@@ -477,7 +644,22 @@ export class SystemScene {
       layer.append(group);
     }
 
-    // Back to front; no depth sorting or geometry generation during animation.
+    if (!animate) {
+      this.renderedInstances.clear();
+      this.content.replaceChildren();
+    }
+    // Only static geometry is replaced. Existing roots stay connected so CSS
+    // animation timelines and painted component geometry survive rapid clicks.
+    const previousGeometry = this.content.firstElementChild;
+    if (previousGeometry) previousGeometry.replaceWith(layer);
+    else this.content.append(layer);
+    const liveIds = new Set(layout.instances.map((instance) => instance.id));
+    for (const [id, record] of this.renderedInstances) {
+      if (liveIds.has(id)) continue;
+      record.root.remove();
+      this.renderedInstances.delete(id);
+    }
+    const orderedRoots: SVGGElement[] = [];
     for (const instance of layout.instances
       .slice()
       .sort(
@@ -485,15 +667,63 @@ export class SystemScene {
           a.position.x + a.position.y - (b.position.x + b.position.y) ||
           a.position.z - b.position.z,
       )) {
-      const element = createComponent(instance);
-      const clusterId = instanceCluster.get(instance.id);
-      if (clusterId) {
-        element.dataset.clusterId = clusterId;
+      const position = project(
+        instance.position.x,
+        instance.position.y,
+        instance.position.z,
+      );
+      let record = this.renderedInstances.get(instance.id);
+      const isNew = !record;
+      if (
+        record &&
+        (record.label !== instance.label || record.type !== instance.type)
+      ) {
+        record.root.remove();
+        this.renderedInstances.delete(instance.id);
+        record = undefined;
       }
-      layer.append(element);
+      if (!record) {
+        const element = createComponent(instance);
+        const root = document.createElementNS(NS, "g");
+        root.classList.add("instance-placement");
+        if (animate && isNew) {
+          const entry = document.createElementNS(NS, "g");
+          entry.classList.add("instance-enter");
+          entry.append(element);
+          root.append(entry);
+        } else root.append(element);
+        record = {
+          root,
+          element,
+          origin: position,
+          label: instance.label,
+          type: instance.type,
+          hidden: false,
+        };
+        this.renderedInstances.set(instance.id, record);
+      }
+      record.root.setAttribute(
+        "transform",
+        `translate(${position[0] - record.origin[0]} ${position[1] - record.origin[1]})`,
+      );
+      const clusterId = instanceCluster.get(instance.id);
+      if (clusterId) record.element.dataset.clusterId = clusterId;
+      else delete record.element.dataset.clusterId;
+      record.element.style.setProperty("--cable-color", instance.color);
+      record.element
+        .querySelector<SVGGElement>(".database-rack")
+        ?.style.setProperty("--cable-color", instance.color);
+      orderedRoots.push(record.root);
     }
-
-    this.content.replaceChildren(layer);
+    // State-preserving moves retain CSS animation progress even if a layout
+    // change alters painter order. Newly created roots have no state to retain.
+    let next: SVGGElement | null = null;
+    for (let index = orderedRoots.length - 1; index >= 0; index--) {
+      const root = orderedRoots[index];
+      if (!root.isConnected) this.content.insertBefore(root, next);
+      else if (root.nextSibling !== next) this.content.moveBefore(root, next);
+      next = root;
+    }
     const extent = contentExtent(layout),
       pad = 55,
       // The hover callout is screen-space and hangs above the topmost rack,
@@ -510,7 +740,23 @@ export class SystemScene {
       width: Math.max(200, extent.maxX - extent.minX + 2 * pad),
       height: Math.max(200, extent.maxY - extent.minY + topPad + bottomPad),
     };
-    this.fit();
+    if (!animate) this.fit();
+    else {
+      // Static geometry changes without a viewport write, so refresh root
+      // visibility here. Non-animated renders get the same pass from fit().
+      const width = this.base.width / this.zoom,
+        height = this.base.height / this.zoom;
+      this.cullInstances(
+        this.center[0] - width / 2,
+        this.center[1] - height / 2,
+        this.center[0] + width / 2,
+        this.center[1] + height / 2,
+      );
+    }
+    this.componentRaster.sync();
+    this.componentRaster.setScale(
+      (this.viewport.width * this.zoom) / this.base.width,
+    );
   }
 
   /** Highlight the frame of the hovered cluster. */
@@ -551,22 +797,22 @@ export class SystemScene {
   ): void {
     const target = this.targetBounds.get(key);
     if (!target) return;
-    const box = this.svg.getBoundingClientRect();
-    if (!box.width || !box.height) return;
+    const stage = this.viewport;
+    if (!stage.width || !stage.height) return;
 
     const worldWidth = target.maxX - target.minX,
       worldHeight = target.maxY - target.minY;
     if (worldWidth <= 0 || worldHeight <= 0) return;
 
-    // Client pixels per user unit is `box.width * zoom / base.width`, so the
+    // Client pixels per user unit is `stage.width * zoom / base.width`, so the
     // fit zoom is the smaller of the width and height solutions.
     const padding = 0.4,
       zoom = Math.max(
         MIN_ZOOM,
         Math.min(
-          (area.width * padding * this.base.width) / (worldWidth * box.width),
+          (area.width * padding * this.base.width) / (worldWidth * stage.width),
           (area.height * padding * this.base.height) /
-            (worldHeight * box.height),
+            (worldHeight * stage.height),
           MAX_ZOOM,
         ),
       ),
@@ -574,9 +820,10 @@ export class SystemScene {
       height = this.base.height / zoom,
       center: [number, number] = [
         (target.minX + target.maxX) / 2 -
-          ((area.x + area.width / 2 - box.left) / box.width - 0.5) * width,
+          ((area.x + area.width / 2 - stage.left) / stage.width - 0.5) * width,
         (target.minY + target.maxY) / 2 -
-          ((area.y + area.height / 2 - box.top) / box.height - 0.5) * height,
+          ((area.y + area.height / 2 - stage.top) / stage.height - 0.5) *
+            height,
       ];
     this.animateCamera(center, zoom);
   }
@@ -589,58 +836,147 @@ export class SystemScene {
    * the projected layout point is always correct.
    */
   targetTopPoint(key: string): { x: number; y: number } | null {
-    const point = this.topPoints.get(key);
-    if (!point) return null;
-    const bounds = this.svg.getBoundingClientRect(),
-      width = this.base.width / this.zoom,
+    const point = this.topPoints.get(key),
+      stage = this.viewport;
+    // Cached stage rect keeps the per-frame callout update free of layout
+    // reads; an unmeasured stage reports null like an invalid CTM would.
+    if (!point || !stage.width || !stage.height) return null;
+    const width = this.base.width / this.zoom,
       height = this.base.height / this.zoom;
     return {
       x:
-        bounds.left +
-        ((point[0] - (this.center[0] - width / 2)) / width) * bounds.width,
+        stage.left +
+        ((point[0] - (this.center[0] - width / 2)) / width) * stage.width,
       y:
-        bounds.top +
-        ((point[1] - (this.center[1] - height / 2)) / height) * bounds.height,
+        stage.top +
+        ((point[1] - (this.center[1] - height / 2)) / height) * stage.height,
     };
   }
 
   /**
-   * Interpolate center and zoom together, or jump under reduced motion.
+   * Follow the latest destination with a critically damped spring.
    *
-   * Zoom is interpolated geometrically (`from * ratio ** t`) so the perceived
-   * zoom rate stays even instead of accelerating near the end.
+   * Retargeting preserves position and velocity instead of restarting ease-in.
+   * Log-space zoom keeps proportional scale changes even. The exact spring
+   * solution is stable across variable frame times and allocates nothing per frame.
    */
   private animateCamera(target: [number, number], zoom: number): void {
-    this.stopCamera();
+    const logZoom = Math.log(zoom);
     if (matchMedia("(prefers-reduced-motion: reduce)").matches) {
+      this.stopCamera();
       this.center = target;
       this.zoom = zoom;
       this.updateViewport();
+      // No spring will settle, so release pulse suppression here.
+      this.endNavigation();
       return;
     }
 
-    const from: [number, number] = [this.center[0], this.center[1]],
-      fromZoom = this.zoom,
-      ratio = zoom / fromZoom,
-      duration = 620,
-      start = performance.now();
+    if (this.cameraMotion) {
+      this.cameraMotion.target[0] = target[0];
+      this.cameraMotion.target[1] = target[1];
+      this.cameraMotion.target[2] = logZoom;
+      return;
+    }
+    // Per-rack pulse motion is suppressed while the camera glides. The spring
+    // owns the class until it settles; the idle timer's checks then no-op.
+    this.markNavigating();
+    const motion = {
+      position: [this.center[0], this.center[1], Math.log(this.zoom)] as [
+        number,
+        number,
+        number,
+      ],
+      target: [target[0], target[1], logZoom] as [number, number, number],
+      velocity: [0, 0, 0] as [number, number, number],
+      time: performance.now(),
+    };
+    this.cameraMotion = motion;
+    // 18/s gives a prompt glide without overshooting a stationary destination.
+    const frequency = 18;
     const step = (now: number) => {
-      const t = Math.min(1, (now - start) / duration),
-        eased = t < 0.5 ? 4 * t * t * t : 1 - (-2 * t + 2) ** 3 / 2;
-      this.center[0] = from[0] + (target[0] - from[0]) * eased;
-      this.center[1] = from[1] + (target[1] - from[1]) * eased;
-      this.zoom = fromZoom * ratio ** eased;
+      const dt = Math.max(0, (now - motion.time) / 1000);
+      motion.time = now;
+      const decay = Math.exp(-frequency * dt);
+      const worldTolerance =
+        (this.base.width / this.zoom / this.viewport.width) * 0.05;
+      let settled = true;
+      for (let axis = 0; axis < 3; axis++) {
+        const error = motion.position[axis] - motion.target[axis];
+        const impulse = motion.velocity[axis] + frequency * error;
+        motion.position[axis] =
+          motion.target[axis] + (error + impulse * dt) * decay;
+        motion.velocity[axis] =
+          (motion.velocity[axis] - frequency * impulse * dt) * decay;
+        const tolerance = axis === 2 ? 0.00001 : worldTolerance;
+        if (
+          Math.abs(motion.position[axis] - motion.target[axis]) > tolerance ||
+          Math.abs(motion.velocity[axis]) > tolerance * frequency
+        )
+          settled = false;
+      }
+      if (settled) {
+        this.center[0] = motion.target[0];
+        this.center[1] = motion.target[1];
+        this.zoom = Math.exp(motion.target[2]);
+        this.cameraMotion = null;
+      } else {
+        this.center[0] = motion.position[0];
+        this.center[1] = motion.position[1];
+        this.zoom = Math.exp(motion.position[2]);
+      }
       this.updateViewport();
-      this.cameraFrame = t < 1 ? requestAnimationFrame(step) : null;
+      this.cameraFrame = settled ? null : requestAnimationFrame(step);
+      if (settled) this.endNavigation();
     };
     this.cameraFrame = requestAnimationFrame(step);
   }
 
   /** Cancel an in-flight camera move so a gesture or fit takes over. */
   private stopCamera(): void {
-    if (this.cameraFrame === null) return;
-    cancelAnimationFrame(this.cameraFrame);
+    this.cameraMotion = null;
+    if (this.cameraFrame !== null) cancelAnimationFrame(this.cameraFrame);
     this.cameraFrame = null;
+  }
+
+  /**
+   * Enter the navigating state that pauses per-rack pulse animations.
+   *
+   * Cheap for per-frame gesture callers: while a timer already exists this is
+   * only a class add. An existing timer is extended only for wheel input,
+   * which has no end event; continuous panning/pinching reuses the active
+   * timer and lets its guard observe the live pointers.
+   *
+   * @param extendIdle - Restart the quiet period (wheel debounce).
+   */
+  private markNavigating(extendIdle = false): void {
+    this.svg.classList.add("navigating");
+    if (this.navigationTimer !== null) {
+      if (!extendIdle) return;
+      clearTimeout(this.navigationTimer);
+    }
+    this.navigationTimer = window.setTimeout(() => {
+      this.navigationTimer = null;
+      // The spring and pointer gestures clear the class when they end.
+      if (this.cameraFrame !== null || this.activePointers.size > 0) return;
+      this.svg.classList.remove("navigating");
+    }, NAVIGATION_IDLE_MS);
+  }
+
+  /**
+   * Leave the navigating state once nothing is moving the camera.
+   *
+   * Called when the spring settles or the last contact lifts, so pulses
+   * resume as soon as navigation stops instead of waiting out the wheel
+   * debounce. A still-active source keeps ownership of the class.
+   */
+  private endNavigation(): void {
+    if (this.navigationTimer !== null) {
+      clearTimeout(this.navigationTimer);
+      this.navigationTimer = null;
+    }
+    if (this.cameraFrame !== null || this.activePointers.size > 0) return;
+    this.svg.classList.remove("navigating");
   }
 
   /** Reset zoom and pan so the whole design is framed again. */
@@ -652,6 +988,9 @@ export class SystemScene {
       this.contentBounds.y + this.contentBounds.height / 2,
     ];
     this.resize();
+    // Fit is an instant jump, not a sustained navigation; never leave pulses
+    // suppressed by a cancelled spring.
+    this.endNavigation();
   }
 
   /**
@@ -666,6 +1005,10 @@ export class SystemScene {
    * under the same screen pixel.
    */
   zoomBy(factor: number, clientX?: number, clientY?: number): void {
+    // Mark before the clamp: wheel input at the zoom limit still counts as
+    // navigation, and a cancelled spring must never leave pulses suppressed.
+    // Wheel and zoom buttons have no end event, so they debounce the state.
+    this.markNavigating(true);
     const next = this.clampZoom(factor);
     if (next === this.zoom) return;
 
@@ -748,6 +1091,7 @@ export class SystemScene {
     const dx = next.midpoint.x - previous.midpoint.x;
     const dy = next.midpoint.y - previous.midpoint.y;
     if (nextZoom === this.zoom && dx === 0 && dy === 0) return;
+    this.markNavigating();
 
     if (nextZoom !== this.zoom) {
       const anchor = this.clientToUser(
@@ -776,8 +1120,8 @@ export class SystemScene {
    * Move the view so the world point under `from` follows it to `to`.
    *
    * Both points are client-space pixels from the same pointer event. The
-   * conversion uses the current CTM, so this works while pinching (after the
-   * zoom anchor has already been applied) and while panning.
+   * conversion uses the cached stage mapping, so this works while pinching
+   * (after the zoom anchor has already been applied) and while panning.
    */
   private panBetween(
     from: { x: number; y: number },
@@ -786,6 +1130,9 @@ export class SystemScene {
     const a = this.clientToUser(from.x, from.y),
       b = this.clientToUser(to.x, to.y);
     if (!a || !b) return;
+    // Stationary contacts can still emit moves; only moving the view counts.
+    if (a.x === b.x && a.y === b.y) return;
+    this.markNavigating();
     // Move the world with the fingers by moving the viewBox center opposite.
     this.center[0] -= b.x - a.x;
     this.center[1] -= b.y - a.y;
@@ -823,8 +1170,15 @@ export class SystemScene {
    * safe to call from ResizeObserver as well as `fit`.
    */
   private resize(): void {
+    // Once per layout change is the only place that needs the client rect.
+    // The stage SVG is fixed and full-viewport, so pan/zoom can reuse it.
     const bounds = this.svg.getBoundingClientRect();
-    this.viewport = { width: bounds.width, height: bounds.height };
+    this.viewport = {
+      left: bounds.left,
+      top: bounds.top,
+      width: bounds.width,
+      height: bounds.height,
+    };
     const aspect =
       bounds.width && bounds.height ? bounds.width / bounds.height : 4 / 3;
     let width = this.contentBounds.width,
@@ -836,7 +1190,7 @@ export class SystemScene {
   }
 
   /**
-   * Write the current viewBox and repaint the grid.
+   * Write the viewBox, refresh grid coverage, and select scale-appropriate detail.
    *
    * This is the single writer for both values, keeping zoom, pan, resize, and
    * grid coverage consistent. Called during drag, so it must stay cheap.
@@ -847,17 +1201,59 @@ export class SystemScene {
       x = this.center[0] - width / 2,
       y = this.center[1] - height / 2;
     this.svg.setAttribute("viewBox", `${x} ${y} ${width} ${height}`);
+    // Hysteresis avoids detail flicker while zoom hovers near the cutoff.
+    const rackPixels =
+      (componentHeight("database-rack") * this.viewport.width) / width;
+    this.svg.classList.toggle(
+      "rack-overview",
+      rackPixels < (this.svg.classList.contains("rack-overview") ? 160 : 130),
+    );
     this.drawGrid(x, y, width, height);
+    this.cullInstances(x, y, x + width, y + height);
+    this.componentRaster.setScale(this.viewport.width / width);
     for (const listener of this.viewListeners) listener();
   }
 
   /**
-   * Regenerate grid lines for the visible world region.
+   * Hide instance roots whose projected bounds fall outside the view.
    *
-   * Inverts the isometric projection at z=0 to find the world-space bounding
-   * box of the viewBox, then emits only lines inside it. This makes the grid
-   * effectively infinite without a large prebuilt path. Line count is capped
-   * around 320 per axis by doubling the world step at very low zoom.
+   * Bounds come from the layout pass (`targetBounds`), never `getBBox()` or
+   * `getBoundingClientRect()`, so culling adds no forced layout to the camera
+   * path. Hiding the outer root with `visibility` keeps the component subtree
+   * and its CSS animation timeline alive: panning back shows the same state,
+   * and an in-flight entry drop is never replayed or restarted.
+   */
+  private cullInstances(
+    minX: number,
+    minY: number,
+    maxX: number,
+    maxY: number,
+  ): void {
+    const left = minX - INSTANCE_CULL_MARGIN,
+      top = minY - INSTANCE_CULL_MARGIN,
+      right = maxX + INSTANCE_CULL_MARGIN,
+      bottom = maxY + INSTANCE_CULL_MARGIN;
+    for (const [id, record] of this.renderedInstances) {
+      const bounds = this.targetBounds.get(`instance:${id}`),
+        // Missing bounds only happens before the first layout; stay visible.
+        hidden =
+          bounds !== undefined &&
+          (bounds.maxX < left ||
+            bounds.minX > right ||
+            bounds.maxY < top ||
+            bounds.minY > bottom);
+      if (record.hidden === hidden) continue;
+      record.hidden = hidden;
+      record.root.style.visibility = hidden ? "hidden" : "visible";
+    }
+  }
+
+  /**
+   * Cache an overscanned world-space grid around the view.
+   *
+   * Camera frames reuse the same path while inside its coverage. Quantized
+   * endpoints keep lines stable when the cache is rebuilt. Adaptive spacing
+   * caps the overscanned geometry around 320 lines per axis at very low zoom.
    *
    * @param x - ViewBox x in SVG user units.
    * @param y - ViewBox y in SVG user units.
@@ -888,38 +1284,68 @@ export class SystemScene {
 
     // Adaptive level of detail: never emit unbounded geometry when zoomed out.
     let step = 120;
-    while (Math.max(maxX - minX, maxY - minY) / step > 320) step *= 2;
-    const startX = Math.floor(minX / step) * step,
-      startY = Math.floor(minY / step) * step;
+    const spanX = maxX - minX,
+      spanY = maxY - minY;
+    while ((Math.max(spanX, spanY) * 1.5) / step > 320) step *= 2;
+    const cached = this.gridCoverage;
+    if (
+      cached &&
+      cached.step === step &&
+      minX >= cached.minX &&
+      maxX <= cached.maxX &&
+      minY >= cached.minY &&
+      maxY <= cached.maxY
+    )
+      return;
+    const startX = Math.floor((minX - spanX * 0.25) / step) * step,
+      startY = Math.floor((minY - spanY * 0.25) / step) * step,
+      endX = Math.ceil((maxX + spanX * 0.25) / step) * step,
+      endY = Math.ceil((maxY + spanY * 0.25) / step) * step;
+    this.gridCoverage = {
+      minX: startX,
+      maxX: endX,
+      minY: startY,
+      maxY: endY,
+      step,
+    };
     const at = (wx: number, wy: number) =>
       project(wx, wy, 0)
         .map((n) => n.toFixed(1))
         .join(" ");
     let d = "";
-    for (let gx = startX; gx <= maxX; gx += step)
-      d += `M${at(gx, minY)}L${at(gx, maxY)}`;
-    for (let gy = startY; gy <= maxY; gy += step)
-      d += `M${at(minX, gy)}L${at(maxX, gy)}`;
+    for (let gx = startX; gx <= endX; gx += step)
+      d += `M${at(gx, startY)}L${at(gx, endY)}`;
+    for (let gy = startY; gy <= endY; gy += step)
+      d += `M${at(startX, gy)}L${at(endX, gy)}`;
     this.grid.setAttribute("d", d);
   }
 
   /**
-   * Convert client pixels to SVG user units using the inverse screen CTM.
+   * Convert client pixels to SVG user units using the cached stage rectangle.
    *
-   * Using the CTM accounts for CSS sizing, viewBox scaling, and markers, so
-   * zoom anchoring and pan deltas remain correct at any layout. Returns null
-   * before the element has a rendered matrix (for example, during teardown).
+   * The root SVG is a fixed full-stage element whose viewBox aspect matches
+   * its client rectangle after `resize`, so the mapping is the viewBox origin
+   * plus a uniform scale. Computing it arithmetically avoids a synchronous
+   * `getScreenCTM()`/layout read on every pan, pinch, and wheel frame.
+   * Returns null until the stage has a measured, non-zero size.
    */
   private clientToUser(
     clientX: number,
     clientY: number,
   ): { x: number; y: number } | null {
-    const matrix = this.svg.getScreenCTM();
-    if (!matrix) return null;
-    const point = this.svg.createSVGPoint();
-    point.x = clientX;
-    point.y = clientY;
-    const projected = point.matrixTransform(matrix.inverse());
-    return { x: projected.x, y: projected.y };
+    const stage = this.viewport;
+    if (!stage.width || !stage.height) return null;
+    const width = this.base.width / this.zoom,
+      height = this.base.height / this.zoom;
+    return {
+      x:
+        this.center[0] -
+        width / 2 +
+        ((clientX - stage.left) / stage.width) * width,
+      y:
+        this.center[1] -
+        height / 2 +
+        ((clientY - stage.top) / stage.height) * height,
+    };
   }
 }

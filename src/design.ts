@@ -48,7 +48,8 @@ export interface DesignInstance {
  *
  * `id` is optional: the renderer falls back to `from->to`, which keeps simple
  * documents free of bookkeeping. `relation` is optional prose for the link
- * (for example "replicates") and is exposed in the cable title.
+ * (for example "replicates"); the renderer draws it beside the cable and the
+ * inspector repeats it in the link list.
  */
 export interface Connection {
   id?: string;
@@ -92,7 +93,7 @@ export interface Design {
  *
  * IDs intentionally use the `db-` prefix; the layout pass turns that prefix
  * into the database-rack renderer, lays the three racks out in one column, and
- * assigns three distinct colors. A dashed floor frame groups the replicas.
+ * assigns their shared database palette. A dashed floor frame groups replicas.
  */
 export const example: Design = {
   version: 1,
@@ -155,6 +156,272 @@ export const webAppExample: Design = {
   ],
   clusters: [],
 };
+
+/**
+ * Read/write split: one writable primary streams changes to two read replicas.
+ *
+ * The database nodes share a replica-set cluster; role labels and directed
+ * links carry the split that the isometric geometry cannot.
+ */
+const readReplicaExample: Design = {
+  version: 1,
+  name: "Read replicas",
+  instances: [
+    {
+      id: "web-frontend",
+      label: "Web frontend",
+      description: "A browser client that only talks to the backend API.",
+    },
+    {
+      id: "compute-api",
+      label: "Backend API",
+      description:
+        "Sends every write to the primary and spreads reads across the replicas.",
+    },
+    {
+      id: "db-primary",
+      label: "Primary database",
+      description:
+        "The single writer. Streams its changes to the two read replicas.",
+    },
+    {
+      id: "db-read-1",
+      label: "Read replica 1",
+      description:
+        "Serves read queries. May lag slightly behind the primary after a write.",
+    },
+    {
+      id: "db-read-2",
+      label: "Read replica 2",
+      description:
+        "Serves read queries. May lag slightly behind the primary after a write.",
+    },
+  ],
+  connections: [
+    { from: "web-frontend", to: "compute-api", relation: "HTTPS / JSON" },
+    { from: "compute-api", to: "db-primary", relation: "writes" },
+    { from: "compute-api", to: "db-read-1", relation: "reads" },
+    { from: "compute-api", to: "db-read-2", relation: "reads" },
+    { from: "db-primary", to: "db-read-1", relation: "replicates" },
+    { from: "db-primary", to: "db-read-2", relation: "replicates" },
+  ],
+  clusters: [
+    {
+      label: "Users replica set",
+      description:
+        "One writable primary and two read replicas. Reads scale out; writes still have a single home.",
+      instances: ["db-primary", "db-read-1", "db-read-2"],
+    },
+  ],
+};
+
+/**
+ * Range-sharded users table.
+ *
+ * Each shard is an independent database, so a hot key or a failed shard is
+ * contained to one slice. The API owns the routing table.
+ */
+const shardingExample: Design = {
+  version: 1,
+  name: "Database sharding",
+  instances: [
+    {
+      id: "compute-api",
+      label: "API + shard router",
+      description:
+        "Hashes each user ID and sends the query to the shard that owns that key range.",
+    },
+    {
+      id: "db-shard-a",
+      label: "Shard A",
+      description:
+        "Stores the first third of user rows. No other shard keeps a copy.",
+    },
+    {
+      id: "db-shard-b",
+      label: "Shard B",
+      description:
+        "Stores the middle third of user rows. A hot key here affects only this shard.",
+    },
+    {
+      id: "db-shard-c",
+      label: "Shard C",
+      description:
+        "Stores the last third of user rows. Adding a shard means moving keys.",
+    },
+  ],
+  connections: [
+    { from: "compute-api", to: "db-shard-a", relation: "keys 0-33%" },
+    { from: "compute-api", to: "db-shard-b", relation: "keys 34-66%" },
+    { from: "compute-api", to: "db-shard-c", relation: "keys 67-100%" },
+  ],
+  clusters: [],
+};
+
+/**
+ * Stateless API fleet behind one load balancer.
+ *
+ * Every replica shares the same database and keeps no session state, so any
+ * request can land on any healthy server.
+ */
+const loadBalancedExample: Design = {
+  version: 1,
+  name: "Load-balanced API",
+  instances: [
+    {
+      id: "web-frontend",
+      label: "Web frontend",
+      description: "Sends requests to one stable load-balancer address.",
+    },
+    {
+      id: "compute-lb",
+      label: "Load balancer",
+      description:
+        "Checks API health and spreads each request across the live replicas.",
+    },
+    { id: "compute-api-1", label: "API replica 1" },
+    { id: "compute-api-2", label: "API replica 2" },
+    { id: "compute-api-3", label: "API replica 3" },
+    {
+      id: "db-app",
+      label: "Application database",
+      description: "Shared state lives here; the API tier stays stateless.",
+    },
+  ],
+  connections: [
+    { from: "web-frontend", to: "compute-lb", relation: "HTTPS" },
+    { from: "compute-lb", to: "compute-api-1", relation: "HTTP" },
+    { from: "compute-lb", to: "compute-api-2", relation: "HTTP" },
+    { from: "compute-lb", to: "compute-api-3", relation: "HTTP" },
+    { from: "compute-api-1", to: "db-app", relation: "SQL" },
+    { from: "compute-api-2", to: "db-app", relation: "SQL" },
+    { from: "compute-api-3", to: "db-app", relation: "SQL" },
+  ],
+  clusters: [
+    {
+      label: "Stateless API tier",
+      description:
+        "Identical API servers behind the load balancer. Add or remove replicas without changing client behavior.",
+      instances: ["compute-api-1", "compute-api-2", "compute-api-3"],
+    },
+  ],
+};
+
+/**
+ * Database-per-service topology.
+ *
+ * Each service owns its schema, so cross-service reads go through the owning
+ * API rather than a shared table. Deployments and failures stay independent.
+ */
+const microservicesExample: Design = {
+  version: 1,
+  name: "Microservices",
+  instances: [
+    {
+      id: "web-frontend",
+      label: "Web app",
+      description:
+        "Calls the API gateway and never queries a service database.",
+    },
+    {
+      id: "compute-gateway",
+      label: "API gateway",
+      description:
+        "Authenticates requests and routes each call to the owning service.",
+    },
+    {
+      id: "compute-orders",
+      label: "Orders service",
+      description:
+        "Owns orders and fulfillment. Deploys independently of the users service.",
+    },
+    {
+      id: "db-orders",
+      label: "Orders DB",
+      description:
+        "Private to the orders service. Other services call its API instead of reading it directly.",
+    },
+    {
+      id: "compute-users",
+      label: "Users service",
+      description:
+        "Owns profiles and authentication data. Deploys independently of orders.",
+    },
+    {
+      id: "db-users",
+      label: "Users DB",
+      description:
+        "Private to the users service. Cross-service reads go through the service API.",
+    },
+  ],
+  connections: [
+    { from: "web-frontend", to: "compute-gateway", relation: "HTTPS" },
+    { from: "compute-gateway", to: "compute-orders", relation: "gRPC" },
+    { from: "compute-gateway", to: "compute-users", relation: "gRPC" },
+    { from: "compute-orders", to: "db-orders", relation: "SQL" },
+    { from: "compute-users", to: "db-users", relation: "SQL" },
+  ],
+  clusters: [],
+};
+
+/**
+ * One reference design in the sidebar picker.
+ *
+ * `id` is the stable option value; `design.name` is the visible label. The
+ * summary states the concept to look for, so switching examples teaches
+ * something before the learner hovers a component.
+ */
+export interface DesignExample {
+  id: string;
+  summary: string;
+  design: Design;
+}
+
+/**
+ * Curated examples ordered from one request path to distributed topologies.
+ *
+ * `main.ts` selects the default scene's entry on boot and after Reset. Keep
+ * every design valid through `parseDesign` and every name unique: both back
+ * the picker's labels and the exported document.
+ */
+export const examples: readonly DesignExample[] = [
+  {
+    id: "web-app",
+    summary:
+      "Follow one request from the browser through the API to the cache and database.",
+    design: webAppExample,
+  },
+  {
+    id: "horizontal-scaling",
+    summary:
+      "Replicas share the traffic; replication keeps their copies in sync.",
+    design: example,
+  },
+  {
+    id: "read-replicas",
+    summary:
+      "Send writes to one primary and spread reads across stand-by replicas.",
+    design: readReplicaExample,
+  },
+  {
+    id: "sharding",
+    summary:
+      "Split rows across independent databases so each shard owns a key range.",
+    design: shardingExample,
+  },
+  {
+    id: "load-balanced-api",
+    summary:
+      "Put a load balancer in front of identical, stateless API servers.",
+    design: loadBalancedExample,
+  },
+  {
+    id: "microservices",
+    summary:
+      "Give each service its own database and let services talk over the network.",
+    design: microservicesExample,
+  },
+];
 
 /**
  * Assert that an untrusted JSON value is a non-array object.
