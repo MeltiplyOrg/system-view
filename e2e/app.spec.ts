@@ -155,7 +155,7 @@ test.describe("minimal isometric canvas", () => {
     await expect(page.locator("#detail-count")).toHaveText("3");
     await expect(page.locator(".scene-instance")).toHaveCount(6);
     await expect(
-      page.locator('.connection[data-connection-id="compute-api->db-app"]'),
+      page.locator('.connection[data-connection-id="cache-server->db-app"]'),
     ).toHaveAttribute("data-to-cluster", /.+/);
 
     // The promoted cluster must stay to the right of every node declared
@@ -169,7 +169,7 @@ test.describe("minimal isometric canvas", () => {
         cluster: center(".cluster-frame"),
         web: center('[data-instance-id="web-frontend"]'),
         api: center('[data-instance-id="compute-api"]'),
-        cache: center('[data-instance-id="cache-app"]'),
+        cache: center('[data-instance-id="cache-server"]'),
       };
     });
     expect(centers.cluster).toBeGreaterThan(centers.web);
