@@ -1,4 +1,4 @@
-import type { Cluster, PlacedInstance, Design, DesignInstance } from "./design";
+import type { PlacedInstance, Design, DesignInstance } from "./design";
 
 /** One logical group of separate platforms, packed into rows of five. */
 interface LayoutGroup {
@@ -152,7 +152,8 @@ function layoutGroups(design: Design): LayoutGroup[] {
       });
   }
 
-  for (let index = 0; index < design.clusters.length; index++) addCluster(index);
+  for (let index = 0; index < design.clusters.length; index++)
+    addCluster(index);
   return groups;
 }
 

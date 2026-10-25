@@ -51,6 +51,32 @@ describe("automatic layout", () => {
     expect(layout.clusters).toEqual([]);
   });
 
+  test("keeps a declared cluster in its first member's slot", () => {
+    const layout = layoutDesign(
+      design(
+        [{ id: "db-a" }, { id: "db-b" }, { id: "db-c" }],
+        [{ instances: ["db-b", "db-c"] }],
+      ),
+    );
+    expect(
+      layout.instances.map(({ id, position }) => ({
+        id,
+        x: position.x,
+        y: position.y,
+      })),
+    ).toEqual([
+      { id: "db-a", x: 0, y: 0 },
+      { id: "db-b", x: 420, y: 0 },
+      { id: "db-c", x: 420, y: 176 },
+    ]);
+    expect(layout.clusters[0].bounds).toEqual({
+      x: 276,
+      y: -75,
+      width: 288,
+      height: 326,
+    });
+  });
+
   test("derives cluster fallbacks and supports multiple group columns", () => {
     const layout = layoutDesign(
       design(

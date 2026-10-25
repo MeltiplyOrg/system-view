@@ -1,5 +1,6 @@
 import { describe, expect, test } from "vite-plus/test";
 import { parseDesign, webAppExample } from "../src/design";
+import { layoutDesign } from "../src/layout";
 import { resizeReplicas } from "../src/replicas";
 
 /** Replica edits must stay exportable and keep existing network endpoints valid. */
@@ -22,6 +23,17 @@ describe("replica resizing", () => {
     const collapsed = resizeReplicas(expanded, cluster.instances[9], 1);
     expect(collapsed).toEqual(original);
     expect(webAppExample).toEqual(original);
+  });
+
+  test("promoting a database keeps its column and link direction", () => {
+    const before = layoutDesign(webAppExample),
+      after = layoutDesign(resizeReplicas(webAppExample, "db-app", 3)),
+      original = before.instances.find(({ id }) => id === "db-app")!,
+      promoted = after.instances.find(({ id }) => id === "db-app")!;
+    expect(promoted.position).toEqual(original.position);
+    expect(
+      after.instances.find(({ id }) => id === "compute-api")!.position.x,
+    ).toBeLessThan(promoted.position.x);
   });
 
   test("retargets removed endpoints, drops internal self links, and preserves other cluster IDs", () => {

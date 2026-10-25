@@ -127,9 +127,54 @@ test.describe("minimal isometric canvas", () => {
       "SQL",
     ]);
 
+    await picker.selectOption("read-replicas");
+    await expect(page.locator("#scene-title")).toHaveText("Read replicas");
+    await expect(page.locator(".connection[data-to-cluster]")).toHaveCount(3);
+    await expect(page.locator(".connection[data-cluster-id]")).toHaveCount(2);
+
     await page.locator("#reset").click();
     await expect(picker).toHaveValue("horizontal-scaling");
     await expect(page.locator("#scene-title")).toHaveText("Horizontal scaling");
+  });
+
+  test("promoting a database keeps its cluster in place", async ({ page }) => {
+    await page.goto("/");
+    await openSidebar(page);
+    await page.locator("#example").selectOption("web-app");
+    await page.locator("#panel-close").click();
+
+    const point = await rackPoint(page);
+    if (!point) throw new Error("No database rack found.");
+    await page.mouse.click(point.x, point.y);
+    await expect(page.locator("#detail-title")).toHaveText(
+      "Application database",
+    );
+    await page.locator("#replica-increase").click();
+    await page.locator("#replica-increase").click();
+    await expect(page.locator("#detail-kind")).toHaveText("Cluster");
+    await expect(page.locator("#detail-count")).toHaveText("3");
+    await expect(page.locator(".scene-instance")).toHaveCount(6);
+    await expect(
+      page.locator('.connection[data-connection-id="compute-api->db-app"]'),
+    ).toHaveAttribute("data-to-cluster", /.+/);
+
+    // The promoted cluster must stay to the right of every node declared
+    // before it, so the API reaches forward instead of crossing the frontend.
+    const centers = await page.evaluate(() => {
+      const center = (selector: string) => {
+        const box = document.querySelector(selector)!.getBoundingClientRect();
+        return box.left + box.width / 2;
+      };
+      return {
+        cluster: center(".cluster-frame"),
+        web: center('[data-instance-id="web-frontend"]'),
+        api: center('[data-instance-id="compute-api"]'),
+        cache: center('[data-instance-id="cache-app"]'),
+      };
+    });
+    expect(centers.cluster).toBeGreaterThan(centers.web);
+    expect(centers.cluster).toBeGreaterThan(centers.api);
+    expect(centers.cluster).toBeGreaterThan(centers.cache);
   });
 
   test("hovering an instance raises a corner-bracketed callout", async ({
