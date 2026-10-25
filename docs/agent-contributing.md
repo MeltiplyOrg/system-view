@@ -32,6 +32,7 @@ this guide adds the app's mechanics.
 | Provider catalog, accent, footprint, mark         | `src/providers.ts`        | `src/components.ts`, `src/database.ts`, `src/style.css`, `src/main.ts` |
 | Renderer artwork, height, label placement, motion | `src/components.ts`       | `src/style.css`, `src/component-raster.ts`                             |
 | Database rack geometry and shared `<defs>`        | `src/database.ts`         | `src/components.ts` wrapper                                            |
+| Provider database cabinets                        | `src/database-skins.ts`   | `src/database.ts`, `src/providers.ts`, `src/style.css`                 |
 | Platform union and rendering                      | `src/platform.ts`         | `src/layout.ts` footprints                                             |
 | Canvas render pass, camera, selection, morph      | `src/scene.ts`            | `src/components.ts`, `src/component-raster.ts`, `src/main.ts` overlays |
 | Raster cache and shared images                    | `src/component-raster.ts` | `src/scene.ts`, `src/style.css` palettes                               |
@@ -95,11 +96,15 @@ One pass explains where most edits belong:
   imported strings cannot inject markup; only trusted constants use
   `innerHTML`.
 - Use the exact upstream brand mark from the provider theme, and place one mark
-  on the object. The Redis cache reuses `REDIS_LOGO_ART`; database racks print
-  the theme mark on the roof plate.
-- Database provider skins share the rack chassis: the accent tints faces,
-  drawers, glass, LEDs, and cables. `ProviderTheme.plate` chooses a light or
-  dark badge background so the mark stays legible.
+  on the object. The Redis cache reuses `REDIS_LOGO_ART`; database skins print
+  the theme mark on an enamel plate.
+- Database provider skins are dedicated cabinets in `src/database-skins.ts`:
+  PostgreSQL's arched archive tower, MySQL's wave cabinet with a dorsal fin,
+  SQLite's low file tray, and MongoDB's shard enclosure. Each owns its height
+  and `db-<id>-rear/front` definitions; the neutral rack remains provider-free.
+- The provider accent tints faces, glass, LEDs, and cables.
+  `ProviderTheme.plate` chooses a dark enamel tone for the single mark; the
+  badge never uses a white backing.
 
 ### Wires
 
@@ -171,9 +176,10 @@ One pass explains where most edits belong:
 
 1. Register the theme in `PROVIDERS`: canonical id, label, accent, supported
    types, optional footprints, exact self-contained logo.
-2. Add artwork: a `PROVIDER_VARIANTS` entry for generic renderers, or the
-   renderer's own skin. Database racks print `logo` on the roof plate; set
-   `plate` when the mark is white or bright.
+2. Add artwork: a `PROVIDER_VARIANTS` entry for generic renderers, or a
+   dedicated cabinet builder plus `db-<id>-rear/front` definitions in
+   `src/database-skins.ts`. Each database skin owns its height and one `logo`
+   badge; set a dark `plate` tone so the mark stays legible.
 3. Add skin classes to `style.css`. Put animated fills and strokes outside the
    static base. Add the reduced-motion rule.
 4. The generic morph handles transitions; a new skin participates
@@ -191,7 +197,7 @@ One pass explains where most edits belong:
 | ---------------------------------------- | --------------------------------------------------------- | ------------------------------------------------------------- |
 | Validation, limits, references           | `tests/design.test.ts`                                    | apply/import/export in `e2e/app.spec.ts`                      |
 | Placement, pitch, cluster bounds, colors | `tests/layout.test.ts`                                    | replica and provider paths in `e2e/app.spec.ts`               |
-| Provider catalogue, gates, object marks  | `tests/providers.test.ts`, `tests/database.test.ts`       | `e2e/database-providers.spec.ts`                              |
+| Provider catalogue, gates, object marks  | `tests/providers.test.ts`, `tests/database-skins.test.ts` | `e2e/database-providers.spec.ts`                              |
 | Platform topology and markup             | `tests/platform.test.ts`, `tests/platform-render.test.ts` | boot scene render in `e2e/app.spec.ts`                        |
 | Cable routing and cluster ports          | `tests/routing.test.ts`, `tests/scene-port.test.ts`       | `e2e/wires.spec.ts`; link and zoom tests in `e2e/app.spec.ts` |
 | Rack geometry and projection             | `tests/database.test.ts`                                  | boot scene and theme switch in `e2e/app.spec.ts`              |
