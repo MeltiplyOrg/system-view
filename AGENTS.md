@@ -2,6 +2,8 @@
 
 Universal rules for every change in this repository.
 
+App work: read `docs/agent-contributing.md` before editing; it maps owners, contracts, and proof. Universal policy stays here.
+
 ## Commits
 
 Use Conventional Commits for every commit:
