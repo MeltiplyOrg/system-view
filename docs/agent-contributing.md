@@ -29,7 +29,7 @@ this guide adds the app's mechanics.
 | ------------------------------------------------- | ------------------------- | ---------------------------------------------------------------------- |
 | Document shape, validation, examples              | `src/design.ts`           | `src/main.ts` editor; `src/layout.ts` inputs                           |
 | Placement, color, cluster bounds                  | `src/layout.ts`           | `src/platform.ts`, `src/scene.ts`, `src/routing.ts`                    |
-| Provider catalog, accent, footprint, mark         | `src/providers.ts`        | `src/components.ts`, `src/style.css`, `src/main.ts` picker             |
+| Provider catalog, accent, footprint, mark         | `src/providers.ts`        | `src/components.ts`, `src/database.ts`, `src/style.css`, `src/main.ts` |
 | Renderer artwork, height, label placement, motion | `src/components.ts`       | `src/style.css`, `src/component-raster.ts`                             |
 | Database rack geometry and shared `<defs>`        | `src/database.ts`         | `src/components.ts` wrapper                                            |
 | Platform union and rendering                      | `src/platform.ts`         | `src/layout.ts` footprints                                             |
@@ -95,8 +95,11 @@ One pass explains where most edits belong:
   imported strings cannot inject markup; only trusted constants use
   `innerHTML`.
 - Use the exact upstream brand mark from the provider theme, and place one mark
-  on the object. Reuse `REDIS_LOGO_ART` for printed badges instead of redrawing
-  a logo.
+  on the object. The Redis cache reuses `REDIS_LOGO_ART`; database racks print
+  the theme mark on the roof plate.
+- Database provider skins share the rack chassis: the accent tints faces,
+  drawers, glass, LEDs, and cables. `ProviderTheme.plate` chooses a light or
+  dark badge background so the mark stays legible.
 
 ### Wires
 
@@ -155,29 +158,31 @@ One pass explains where most edits belong:
 
 ## Change paths
 
-| Goal                             | Edit in this order                                                                                                                                         | Close with                                               |
-| -------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------- |
-| Add a provider skin              | `providers.ts` theme → `components.ts` variant and optional motion → `style.css` skin → provider gating test                                               | provider catalog and footprint proof; provider morph e2e |
-| Add a renderer type              | `design.ts` type → `layout.ts` prefix/color/footprint → `components.ts` geometry/height/label → `component-raster.ts` renderer list → scene/callout labels | unit tests per pure owner; boot scene e2e                |
-| Tune replica spacing or groups   | `layout.ts` constants and packing → `tests/layout.test.ts` → verify border ports, platform union, routing                                                  | layout, platform, routing, replica e2e                   |
-| Reshape artwork                  | `components.ts` variant → `style.css` palette/animation → reduced-motion block                                                                             | app/cache e2e; visual smoke at overview and close-up     |
-| Change shell, editor, inspector  | `main.ts` → `index.html` → `style.css`                                                                                                                     | `e2e/app.spec.ts`, including a11y                        |
-| Change camera, selection, cables | `scene.ts`; extract pure math for unit proof where possible                                                                                                | `tests/scene-*.test.ts`, `e2e/app.spec.ts`               |
+| Goal                             | Edit in this order                                                                                                                                         | Close with                                           |
+| -------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------- |
+| Add a provider skin              | `providers.ts` theme → `components.ts` variant (generic) or `database.ts` badge (racks) → `style.css` skin → provider gating test                          | provider catalogue and footprint proof; provider e2e |
+| Add a renderer type              | `design.ts` type → `layout.ts` prefix/color/footprint → `components.ts` geometry/height/label → `component-raster.ts` renderer list → scene/callout labels | unit tests per pure owner; boot scene e2e            |
+| Tune replica spacing or groups   | `layout.ts` constants and packing → `tests/layout.test.ts` → verify border ports, platform union, routing                                                  | layout, platform, routing, replica e2e               |
+| Reshape artwork                  | `components.ts` variant → `style.css` palette/animation → reduced-motion block                                                                             | app/cache e2e; visual smoke at overview and close-up |
+| Change shell, editor, inspector  | `main.ts` → `index.html` → `style.css`                                                                                                                     | `e2e/app.spec.ts`, including a11y                    |
+| Change camera, selection, cables | `scene.ts`; extract pure math for unit proof where possible                                                                                                | `tests/scene-*.test.ts`, `e2e/app.spec.ts`           |
 
 ### Provider skin checklist
 
 1. Register the theme in `PROVIDERS`: canonical id, label, accent, supported
    types, optional footprints, exact self-contained logo.
-2. Add the artwork variant in `PROVIDER_VARIANTS`: static markup, optional
-   motion, height, and label transform/limits.
+2. Add artwork: a `PROVIDER_VARIANTS` entry for generic renderers, or the
+   renderer's own skin. Database racks print `logo` on the roof plate; set
+   `plate` when the mark is white or bright.
 3. Add skin classes to `style.css`. Put animated fills and strokes outside the
    static base. Add the reduced-motion rule.
 4. The generic morph handles transitions; a new skin participates
    automatically.
 5. Prove color and footprint through `layoutDesign` and supported-type gating
    through `providersFor`; add that focused provider test. Then switch provider
-   on a cache node in the browser: exactly one artwork mark (inspect before the
-   raster cache replaces vectors), the build, border, platform, and cleanup.
+   on a cache or database node in the browser: exactly one artwork mark
+   (inspect before the raster cache replaces vectors), the build, border,
+   platform, and cleanup.
 6. Check `bun run size`; provider art ships in the JS bundle.
 
 ## Proof matrix
@@ -186,6 +191,7 @@ One pass explains where most edits belong:
 | ---------------------------------------- | --------------------------------------------------------- | ------------------------------------------------------------- |
 | Validation, limits, references           | `tests/design.test.ts`                                    | apply/import/export in `e2e/app.spec.ts`                      |
 | Placement, pitch, cluster bounds, colors | `tests/layout.test.ts`                                    | replica and provider paths in `e2e/app.spec.ts`               |
+| Provider catalogue, gates, object marks  | `tests/providers.test.ts`, `tests/database.test.ts`       | `e2e/database-providers.spec.ts`                              |
 | Platform topology and markup             | `tests/platform.test.ts`, `tests/platform-render.test.ts` | boot scene render in `e2e/app.spec.ts`                        |
 | Cable routing and cluster ports          | `tests/routing.test.ts`, `tests/scene-port.test.ts`       | `e2e/wires.spec.ts`; link and zoom tests in `e2e/app.spec.ts` |
 | Rack geometry and projection             | `tests/database.test.ts`                                  | boot scene and theme switch in `e2e/app.spec.ts`              |
