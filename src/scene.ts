@@ -1775,8 +1775,8 @@ export class SystemScene {
               // wrappers are created for a cluster-sized swap.
               slot.animate(
                 [
-                  { opacity: 0, transform: "translateY(14px)" },
-                  { opacity: 1, transform: "translateY(0px)" },
+                  { opacity: 0, transform: "scale(0.96)" },
+                  { opacity: 1, transform: "scale(1)" },
                 ],
                 {
                   duration: 360,
@@ -1925,12 +1925,10 @@ export class SystemScene {
         0.05,
         (this.viewport.width * this.zoom) / Math.max(1, this.base.width),
       ),
-      outward = Math.min(40, 12 / pixelsPerUnit),
-      lift = Math.min(48, 16 / pixelsPerUnit);
+      railTravel = Math.min(26, 12 / pixelsPerUnit);
     const animations: Animation[] = [],
-      // Up to 340ms of stagger: further parts wait long enough to read as a
-      // sequence, while a single complex skin still settles under a second.
-      step = Math.min(24, 340 / Math.max(1, measured.length));
+      step = Math.min(22, 280 / Math.max(1, measured.length));
+    // Sort bottom-to-top so chassis seats first and upper bays/bezel latch in order.
     measured.sort((a, b) => b.box.y + b.box.height - (a.box.y + a.box.height));
     for (const [index, { wrap, box }] of measured.entries()) {
       const nx = Math.max(
@@ -1940,25 +1938,40 @@ export class SystemScene {
         ny = Math.max(
           -1,
           Math.min(1, (box.y + box.height / 2 - centerY) / halfHeight),
-        ),
-        offsetX = nx * outward,
-        offsetY = ny * outward,
-        delay = index * step;
+        );
+
+      // Mechanical rail vectors:
+      // - Roof deck / fins (ny < -0.35) mount vertically down from above.
+      // - Side walls (nx > 0.45) slide along the narrow right-hand face.
+      // - Front bays, drives, drawers, and fascias slide along the 30° isometric rack rails [-0.866, 0.5].
+      let slideX: number, slideY: number;
+      if (ny < -0.35) {
+        slideX = 0;
+        slideY = -railTravel * 0.75;
+      } else if (nx > 0.45) {
+        slideX = 0.866 * railTravel * 0.55;
+        slideY = 0.5 * railTravel * 0.55;
+      } else {
+        slideX = -0.866 * railTravel;
+        slideY = 0.5 * railTravel;
+      }
+
+      const delay = index * step;
       animations.push(
         direction === "assemble"
           ? wrap.wrapper.animate(
               [
                 {
                   opacity: 0,
-                  transform: `translate(${offsetX}px, ${offsetY + lift}px)`,
+                  transform: `translate(${slideX.toFixed(2)}px, ${slideY.toFixed(2)}px)`,
                 },
-                { opacity: 1, offset: 0.45 },
+                { opacity: 1, offset: 0.35 },
                 { opacity: 1, transform: "translate(0px, 0px)" },
               ],
               {
                 duration: 440,
                 delay,
-                easing: "cubic-bezier(0.22, 0.9, 0.24, 1)",
+                easing: "cubic-bezier(0.12, 0.98, 0.24, 1)",
                 fill: "backwards",
               },
             )
@@ -1967,13 +1980,13 @@ export class SystemScene {
                 { opacity: 1, transform: "translate(0px, 0px)" },
                 {
                   opacity: 0,
-                  transform: `translate(${offsetX}px, ${offsetY - lift}px)`,
+                  transform: `translate(${slideX.toFixed(2)}px, ${slideY.toFixed(2)}px)`,
                 },
               ],
               {
-                duration: 400,
+                duration: 360,
                 delay,
-                easing: "cubic-bezier(0.4, 0, 0.6, 1)",
+                easing: "cubic-bezier(0.35, 0, 0.65, 1)",
                 fill: "forwards",
               },
             ),
