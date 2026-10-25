@@ -99,6 +99,19 @@ const REPLICAS_PER_ROW = 5;
 /** World-space gap between cluster columns. */
 const CLUSTER_GAP = 420;
 
+/**
+ * Extra world-space clearance per overflow row, added on both sides of a
+ * group.
+ *
+ * The base `CLUSTER_GAP` keeps single-row groups at the historic 420-unit
+ * pitch, so existing scenes do not move. Every row beyond the first five
+ * replicas means a wider, taller cluster whose dashed frame crowds its
+ * neighbors, so each overflow row spreads the gaps to the adjacent groups by
+ * one rack spacing (both sides contribute, so two many-replica clusters
+ * separate by the sum).
+ */
+const CLUSTER_GAP_PER_ROW = RACK_SPACING;
+
 /** Half-width and half-depth of the 288 × 150 rack foot. */
 export const RACK_HALF_WIDTH = 144,
   RACK_HALF_DEPTH = 75;
@@ -161,13 +174,15 @@ function layoutGroups(design: Design): LayoutGroup[] {
  * Derive all render-only fields from a validated design.
  *
  * Layout is deterministic: each row holds at most five members along Y at
- * 176-unit intervals. Overflow rows step backwards along negative X. Groups
- * reserve their complete footprint so a back row cannot overlap its neighbor.
- * The original row stays anchored when its group gains a back row. A cluster
- * is emitted at its first declared member's slot, so promoting an instance
- * never reorders the surrounding scene.
- * Existing positions are never read, which makes the imported document the
- * single source of truth.
+ * 176-unit intervals. Overflow rows step backwards along negative X and add
+ * one rack spacing of gap on each side of their group, so many-replica
+ * clusters keep clearance from their neighbors while single-row scenes keep
+ * the historic 420-unit pitch. Groups reserve their complete footprint so a
+ * back row cannot overlap its neighbor. The original row stays anchored when
+ * its group gains a back row. A cluster is emitted at its first declared
+ * member's slot, so promoting an instance never reorders the surrounding
+ * scene. Existing positions are never read, which makes the imported document
+ * the single source of truth.
  *
  * Colors are normalized per renderer type so replicas share rasterized
  * geometry; changing declaration order or cluster membership never recolors an
@@ -192,8 +207,12 @@ export function layoutDesign(design: Design): Layout {
   for (const [groupIndex, group] of layoutGroups(design).entries()) {
     const rows = Math.ceil(group.instanceIds.length / REPLICAS_PER_ROW);
     const backWidth = Math.max(0, rows - 1) * ROW_SPACING;
-    const x = nextX + (groupIndex === 0 ? 0 : backWidth);
-    nextX = x + CLUSTER_GAP;
+    // Overflow rows widen the gap on both sides of this group: the shift
+    // clears the previous group before the back rows extend left, and the
+    // reservation below leaves room for the next group to do the same.
+    const spread = (rows - 1) * CLUSTER_GAP_PER_ROW;
+    const x = groupIndex === 0 ? 0 : nextX + backWidth + spread;
+    nextX = x + CLUSTER_GAP + spread;
     const members = group.instanceIds.map((id) => {
       const entry = indexed.get(id);
       if (!entry)
