@@ -74,4 +74,54 @@ describe("replica resizing", () => {
         "1 to 10",
       );
   });
+
+  test("shrinks an existing cluster without mutating it and redirects removed sources", () => {
+    const original = parseDesign(
+      JSON.stringify({
+        version: 1,
+        name: "Shrink",
+        instances: ["db-a", "db-b", "db-c", "web-a"],
+        clusters: [{ id: "databases", instances: ["db-a", "db-b", "db-c"] }],
+        connections: [{ from: "db-c", to: "web-a", relation: "results" }],
+      }),
+    );
+    const resized = resizeReplicas(original, "db-b", 2);
+    expect(resized.clusters[0].instances).toEqual(["db-a", "db-b"]);
+    expect(resized.connections).toEqual([
+      { from: "db-a", to: "web-a", relation: "results" },
+    ]);
+    expect(original.clusters[0].instances).toEqual(["db-a", "db-b", "db-c"]);
+    expect(resizeReplicas(resized, "db-b", 2)).toEqual(resized);
+    expect(
+      resizeReplicas(resized, "db-b", 1).instances.find((i) => i.id === "db-a"),
+    ).toEqual({ id: "db-a" });
+  });
+
+  test("preserves existing cluster IDs when promoting an unnamed instance", () => {
+    const original = parseDesign(
+      JSON.stringify({
+        version: 1,
+        name: "Independent clusters",
+        instances: ["db-a", "db-b", "compute-a"],
+        clusters: [{ id: "replicas-1", instances: ["db-a", "db-b"] }],
+        connections: [],
+      }),
+    );
+    const resized = resizeReplicas(original, "compute-a", 2);
+    expect(resized.clusters.map((c) => c.id)).toEqual([
+      "replicas-1",
+      "replicas-2",
+    ]);
+    expect(resized.clusters[1].label).toBe("compute-a");
+    expect(resized.clusters[0].instances).toEqual(["db-a", "db-b"]);
+    expect(parseDesign(JSON.stringify(resized))).toEqual(resized);
+  });
+
+  test("rejects an unknown instance without altering the design", () => {
+    const original = structuredClone(webAppExample);
+    expect(() => resizeReplicas(original, "missing", 2)).toThrow(
+      "Unknown instance",
+    );
+    expect(original).toEqual(webAppExample);
+  });
 });

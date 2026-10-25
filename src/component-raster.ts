@@ -21,6 +21,7 @@
  */
 import type { PlacedInstance } from "./design";
 import { instanceColor } from "./layout";
+import type { TransformerSnapshot } from "./transformer-model";
 
 const NS = "http://www.w3.org/2000/svg";
 
@@ -532,9 +533,15 @@ export class ComponentRasterCache {
   private readonly records = new Map<SVGGElement, RasterRecord>();
   private readonly queue: RasterRecord[] = [];
   private readonly queued = new Set<RasterRecord>();
+  /** Explicit provider edits prepare their normal shared image ahead of idle tiers. */
+  private readonly requested = new Set<RasterRecord>();
 
   /** Insertion order is LRU; URLs outlive replica removal but stay pixel-bounded. */
   private readonly drawings = new Map<string, SharedDrawing>();
+
+  /** Bitmap leases keep in-flight transformer textures alive without copying pixels. */
+  private readonly leases = new Map<SharedDrawing, number>();
+  private readonly retired = new Set<SharedDrawing>();
 
   /** Current CSS pixels per world unit; zero until first update. */
   private scale = 0;
@@ -551,6 +558,7 @@ export class ComponentRasterCache {
   /** One raster job at a time, so many components never form one long task. */
   private processing = false;
   private pumpTimer: number | null = null;
+  private pumpIdle = false;
 
   /** Invalidates every in-flight raster when the palette changes. */
   private themeRevision = 0;
@@ -615,10 +623,6 @@ export class ComponentRasterCache {
     )) {
       const type = element.dataset.rendererType;
       if (!isRendererType(type)) continue;
-      // A skin mid-morph keeps its live vectors so individual parts can
-      // animate. The scene calls sync() again when the transition settles, so
-      // raster work never competes with the animation frames.
-      if (element.hasAttribute("data-skin-morph")) continue;
       const provider = element.dataset.rendererProvider ?? "";
       const known = this.records.get(element);
       const queryBase = element.querySelector<SVGGElement>(
@@ -728,20 +732,66 @@ export class ComponentRasterCache {
   }
 
   /**
-   * Restore live static vectors before a transient clone.
-   *
-   * A provider morph animates the outgoing skin part by part, which a single
-   * cached bitmap cannot express. Only that component's image is dropped;
-   * the shared drawing stays cached for the next reuse, and the outgoing DOM
-   * is replaced in the same render, so no stale frame is painted.
-   *
-   * @param element - Scene-instance wrapper about to be cloned.
+   * Prepare a visible user-requested target promptly, through the existing
+   * pixel budget and single-encode queue. This neither makes a transition-only
+   * bitmap nor samples source vectors; only the ordinary target cache job is
+   * advanced ahead of background sharpening. Navigation still owns the CPU.
    */
-  materializeVectors(element: SVGGElement): void {
-    const geometry = element.querySelector<SVGGElement>("[data-renderer-type]");
-    if (!geometry) return;
+  requestSnapshot(geometry: SVGGElement): void {
     const record = this.records.get(geometry);
-    if (record?.vectorsDetached) this.dropImages(record);
+    if (!record || record.base || this.isCulled(record)) return;
+    this.requested.add(record);
+    const queuedAt = this.queue.indexOf(record);
+    if (queuedAt >= 0) {
+      this.queue.splice(queuedAt, 1);
+      this.queue.unshift(record);
+    }
+    if (this.pumpIdle && this.pumpTimer !== null) {
+      this.view.cancelIdleCallback(this.pumpTimer);
+      this.pumpTimer = null;
+      this.pumpIdle = false;
+    }
+    this.scheduleRefresh(0);
+  }
+
+  /**
+   * Borrow already-decoded static images for a mechanical transformation.
+   * Never expands vectors or allocates a canvas. The caller owns an idempotent
+   * release; shared URLs survive source removal and palette invalidation until
+   * the final borrower releases them.
+   */
+  capture(geometry: SVGGElement): TransformerSnapshot | null {
+    const record = this.records.get(geometry);
+    const drawing = record?.shared;
+    if (!drawing || !record.base) return null;
+    this.leases.set(drawing, (this.leases.get(drawing) ?? 0) + 1);
+    const images = [record.base.element, record.overlay?.element]
+      .filter((image): image is SVGImageElement => image !== undefined)
+      .map((image) => {
+        const clone = image.cloneNode(false) as SVGImageElement;
+        clone.removeAttribute("class");
+        clone.removeAttribute("data-raster-layer");
+        clone.style.visibility = "visible";
+        return clone;
+      });
+    let released = false;
+    return {
+      images,
+      release: () => {
+        if (released) return;
+        released = true;
+        const remaining = (this.leases.get(drawing) ?? 1) - 1;
+        if (remaining > 0) this.leases.set(drawing, remaining);
+        else {
+          this.leases.delete(drawing);
+          if (this.retired.delete(drawing)) {
+            URL.revokeObjectURL(drawing.base);
+            if (drawing.overlay) URL.revokeObjectURL(drawing.overlay);
+          }
+        }
+        this.trimDrawings();
+      },
+    };
   }
 
   /**
@@ -1028,6 +1078,7 @@ export class ComponentRasterCache {
       record.revision += 1;
       this.enqueue(record);
     }
+    this.pump();
   }
 
   /** Enqueue one component; `building` jobs observe revisions and rebuild. */
@@ -1035,21 +1086,26 @@ export class ComponentRasterCache {
     if (record.building || this.queued.has(record)) return;
     if (!this.records.has(record.element)) return;
     this.queued.add(record);
-    this.queue.push(record);
+    if (this.requested.has(record)) this.queue.unshift(record);
+    else this.queue.push(record);
     this.pump();
   }
 
-  /** Prepare one shared drawing only when the browser has an idle task slot. */
+  /** Yield between encodes; explicit target requests precede idle sharpening. */
   private pump(): void {
-    if (this.processing || this.pumpTimer !== null) return;
+    if (this.processing || this.pumpTimer !== null || !this.queue.length)
+      return;
     const run = () => {
       this.pumpTimer = null;
+      this.pumpIdle = false;
       this.processNext();
     };
-    this.pumpTimer =
-      typeof this.view.requestIdleCallback === "function"
-        ? this.view.requestIdleCallback(run, { timeout: 1000 })
-        : this.view.setTimeout(run, 0);
+    this.pumpIdle =
+      this.requested.size === 0 &&
+      typeof this.view.requestIdleCallback === "function";
+    this.pumpTimer = this.pumpIdle
+      ? this.view.requestIdleCallback(run, { timeout: 1000 })
+      : this.view.setTimeout(run, 0);
   }
 
   /** Run one queued component, then yield before the next. */
@@ -1067,6 +1123,7 @@ export class ComponentRasterCache {
     while (this.queue.length) {
       const record = this.queue.shift();
       if (!record) break;
+      this.requested.delete(record);
       this.queued.delete(record);
       if (
         !this.isCurrent(record) ||
@@ -1362,6 +1419,7 @@ export class ComponentRasterCache {
       // Detached originals retain fallback/source data without participating
       // in SVG layout on every close-range camera update.
       this.detachVectors(record);
+      record.element.dispatchEvent(new Event("component-raster-ready"));
       this.trimDrawings();
     } catch {
       // Leave the original vectors (and any previous image set) in place.
@@ -1463,8 +1521,11 @@ export class ComponentRasterCache {
     this.themeRevision += 1;
     for (const record of this.records.values()) this.invalidate(record);
     for (const drawing of this.drawings.values()) {
-      URL.revokeObjectURL(drawing.base);
-      if (drawing.overlay) URL.revokeObjectURL(drawing.overlay);
+      if (this.leases.has(drawing)) this.retired.add(drawing);
+      else {
+        URL.revokeObjectURL(drawing.base);
+        if (drawing.overlay) URL.revokeObjectURL(drawing.overlay);
+      }
     }
     this.drawings.clear();
     this.scheduleRefresh(0);
@@ -1491,6 +1552,7 @@ export class ComponentRasterCache {
     record.shared = null;
     delete record.element.dataset.rasterReady;
     this.records.delete(record.element);
+    this.requested.delete(record);
     record.revision += 1;
   }
 
@@ -1545,6 +1607,7 @@ export class ComponentRasterCache {
     record.styles = drawing.styles;
     record.element.dataset.rasterReady = "true";
     this.detachVectors(record);
+    record.element.dispatchEvent(new Event("component-raster-ready"));
   }
 
   /** Evict least-recent unused tiers; active replicas never lose their pixels. */
@@ -1556,6 +1619,7 @@ export class ComponentRasterCache {
     for (const record of this.records.values()) {
       if (record.base) active.add(record.base.url);
     }
+    for (const drawing of this.leases.keys()) active.add(drawing.base);
     for (const [key, drawing] of this.drawings) {
       if (active.has(drawing.base)) continue;
       URL.revokeObjectURL(drawing.base);

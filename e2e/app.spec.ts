@@ -938,103 +938,93 @@ test.describe("instance selection", () => {
   });
 });
 
-test.describe("provider skin transition", () => {
-  // The morph is the behavior under test, so opt out of the global reduce.
-  test.use({ reducedMotion: "no-preference" });
+test.describe("provider switching safety", () => {
+  for (const reducedMotion of ["no-preference", "reduce"] as const) {
+    test(`switches provider with bounded motion and ${reducedMotion}`, async ({
+      page,
+    }) => {
+      await page.emulateMedia({ reducedMotion });
+      await page.goto("/");
+      const cache = page.locator(
+        '.scene-instance[data-instance-id="cache-server"]',
+      );
+      await expect(cache.locator('[data-raster-ready="true"]')).toHaveCount(1);
+      const box = await cache.boundingBox();
+      if (!box) throw new Error("Cache instance not laid out.");
+      await page.mouse.click(
+        box.x + box.width * 0.35,
+        box.y + box.height * 0.78,
+      );
+      await expect(page.locator("#detail-provider")).toHaveValue("redis");
+      await expect(page.locator("#scene")).not.toHaveClass(/navigating/);
+      const viewport = await page.locator("#scene").getAttribute("viewBox");
+      if (!viewport) throw new Error("Missing scene viewport.");
 
-  test("builds the incoming skin and retires the outgoing one", async ({
+      // Inspect the same task as the change event: final geometry must already
+      // be mounted, not deferred until an animation frame or timeout.
+      const immediate = await page.evaluate(() => {
+        const select =
+          document.querySelector<HTMLSelectElement>("#detail-provider")!;
+        select.value = "";
+        select.dispatchEvent(new Event("change", { bubbles: true }));
+        const node = document.querySelector<SVGGElement>(
+          '.scene-instance[data-instance-id="cache-server"]',
+        )!;
+        const body = node.querySelector<SVGGElement>("[data-renderer-type]")!;
+        return {
+          provider: body.dataset.rendererProvider ?? "",
+          copies: document.querySelectorAll(
+            '.scene-instance[data-instance-id="cache-server"]',
+          ).length,
+          transient: document.querySelectorAll(
+            ".transformer-rig,.transformer-waiting",
+          ).length,
+          bodyAnimations: body.getAnimations().length,
+          bodyTransform: getComputedStyle(body).transform,
+          replicasDropping: node.closest(".instance-enter") !== null,
+        };
+      });
+      expect(immediate).toEqual({
+        provider: "",
+        copies: 1,
+        transient: reducedMotion === "reduce" ? 0 : 1,
+        bodyAnimations: 0,
+        bodyTransform: "none",
+        replicasDropping: false,
+      });
+      await expect(cache.locator(".cache")).toHaveAttribute(
+        "data-raster-ready",
+        "true",
+      );
+      if (reducedMotion === "no-preference")
+        await expect(cache.locator(".transformer-rig")).toHaveCount(1);
+      await expect(
+        page.locator(".transformer-rig,.transformer-waiting"),
+      ).toHaveCount(0, { timeout: 1500 });
+      await expect(page.locator("#scene")).toHaveAttribute("viewBox", viewport);
+      await page.selectOption("#detail-provider", "redis");
+      await expect(cache.locator(".cache")).toHaveAttribute(
+        "data-renderer-provider",
+        "redis",
+      );
+      await expect(cache.locator(".cache")).toHaveAttribute(
+        "data-raster-ready",
+        "true",
+      );
+      if (reducedMotion === "no-preference")
+        await expect(cache.locator(".transformer-rig")).toHaveCount(1);
+      await expect(
+        page.locator(".transformer-rig,.transformer-waiting"),
+      ).toHaveCount(0, { timeout: 1500 });
+      await expect(page.locator("#scene")).toHaveAttribute("viewBox", viewport);
+      await expect(page.locator("#detail-title")).toHaveText("Cache server");
+    });
+  }
+
+  test("rapid cluster provider changes keep only the final ten cabinets", async ({
     page,
   }) => {
-    await page.goto("/");
-    const cache = page.locator(
-      '.scene-instance[data-instance-id="cache-server"]',
-    );
-    const box = await cache.boundingBox();
-    if (!box) throw new Error("Cache instance not laid out.");
-    // Hit the lower front face; the centre hosts the drag handle.
-    await page.mouse.click(box.x + box.width * 0.35, box.y + box.height * 0.78);
-    await expect(page.locator("#detail-title")).toHaveText("Cache server");
-    await expect(page.locator("#detail-provider")).toHaveValue("redis");
-    // The object carries exactly one mark, and it is the upstream artwork.
-    await expect(cache.locator('svg[viewBox="0 0 256 220"]')).toHaveCount(1);
-
-    // Change the provider inside the page so the ghost and its running build
-    // can be observed before the first frame settles.
-    const started = await page.evaluate(() => {
-      const select =
-        document.querySelector<HTMLSelectElement>("#detail-provider")!;
-      select.value = "";
-      select.dispatchEvent(new Event("change", { bubbles: true }));
-      const instance = document.querySelector(
-        '.scene-instance[data-instance-id="cache-server"]',
-      )!;
-      const parts = [...instance.querySelectorAll(".skin-part")];
-      return {
-        ghosts: document.querySelectorAll(".skin-ghost").length,
-        instances: document.querySelectorAll(
-          '.scene-instance[data-instance-id="cache-server"]',
-        ).length,
-        // Artwork groups animate independently, not as one whole-skin clip.
-        parts: parts.length,
-        running: parts.filter((part) => part.getAnimations().length > 0).length,
-        // Borders animate their projected hit target with transforms.
-        frames: [...document.querySelectorAll(".scene-frame")].filter((frame) =>
-          frame.getAnimations().some((animation) => {
-            const effect = animation.effect;
-            return (
-              effect instanceof KeyframeEffect &&
-              effect
-                .getKeyframes()
-                .some((keyframe) => keyframe.transform !== undefined)
-            );
-          }),
-        ).length,
-        // The merged platform cross-fades instead of snapping.
-        platforms: document.querySelectorAll(".platform-ghost").length,
-        morphing: instance
-          .querySelector("[data-renderer-type]")
-          ?.hasAttribute("data-skin-morph"),
-      };
-    });
-    expect(started.ghosts).toBe(1);
-    expect(started.instances).toBe(1);
-    expect(started.parts).toBeGreaterThan(2);
-    expect(started.running).toBeGreaterThan(1);
-    expect(started.frames).toBeGreaterThan(0);
-    expect(started.platforms).toBe(1);
-    expect(started.morphing).toBe(true);
-    await expect(page.locator(".skin-ghost")).toHaveCount(0);
-    await expect(page.locator(".skin-part")).toHaveCount(0);
-    await expect(page.locator(".platform-ghost")).toHaveCount(0);
-    await expect(cache.locator(".cache")).not.toHaveAttribute(
-      "data-renderer-provider",
-      "redis",
-    );
-    await expect(cache.locator('svg[viewBox="0 0 256 220"]')).toHaveCount(0);
-
-    const reverse = await page.evaluate(() => {
-      const select =
-        document.querySelector<HTMLSelectElement>("#detail-provider")!;
-      select.value = "redis";
-      select.dispatchEvent(new Event("change", { bubbles: true }));
-      return {
-        ghosts: document.querySelectorAll(".skin-ghost").length,
-        parts: document.querySelectorAll(".skin-part").length,
-        platforms: document.querySelectorAll(".platform-ghost").length,
-      };
-    });
-    expect(reverse.ghosts).toBe(1);
-    expect(reverse.parts).toBeGreaterThan(2);
-    expect(reverse.platforms).toBe(1);
-    await expect(page.locator(".skin-ghost")).toHaveCount(0);
-    await expect(page.locator(".skin-part")).toHaveCount(0);
-    await expect(cache.locator(".cache")).toHaveAttribute(
-      "data-renderer-provider",
-      "redis",
-    );
-  });
-
-  test("keeps a cluster-wide swap on the whole-skin path", async ({ page }) => {
+    await page.emulateMedia({ reducedMotion: "no-preference" });
     await page.goto("/");
     const cache = page.locator(
       '.scene-instance[data-instance-id="cache-server"]',
@@ -1042,41 +1032,97 @@ test.describe("provider skin transition", () => {
     const box = await cache.boundingBox();
     if (!box) throw new Error("Cache instance not laid out.");
     await page.mouse.click(box.x + box.width * 0.35, box.y + box.height * 0.78);
-    await expect(page.locator("#detail-title")).toHaveText("Cache server");
     await page.locator("#replica-increase").evaluate((button) => {
       for (let index = 0; index < 9; index++)
         (button as HTMLButtonElement).click();
     });
-    await expect(page.locator(".scene-instance")).toHaveCount(13);
-
-    const started = await page.evaluate(() => {
+    await expect(
+      page.locator(
+        '.scene-instance [data-renderer-type="cache"][data-raster-ready="true"]',
+      ),
+    ).toHaveCount(10);
+    await page.evaluate(() => {
+      const stats = { peakRigs: 0, peakWaiting: 0 };
+      (
+        window as Window & { transformerStats?: typeof stats }
+      ).transformerStats = stats;
+      new MutationObserver(() => {
+        stats.peakRigs = Math.max(
+          stats.peakRigs,
+          document.querySelectorAll(".transformer-rig").length,
+        );
+        stats.peakWaiting = Math.max(
+          stats.peakWaiting,
+          document.querySelectorAll(".transformer-waiting").length,
+        );
+      }).observe(document.querySelector("#scene")!, {
+        childList: true,
+        subtree: true,
+      });
+    });
+    await page.selectOption("#detail-provider", "");
+    await expect(page.locator(".transformer-rig")).toHaveCount(3);
+    await expect(
+      page.locator(".transformer-rig,.transformer-waiting"),
+    ).toHaveCount(0, { timeout: 5000 });
+    await page.selectOption("#detail-provider", "redis");
+    await expect(page.locator(".transformer-rig")).toHaveCount(3);
+    const final = await page.evaluate(() => {
       const select =
         document.querySelector<HTMLSelectElement>("#detail-provider")!;
-      select.value = "";
-      select.dispatchEvent(new Event("change", { bubbles: true }));
-      return {
-        parts: document.querySelectorAll(".skin-part").length,
-        ghosts: document.querySelectorAll(".skin-ghost").length,
-        morphing: document.querySelectorAll("[data-skin-morph]").length,
-        caches: document.querySelectorAll(
+      // Interrupt three active rigs and their queued replicas in the same task.
+      // Old jobs must release their pixels instead of stacking choreography.
+      for (const provider of ["", "redis", ""]) {
+        select.value = provider;
+        select.dispatchEvent(new Event("change", { bubbles: true }));
+      }
+      const nodes = [
+        ...document.querySelectorAll<SVGGElement>(
           '.scene-instance[data-instance-id^="cache-server"]',
+        ),
+      ];
+      return {
+        ids: nodes.map((node) => node.dataset.instanceId),
+        providers: nodes.map(
+          (node) =>
+            node.querySelector<SVGGElement>("[data-renderer-type]")!.dataset
+              .rendererProvider ?? "",
+        ),
+        transient: document.querySelectorAll(
+          ".transformer-rig,.transformer-waiting",
         ).length,
+        drops: nodes.filter((node) => node.closest(".instance-enter")).length,
       };
     });
-    // Ten simultaneous skins stay on the whole-object cross-fade: no part
-    // wrappers, one ghost each, and every incoming skin skips raster work
-    // until its rebuild settles.
-    expect(started).toEqual({
-      parts: 0,
-      ghosts: 10,
-      morphing: 10,
-      caches: 10,
-    });
-    await expect(page.locator(".skin-ghost")).toHaveCount(0);
-    await expect(page.locator(".skin-part")).toHaveCount(0);
-    await expect(page.locator("[data-skin-morph]")).toHaveCount(0);
-    await expect(page.locator('[data-renderer-type="cache"]')).toHaveCount(10);
+    expect(final.ids).toHaveLength(10);
+    expect(new Set(final.ids).size).toBe(10);
+    expect(final.providers).toEqual(Array(10).fill(""));
+    expect(final.transient).toBeLessThanOrEqual(10);
+    expect(final.drops).toBe(0);
+    await expect(
+      page.locator(
+        '.scene-instance [data-renderer-type="cache"][data-raster-ready="true"]',
+      ),
+    ).toHaveCount(10);
     await expect(page.locator("#detail-provider")).toHaveValue("");
+    await expect(
+      page.locator(".transformer-rig,.transformer-waiting"),
+    ).toHaveCount(0, { timeout: 5000 });
+    const stats = await page.evaluate(
+      () =>
+        (
+          window as Window & {
+            transformerStats?: { peakRigs: number; peakWaiting: number };
+          }
+        ).transformerStats!,
+    );
+    expect(stats.peakRigs).toBe(3);
+    expect(stats.peakWaiting).toBeLessThanOrEqual(10);
+    await expect(
+      page.locator(
+        '.scene-instance [data-renderer-type="cache"][style*="visibility: hidden"]',
+      ),
+    ).toHaveCount(0);
   });
 });
 

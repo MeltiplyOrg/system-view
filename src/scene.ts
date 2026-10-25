@@ -5,13 +5,16 @@ import { instanceFootprint, layoutDesign } from "./layout";
 import type { Layout, PlacedCluster } from "./layout";
 import { createPlatforms } from "./platform";
 import {
+  componentEnvelope,
   componentHeight,
   createComponent,
-  createComponentMotion,
 } from "./components";
 import { ComponentRasterCache } from "./component-raster";
 import { routeOrthogonal } from "./routing";
 import type { RoutePoint, RouteRect } from "./routing";
+import { TransformerTransitions } from "./transformer-transitions";
+import type { TransformerSource } from "./transformer-transitions";
+import type { TransformerEnvelope } from "./transformer-model";
 
 const NS = "http://www.w3.org/2000/svg";
 
@@ -252,39 +255,6 @@ const CABLE_LABEL_MAX_CHARS = 36;
 
 /** Width in SVG units used when a relation caption needs condensing. */
 const CABLE_LABEL_WIDTH = 180;
-
-/**
- * Transform/opacity animations shared by detailed skin swaps in one render.
- *
- * Both the outgoing ghost and the incoming skin animate, so this is split
- * across twice the number of swapping instances. Complex skins are chunked
- * into at most this many parts. Bounding the count keeps a small cluster from
- * allocating hundreds of compositor-promoted groups on a weak device; larger
- * swaps switch to the whole-skin cross-fade instead.
- */
-const SKIN_PART_ANIMATION_BUDGET = 96;
-
-/** Upper bound for one skin regardless of the shared budget. */
-const SKIN_PART_LIMIT = 32;
-
-/**
- * Borders allowed one transform animation per render.
- *
- * A bottlenecked scene with many nodes snaps the rest into place rather than
- * paying for a layer per border. Provider swaps normally change only a few
- * frames, so the visible result is unchanged while the cost stays bounded.
- */
-const SKIN_FRAME_ANIMATION_BUDGET = 32;
-
-/** Normalize provider keys for change detection; the renderer is case-blind. */
-const providerKey = (value: string | undefined): string =>
-  value?.trim().toLowerCase() ?? "";
-
-/** One chunk of a provider skin wrapped in an animatable group. */
-interface SkinPartWrap {
-  wrapper: SVGGElement;
-  parts: Element[];
-}
 
 /**
  * Projected bounds of the design content.
@@ -667,45 +637,21 @@ export class SystemScene {
 
   /** Shared static artwork for every renderer type, keyed by geometry/palette. */
   private readonly componentRaster: ComponentRasterCache;
+  private readonly transformers: TransformerTransitions;
 
   /** Live component DOM survives replica edits, including in-flight CSS drops. */
   private readonly renderedInstances = new Map<
     string,
     {
       root: SVGGElement;
-      /** Holder for the skin; skin swaps animate this, not the identity root. */
-      slot: SVGGElement;
       element: SVGGElement;
       /** Projected position the element's own transform was built at. */
       origin: readonly [number, number];
-      /** Projected position used by the last render, for ghost handoff. */
-      placed: readonly [number, number];
       label: string;
       type: PlacedInstance["type"];
       provider?: string;
       /** Cached root visibility so pans only write style on state changes. */
       hidden: boolean;
-    }
-  >();
-
-  /**
-   * In-flight provider skin morph, keyed by instance id.
-   *
-   * The old skin is a clone parked beside the holder while the new skin
-   * builds. Tracking it lets a second provider change (or deletion) cancel
-   * the animations and remove the ghost instead of stacking crossfades.
-   */
-  private readonly skinMorphs = new Map<
-    string,
-    {
-      ghost: SVGGElement;
-      animations: Animation[];
-      /** Incoming part holders, unwrapped when the build settles. */
-      wraps: SkinPartWrap[];
-      /** Incoming geometry root carrying the raster skip marker. */
-      geometry: SVGGElement | null;
-      /** Lazy live-detail layer for bulk swaps. */
-      motion: (() => SVGGElement | null) | null;
     }
   >();
 
@@ -914,6 +860,10 @@ export class SystemScene {
     );
     svg.append(databaseDefs, this.grid, this.content);
     this.componentRaster = new ComponentRasterCache(svg);
+    this.transformers = new TransformerTransitions(
+      this.content,
+      this.componentRaster,
+    );
     new ResizeObserver(() => this.resize()).observe(svg);
 
     svg.addEventListener(
@@ -1039,38 +989,11 @@ export class SystemScene {
    *
    * @param design - Already validated document. The defensive endpoint check
    *   protects against callers bypassing the parser.
-   * @param animate - Preserve live components/camera, drop in new replicas, and
-   *   morph changed provider skins through a build reveal.
+   * @param animate - Preserve live components/camera and drop in new replicas.
+   *   Provider swaps assemble bounded, bitmap-textured layers from base to cap.
    * @throws Error when a connection references a missing instance.
    */
   render(design: Design, animate = false): void {
-    const previousDesign = this.currentDesign,
-      motion =
-        animate && !matchMedia("(prefers-reduced-motion: reduce)").matches,
-      previousProviders = new Map(
-        (previousDesign?.instances ?? []).map((instance) => [
-          instance.id,
-          providerKey(instance.provider),
-        ]),
-      ),
-      providerTransition =
-        motion &&
-        previousDesign !== null &&
-        design.instances.some(
-          (instance) =>
-            previousProviders.has(instance.id) &&
-            previousProviders.get(instance.id) !==
-              providerKey(instance.provider),
-        );
-
-    // A new render owns the platform cross-fade; an older ghost must not
-    // outlive it or be mistaken for the live platform layer.
-    for (const ghost of this.content.querySelectorAll<SVGGElement>(
-      ".platform-ghost",
-    )) {
-      for (const animation of ghost.getAnimations()) animation.cancel();
-      ghost.remove();
-    }
     this.currentDesign = design;
     this.hoveredFrameId = null;
     const previousCluster = new Map(this.instanceCluster);
@@ -1084,33 +1007,6 @@ export class SystemScene {
     this.reconcileOffsets(previousCluster, design);
     const layout = layoutDesign(design);
     this.applyDragOffsets(layout);
-
-    // Split the shared animation budget across every skin that will swap.
-    // Chunking happens inside each skin, so the total layer count is bounded
-    // even when a large cluster changes provider at once.
-    let skinSwaps = 0;
-    if (animate)
-      for (const instance of layout.instances) {
-        const record = this.renderedInstances.get(instance.id);
-        if (
-          record &&
-          (record.type !== instance.type ||
-            record.provider !== instance.provider)
-        )
-          skinSwaps += 1;
-      }
-    // Part-level builds are only legible when the objects are large on
-    // screen. Small swaps get the full per-part detail; cluster-wide swaps
-    // use a single whole-skin cross-fade so ten replicas cannot multiply
-    // wrappers and paint work on a weak device.
-    const detailed = skinSwaps > 0 && skinSwaps <= 3,
-      partBudget = Math.max(
-        3,
-        Math.min(
-          SKIN_PART_LIMIT,
-          Math.floor(SKIN_PART_ANIMATION_BUDGET / (2 * Math.max(1, skinSwaps))),
-        ),
-      );
 
     // Every draggable node gets a border. A declared cluster is one group
     // border around all its members; each unclustered instance gets its own.
@@ -1438,7 +1334,7 @@ export class SystemScene {
     }
 
     if (!animate) {
-      for (const id of this.skinMorphs.keys()) this.endSkinMorph(id);
+      this.transformers.cancelAll();
       this.renderedInstances.clear();
       this.content.replaceChildren();
     }
@@ -1446,54 +1342,22 @@ export class SystemScene {
     // animation timelines and painted component geometry survive rapid clicks.
     const previousGeometry = this.content
       .firstElementChild as SVGGElement | null;
-    if (previousGeometry) {
-      // Borders are recreated each render, so capture their old projected
-      // rectangles first and let the fresh path start under an affine
-      // transform. The dashed hit target then follows the drawn line.
-      const previousFrames = new Map<string, string>();
-      if (providerTransition)
-        for (const path of previousGeometry.querySelectorAll<SVGPathElement>(
-          ".scene-frame",
-        )) {
-          const key = path.dataset.clusterId;
-          if (key) previousFrames.set(key, path.getAttribute("d") ?? "");
-        }
-      this.animateNodeFrames(previousFrames, layer, providerTransition);
-
-      // A provider change can reshape the merged platform. Reuse the outgoing
-      // group as a fading underlay and fade the incoming group in, which is two
-      // animated groups instead of duplicating the whole platform markup.
-      const previousPlatforms = providerTransition
-        ? previousGeometry.querySelector<SVGGElement>(".platforms")
-        : null;
-      if (previousPlatforms) {
-        previousPlatforms.classList.remove("platforms");
-        previousPlatforms.classList.add("platform-ghost");
-        previousGeometry.replaceWith(previousPlatforms);
-        this.content.insertBefore(layer, previousPlatforms.nextSibling);
-        layer
-          .querySelector<SVGGElement>(".platforms")
-          ?.animate([{ opacity: 0 }, { opacity: 1 }], {
-            duration: 460,
-            easing: "ease-out",
-          });
-        const fade = previousPlatforms.animate(
-          [{ opacity: 1 }, { opacity: 0 }],
-          { duration: 460, easing: "ease-out", fill: "forwards" },
-        );
-        void fade.finished
-          .catch(() => undefined)
-          .then(() => previousPlatforms.remove());
-      } else previousGeometry.replaceWith(layer);
-    } else this.content.append(layer);
+    if (previousGeometry) previousGeometry.replaceWith(layer);
+    else this.content.append(layer);
     const liveIds = new Set(layout.instances.map((instance) => instance.id));
     for (const [id, record] of this.renderedInstances) {
       if (liveIds.has(id)) continue;
-      this.endSkinMorph(id);
+      this.transformers.cancel(id);
       record.root.remove();
       this.renderedInstances.delete(id);
     }
     const orderedRoots: SVGGElement[] = [];
+    const swaps: {
+      id: string;
+      source: TransformerSource;
+      element: SVGGElement;
+      envelope: TransformerEnvelope;
+    }[] = [];
     for (const instance of layout.instances
       .slice()
       .sort(
@@ -1508,70 +1372,49 @@ export class SystemScene {
       );
       let record = this.renderedInstances.get(instance.id);
       const isNew = !record;
+      let source: TransformerSource | null = null;
+      const envelope = componentEnvelope(instance.type, instance.provider);
       if (
         record &&
         (record.label !== instance.label ||
           record.type !== instance.type ||
           record.provider !== instance.provider)
       ) {
-        const skinChanged =
-          record.type !== instance.type ||
-          record.provider !== instance.provider;
-        if (animate && skinChanged) {
-          const element = createComponent(instance, { motion: detailed }),
-            { origin, placed } = record;
-          // Reset the placement root before the skin is measured. The new
-          // element is built at the current projected point, and the ghost
-          // carries its own old-position offset, so parts measure against
-          // the destination instead of inheriting the previous frame's shift.
-          record.root.setAttribute("transform", "translate(0 0)");
-          record.origin = position;
-          record.placed = position;
-          this.startSkinMorph(
+        const previousEnvelope = componentEnvelope(
+          record.type,
+          record.provider,
+        );
+        this.transformers.cancel(instance.id);
+        if (
+          animate &&
+          record.type === instance.type &&
+          record.provider !== instance.provider &&
+          previousEnvelope &&
+          envelope
+        )
+          source = this.transformers.capture(
             instance.id,
-            record.slot,
             record.element,
-            element,
-            {
-              shift: {
-                fromX: placed[0] - origin[0],
-                fromY: placed[1] - origin[1],
-                toX: position[0] - origin[0],
-                toY: position[1] - origin[1],
-              },
-              maxParts: partBudget,
-              detailed,
-              motion: detailed ? null : () => createComponentMotion(instance),
-            },
+            previousEnvelope,
           );
-          record.element = element;
-          record.label = instance.label;
-          record.type = instance.type;
-          if (instance.provider === undefined) delete record.provider;
-          else record.provider = instance.provider;
-        } else {
-          this.endSkinMorph(instance.id);
-          record.root.remove();
-          this.renderedInstances.delete(instance.id);
-          record = undefined;
-        }
+        record.root.remove();
+        this.renderedInstances.delete(instance.id);
+        record = undefined;
       }
       if (!record) {
         const element = createComponent(instance);
         const root = document.createElementNS(NS, "g"),
           slot = document.createElementNS(NS, "g");
         root.classList.add("instance-placement");
-        // The slot gives a skin swap a stable animation target without ever
-        // touching the identity root or the projected `<g>` transform.
+        // Only genuinely new replicas animate; provider replacements mount
+        // immediately because their stable instance id already existed.
         if (animate && isNew) slot.classList.add("instance-enter");
         slot.append(element);
         root.append(slot);
         record = {
           root,
-          slot,
           element,
           origin: position,
-          placed: position,
           label: instance.label,
           type: instance.type,
           ...(instance.provider === undefined
@@ -1580,12 +1423,13 @@ export class SystemScene {
           hidden: false,
         };
         this.renderedInstances.set(instance.id, record);
+        if (source && envelope)
+          swaps.push({ id: instance.id, source, element, envelope });
       }
       record.root.setAttribute(
         "transform",
         `translate(${position[0] - record.origin[0]} ${position[1] - record.origin[1]})`,
       );
-      record.placed = position;
       const clusterId = this.instanceCluster.get(instance.id);
       if (clusterId) record.element.dataset.clusterId = clusterId;
       else delete record.element.dataset.clusterId;
@@ -1644,6 +1488,13 @@ export class SystemScene {
     this.componentRaster.setScale(
       (this.viewport.width * this.zoom) / this.base.width,
     );
+    for (const swap of swaps)
+      this.transformers.start(
+        swap.id,
+        swap.source,
+        swap.element,
+        swap.envelope,
+      );
     // A manual move can change which nodes cover the focused target's wires;
     // re-derive the dim set so it tracks the dragged layout.
     if (this.focusKey) this.setFocus(this.focusKey);
@@ -1659,458 +1510,6 @@ export class SystemScene {
     // replica edit); let screen-space overlays re-anchor to the new bounds.
     // Non-animated renders fit the camera and already notify view listeners.
     if (animate) for (const listener of this.layoutListeners) listener();
-  }
-
-  /**
-   * Cancel an in-flight skin morph and release its transient DOM.
-   *
-   * Restores the incoming skin's part holders (so the raster cache sees the
-   * real structure), drops the outgoing ghost, and clears the raster skip
-   * marker. Safe to call for an instance without a morph.
-   *
-   * @param id - Stable instance id owning the morph.
-   */
-  private endSkinMorph(id: string): void {
-    const morph = this.skinMorphs.get(id);
-    if (!morph) return;
-    this.skinMorphs.delete(id);
-    for (const animation of morph.animations) animation.cancel();
-    morph.ghost.remove();
-    this.restoreSkinParts(morph.wraps, morph.geometry);
-  }
-
-  /**
-   * Rebuild a provider skin part by part.
-   *
-   * The incoming skin replaces the outgoing one synchronously, so no blank
-   * frame is painted. Every top-level paint group of the incoming design —
-   * and of the outgoing design in detailed mode — gets its own animation
-   * holder: incoming parts rise from below and settle, outgoing parts lift
-   * and fade, staggered from the bottom of the drawing upward. The outgoing
-   * skin still glides between derived positions when a footprint change moves
-   * the node. When many skins swap at once both sides cross-fade as whole
-   * layers and the live detail is mounted afterwards, which keeps the
-   * animation count low without leaving the node static.
-   *
-   * Nothing names a provider or renderer pair. Part lists come from the
-   * rendered DOM, so any future skin participates automatically. A shared
-   * animation budget chunks complex skins in detailed mode; larger swaps use
-   * one whole-skin cross-fade. All motion uses only `transform` and `opacity`
-   * — no path geometry, filters, or clip paths animate. Reduced motion swaps
-   * the DOM without motion.
-   *
-   * @param id - Stable instance id.
-   * @param slot - Holder whose single child is the skin.
-   * @param outgoing - Element being replaced.
-   * @param incoming - Newly rendered element.
-   * @param options - Transition parameters: ghost glide, per-skin part cap,
-   *   whether to build parts, and a lazy live-detail layer for bulk swaps.
-   */
-  private startSkinMorph(
-    id: string,
-    slot: SVGGElement,
-    outgoing: SVGGElement,
-    incoming: SVGGElement,
-    options: {
-      shift: { fromX: number; fromY: number; toX: number; toY: number };
-      maxParts: number;
-      detailed: boolean;
-      motion: (() => SVGGElement | null) | null;
-    },
-  ): void {
-    const { shift, maxParts, detailed, motion } = options;
-    this.endSkinMorph(id);
-    slot.classList.remove("instance-enter");
-    for (const animation of slot.getAnimations()) animation.cancel();
-    if (matchMedia("(prefers-reduced-motion: reduce)").matches) {
-      slot.replaceChildren(incoming);
-      return;
-    }
-
-    // Part-level ghosts need real vectors; one cached bitmap cannot animate
-    // as individual pieces. Bulk swaps keep the bitmap, which is far cheaper
-    // to carry, and fade it as one layer.
-    if (detailed) this.componentRaster.materializeVectors(outgoing);
-    // Reuse the outgoing node instead of cloning it: it leaves the slot in
-    // this same frame, and moving it avoids duplicating cached images or a
-    // whole vector tree for every swapping replica.
-    const ghost = document.createElementNS(NS, "g"),
-      outgoingSkin = outgoing;
-    ghost.classList.add("skin-ghost");
-    outgoingSkin.classList.remove("scene-instance");
-    outgoingSkin.removeAttribute("data-instance-id");
-    outgoingSkin.removeAttribute("data-cluster-id");
-    outgoingSkin.removeAttribute("role");
-    outgoingSkin.removeAttribute("aria-label");
-    outgoingSkin.setAttribute("aria-hidden", "true");
-    for (const part of outgoingSkin.querySelectorAll(
-      "[data-renderer-type],[data-renderer-provider],[data-skin-morph]",
-    )) {
-      part.removeAttribute("data-renderer-type");
-      part.removeAttribute("data-renderer-provider");
-      part.removeAttribute("data-skin-morph");
-    }
-    // Live detail on a departing skin would double compositor work for the
-    // whole rebuild. The incoming skin carries the motion instead.
-    outgoingSkin.querySelector(".component-motion")?.remove();
-    ghost.append(outgoingSkin);
-    slot.replaceChildren(incoming);
-    slot.before(ghost);
-
-    const geometry = incoming.querySelector<SVGGElement>(
-      "[data-renderer-type]",
-    );
-    geometry?.setAttribute("data-skin-morph", "true");
-
-    const ghostMotion = detailed
-        ? this.wrapSkinParts(ghost, maxParts, "disperse")
-        : { wraps: [], animations: [] },
-      incomingMotion = detailed
-        ? this.wrapSkinParts(incoming, maxParts, "assemble")
-        : {
-            wraps: [],
-            animations: [
-              // Bulk fallback: one opacity/rise per object. The outgoing
-              // ghost still fades and the layout still glides, but no part
-              // wrappers are created for a cluster-sized swap.
-              slot.animate(
-                [
-                  { opacity: 0, transform: "scale(0.96)" },
-                  { opacity: 1, transform: "scale(1)" },
-                ],
-                {
-                  duration: 360,
-                  easing: "cubic-bezier(0.22, 0.9, 0.24, 1)",
-                  fill: "backwards",
-                },
-              ),
-            ],
-          };
-
-    // Fade-mode ghosts carry opacity in the glide; part-mode ghosts only
-    // glide while their parts fade independently.
-    const ghostGlide = ghost.animate(
-      [
-        {
-          opacity: 1,
-          transform: `translate(${shift.fromX}px,${shift.fromY}px)`,
-        },
-        {
-          opacity: detailed ? 1 : 0,
-          transform: `translate(${shift.toX}px,${shift.toY}px)`,
-        },
-      ],
-      {
-        duration: detailed ? 520 : 420,
-        easing: "cubic-bezier(0.2, 0.7, 0.2, 1)",
-        fill: "forwards",
-      },
-    );
-    const animations = [
-      ghostGlide,
-      ...ghostMotion.animations,
-      ...incomingMotion.animations,
-    ];
-    const state = {
-      ghost,
-      animations,
-      wraps: incomingMotion.wraps,
-      geometry,
-      motion,
-    };
-    this.skinMorphs.set(id, state);
-    void Promise.allSettled(
-      animations.map((animation) => animation.finished),
-    ).then(() => {
-      // A newer morph (or deletion) owns the slot now; keep its state.
-      if (this.skinMorphs.get(id) !== state) return;
-      this.skinMorphs.delete(id);
-      ghost.remove();
-      if (state.motion && state.geometry) {
-        const live = state.motion();
-        if (live)
-          state.geometry.insertBefore(
-            live,
-            state.geometry.querySelector(".component-label"),
-          );
-      }
-      this.restoreSkinParts(state.wraps, state.geometry);
-      // The final vectors can now be measured and shared again.
-      this.componentRaster.sync();
-    });
-  }
-
-  /**
-   * Wrap a rendered skin's paint groups in animatable holders.
-   *
-   * Only top-level paint groups are wrapped, so painter order and per-part
-   * geometry stay untouched. Contiguous static children are chunked when a
-   * skin exceeds its part allowance; the motion layer, static overlay, and
-   * label remain whole because they cross paint boundaries. Each animated
-   * side uses the same budget, which keeps the total animation count
-   * independent of provider complexity.
-   *
-   * Measurements are geometry bounds taken after every wrapper exists: no
-   * document layout is forced per part. Directions are normalized within the
-   * skin, and the travel distance is scaled by camera zoom so the motion
-   * reads the same at overview and close-up.
-   *
-   * @param root - `.scene-instance` wrapper being assembled or dispersed.
-   * @param maxParts - Maximum holders for this skin.
-   * @param direction - Assemble upward, or disperse upward while fading.
-   * @returns Holders to unwrap and their running animations.
-   */
-  private wrapSkinParts(
-    root: SVGGElement,
-    maxParts: number,
-    direction: "assemble" | "disperse",
-  ): { wraps: SkinPartWrap[]; animations: Animation[] } {
-    const base = root.querySelector<SVGGElement>(".component-static-base"),
-      reserved = [
-        root.querySelector<SVGGElement>(".component-motion"),
-        root.querySelector<SVGGElement>(".component-static-overlay"),
-        root.querySelector<SVGGElement>(".component-label"),
-      ].filter((part): part is SVGGElement => part !== null),
-      staticParts = base ? [...base.children] : [],
-      staticBudget = Math.max(1, maxParts - reserved.length),
-      chunkSize = Math.max(1, Math.ceil(staticParts.length / staticBudget)),
-      groups: Element[][] = [];
-
-    for (let index = 0; index < staticParts.length; index += chunkSize)
-      groups.push(staticParts.slice(index, index + chunkSize));
-    for (const part of reserved) groups.push([part]);
-
-    const wraps: SkinPartWrap[] = [];
-    for (const group of groups) {
-      const first = group[0];
-      if (!first?.parentNode) continue;
-      const wrapper = document.createElementNS(NS, "g");
-      wrapper.classList.add("skin-part");
-      first.before(wrapper);
-      wrapper.append(...group);
-      wraps.push({ wrapper, parts: group });
-    }
-
-    // Geometry bounds, not viewport rects: measuring ten skins must not force
-    // ten document layouts. All wrappers share the root's ancestor transform,
-    // so their `getBBox()` values are directly comparable and carry no camera
-    // scale. One try/catch per part keeps a detached/display:none group inert.
-    const measured: { wrap: SkinPartWrap; box: DOMRect }[] = [];
-    for (const wrap of wraps)
-      try {
-        const box = wrap.wrapper.getBBox();
-        if (box.width > 0.01 || box.height > 0.01) measured.push({ wrap, box });
-      } catch {
-        // Detached or unrenderable holder: leave it out of the animation.
-      }
-    const active = new Map(measured.map(({ wrap }) => [wrap, true]));
-    for (const wrap of wraps)
-      if (!active.has(wrap)) wrap.wrapper.replaceWith(...wrap.parts);
-
-    let minX = Infinity,
-      minY = Infinity,
-      maxX = -Infinity,
-      maxY = -Infinity;
-    for (const { box } of measured) {
-      minX = Math.min(minX, box.x);
-      minY = Math.min(minY, box.y);
-      maxX = Math.max(maxX, box.x + box.width);
-      maxY = Math.max(maxY, box.y + box.height);
-    }
-    const centerX = (minX + maxX) / 2,
-      centerY = (minY + maxY) / 2,
-      halfWidth = Math.max(1, (maxX - minX) / 2),
-      halfHeight = Math.max(1, (maxY - minY) / 2),
-      pixelsPerUnit = Math.max(
-        0.05,
-        (this.viewport.width * this.zoom) / Math.max(1, this.base.width),
-      ),
-      railTravel = Math.min(26, 12 / pixelsPerUnit);
-    const animations: Animation[] = [],
-      step = Math.min(22, 280 / Math.max(1, measured.length));
-    // Sort bottom-to-top so chassis seats first and upper bays/bezel latch in order.
-    measured.sort((a, b) => b.box.y + b.box.height - (a.box.y + a.box.height));
-    for (const [index, { wrap, box }] of measured.entries()) {
-      const nx = Math.max(
-          -1,
-          Math.min(1, (box.x + box.width / 2 - centerX) / halfWidth),
-        ),
-        ny = Math.max(
-          -1,
-          Math.min(1, (box.y + box.height / 2 - centerY) / halfHeight),
-        );
-
-      // Mechanical rail vectors:
-      // - Roof deck / fins (ny < -0.35) mount vertically down from above.
-      // - Side walls (nx > 0.45) slide along the narrow right-hand face.
-      // - Front bays, drives, drawers, and fascias slide along the 30° isometric rack rails [-0.866, 0.5].
-      let slideX: number, slideY: number;
-      if (ny < -0.35) {
-        slideX = 0;
-        slideY = -railTravel * 0.75;
-      } else if (nx > 0.45) {
-        slideX = 0.866 * railTravel * 0.55;
-        slideY = 0.5 * railTravel * 0.55;
-      } else {
-        slideX = -0.866 * railTravel;
-        slideY = 0.5 * railTravel;
-      }
-
-      const delay = index * step;
-      animations.push(
-        direction === "assemble"
-          ? wrap.wrapper.animate(
-              [
-                {
-                  opacity: 0,
-                  transform: `translate(${slideX.toFixed(2)}px, ${slideY.toFixed(2)}px)`,
-                },
-                { opacity: 1, offset: 0.35 },
-                { opacity: 1, transform: "translate(0px, 0px)" },
-              ],
-              {
-                duration: 440,
-                delay,
-                easing: "cubic-bezier(0.12, 0.98, 0.24, 1)",
-                fill: "backwards",
-              },
-            )
-          : wrap.wrapper.animate(
-              [
-                { opacity: 1, transform: "translate(0px, 0px)" },
-                {
-                  opacity: 0,
-                  transform: `translate(${slideX.toFixed(2)}px, ${slideY.toFixed(2)}px)`,
-                },
-              ],
-              {
-                duration: 360,
-                delay,
-                easing: "cubic-bezier(0.35, 0, 0.65, 1)",
-                fill: "forwards",
-              },
-            ),
-      );
-    }
-    return {
-      wraps: measured.map(({ wrap }) => wrap),
-      animations,
-    };
-  }
-
-  /**
-   * Restore animated part holders to plain paint groups.
-   *
-   * Idempotent: holders already replaced are skipped. Called when a build
-   * settles and when a newer render cancels it, so the raster cache always
-   * observes the same DOM shape it expects from a static skin.
-   *
-   * @param wraps - Holders created by `wrapSkinParts`.
-   * @param geometry - Geometry root carrying the skip marker.
-   */
-  private restoreSkinParts(
-    wraps: readonly SkinPartWrap[],
-    geometry: SVGGElement | null,
-  ): void {
-    for (const { wrapper, parts } of wraps)
-      if (wrapper.isConnected) wrapper.replaceWith(...parts);
-    geometry?.removeAttribute("data-skin-morph");
-  }
-
-  /**
-   * Animate borders from their previous projected rectangle to the new one.
-   *
-   * A border is an axis-aligned world rectangle projected isometrically, so
-   * every bounds change is affine. The fresh path keeps its final `d` and
-   * starts under the inverse matrix: only `transform` runs, and hit testing
-   * follows the drawn line because the pointer target moves with it. Frames
-   * past the budget snap instead of allocating more compositor layers.
-   *
-   * @param previous - Previous `d` per border key.
-   * @param layer - Fresh node-frame layer.
-   * @param animate - False for reduced motion or an initial render.
-   */
-  private animateNodeFrames(
-    previous: ReadonlyMap<string, string>,
-    layer: SVGGElement,
-    animate: boolean,
-  ): void {
-    if (!animate) return;
-    let count = 0;
-    for (const path of layer.querySelectorAll<SVGPathElement>(".scene-frame")) {
-      if (count >= SKIN_FRAME_ANIMATION_BUDGET) break;
-      const key = path.dataset.clusterId,
-        before = key ? previous.get(key) : undefined,
-        after = path.getAttribute("d");
-      if (!before || !after || before === after) continue;
-      const oldCorners = this.frameCorners(before),
-        newCorners = this.frameCorners(after);
-      if (!oldCorners || !newCorners) continue;
-      const matrix = this.frameMatrix(newCorners, oldCorners);
-      if (!matrix) continue;
-      count += 1;
-      path.animate(
-        [
-          { transform: `matrix(${matrix.join(", ")})` },
-          { transform: "matrix(1, 0, 0, 1, 0, 0)" },
-        ],
-        { duration: 480, easing: "cubic-bezier(0.2, 0.7, 0.2, 1)" },
-      );
-    }
-  }
-
-  /**
-   * Read the four corners of a projected border polygon.
-   *
-   * @param d - `M … L … L … L … Z` path data produced by `createNodeFrames`.
-   * @returns Four screen points, or null when the path shape is unexpected.
-   */
-  private frameCorners(d: string): ScreenPoint[] | null {
-    const values = d.match(/-?\d+(?:\.\d+)?/g);
-    if (!values || values.length < 8) return null;
-    return [0, 2, 4, 6].map((index) => {
-      const point: ScreenPoint = [
-        Number(values[index]),
-        Number(values[index + 1]),
-      ];
-      return point;
-    });
-  }
-
-  /**
-   * Build the affine matrix that maps one parallelogram onto another.
-   *
-   * Both borders are projected rectangles, so three corresponding corners
-   * determine the transform. Returning the matrix instead of interpolating
-   * path data keeps the animation on the compositor-friendly transform path.
-   *
-   * @param from - Three source points (the incoming border).
-   * @param to - Three matching target points (the previous border).
-   * @returns CSS `matrix(a, b, c, d, e, f)`, or null for a degenerate source.
-   */
-  private frameMatrix(
-    from: readonly ScreenPoint[],
-    to: readonly ScreenPoint[],
-  ): number[] | null {
-    const [px, py] = from[0],
-      ux = from[1][0] - px,
-      uy = from[1][1] - py,
-      vx = from[2][0] - px,
-      vy = from[2][1] - py,
-      det = ux * vy - uy * vx;
-    if (Math.abs(det) < 1e-6) return null;
-    const [qx, qy] = to[0],
-      uX = to[1][0] - qx,
-      uY = to[1][1] - qy,
-      vX = to[2][0] - qx,
-      vY = to[2][1] - qy,
-      a = (uX * vy - vX * uy) / det,
-      c = (vX * ux - uX * vx) / det,
-      b = (uY * vy - vY * uy) / det,
-      d = (vY * ux - uY * vx) / det,
-      e = qx - (a * px + c * py),
-      f = qy - (b * px + d * py);
-    return [a, b, c, d, e, f];
   }
 
   /**

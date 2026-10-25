@@ -130,7 +130,7 @@ app.innerHTML = `
           <div class="section-label">Dynamic design</div>
           <code>instances: [{ id, label?, description?, provider? }]<br>connections: [{ from, to, relation? }]<br>clusters: [{ label?, description?, instances }]</code>
           <p>ID prefixes pick the visual: db- for databases, compute- or server- for backend servers, web- for frontend pages, cache- for in-memory caches. Connect IDs with from/to and describe traffic with relation. Positions and colors are generated; cluster members keep separate platforms.</p>
-          <p>An optional provider switches a component to a product skin. Redis applies only to cache nodes: it reworks the cache silhouette and platform, prints the official Redis mark on the cabinet, and replaces the accent with Redis red. Switching providers rebuilds the incoming skin part by part while the outgoing skin dissolves; borders and the merged platform morph with it. The motion is derived from the rendered skins, so any future provider participates without new animation code. Large cluster swaps cross-fade whole objects instead of animating parts, which keeps lower-end devices smooth. Other renderers ignore providers they do not support, so documents stay portable.</p>
+          <p>An optional provider switches a component to a product skin. Redis applies only to cache nodes: it reworks the cache silhouette and platform, prints the official Redis mark on the cabinet, and replaces the accent with Redis red. Provider changes build the new cabinet layer by layer: base first, stacked body sections seating one at a time, then the top cap. Completed layers stay fixed; there are no swinging panels or wireframe chassis. The camera stays fixed. Up to three cabinets animate together; additional replicas queue. Reduced motion uses an immediate switch. Other renderers ignore providers they do not support, so documents stay portable.</p>
           <p>Select a component and use the replica arrows to scale from 1 to 10. Each column holds at most five replicas; additional columns sit behind it, spaced by the actual platform footprint so compact provider cabinets stay compact instead of inheriting the wider rack pitch. New replicas drop onto their platforms (unless reduced motion is enabled), and rapid additions keep existing drops running. Multiple replicas become a cluster; returning to one restores an instance. Changes update the JSON. Links on removed replicas move to the surviving instance.</p>
           <p>Each renderer has a default palette: databases cyan, backend servers orange, frontend pages violet, caches green. A provider may supply its own accent, artwork, and live detail layer; only static artwork is cached, so activity LEDs and packets keep moving. Every node shares cached artwork by type and provider, so replicas and repeated designs reuse the same images. Visible nodes are prewarmed while idle, and removing a replica keeps shared images available for re-addition. Zoom reuses the previous image until a sharper tier is ready; labels remain live. Internal cable pulses pause during navigation and resume at rest. Offscreen nodes are culled and return when panned into view. Links between components remain visible.</p>
         </section>
@@ -546,13 +546,17 @@ function lockCallout(): void {
 }
 
 /**
- * Select a target: pin its callout, open details, and reframe the camera.
+ * Select a target: pin its callout, open details, optionally reframe the camera.
  *
  * The camera moves the target into the free area left of the detail panel with
  * a smooth pan; the scene owns the interpolation, so the shell only supplies
- * the desired client point.
+ * the desired client point. Provider edits preserve the current view so the
+ * mechanical change starts in place, without waiting for another camera glide.
  */
-function selectTarget(anchor: Element | null, preserveCallout = false): void {
+function selectTarget(
+  anchor: Element | null,
+  options: { preserveCallout?: boolean; camera?: "focus" | "preserve" } = {},
+): void {
   const ids = targetIds(anchor);
   if (!anchor || !ids) {
     clearSelection();
@@ -561,12 +565,13 @@ function selectTarget(anchor: Element | null, preserveCallout = false): void {
   selectedKey = ids.key;
   selectedAnchor = anchor;
   scene.setFocus(ids.key);
-  if (preserveCallout) {
+  if (options.preserveCallout) {
     tipKey = ids.key;
     fillCallout(ids, targetMembers(ids, anchor), false);
   } else tipKey = null;
   lockCallout();
   openDetail(ids);
+  if (options.camera === "preserve") return;
 
   const stageBox = stageBounds,
     free = Math.max(220, stageBox.width - detail.offsetWidth - 28),
@@ -721,7 +726,7 @@ function changeReplicas(delta: number): void {
   const anchor = [...sceneSvg.querySelectorAll(".scene-instance")].find(
     (element) => element.getAttribute("data-instance-id") === memberId,
   );
-  selectTarget(anchor ?? null, true);
+  selectTarget(anchor ?? null, { preserveCallout: true });
 }
 
 replicaDecrease.addEventListener("click", () => changeReplicas(-1));
@@ -774,7 +779,7 @@ function changeProvider(provider: string | undefined): void {
     const id = element.dataset.instanceId;
     return id !== undefined && memberIds.has(id);
   });
-  selectTarget(anchor ?? null, true);
+  selectTarget(anchor ?? null, { preserveCallout: true, camera: "preserve" });
 }
 
 detailProvider.addEventListener("change", () => {

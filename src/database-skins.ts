@@ -1,6 +1,7 @@
 import type { PlacedInstance } from "./design";
 import type { ProviderTheme } from "./providers";
 import { findProvider, PROVIDERS } from "./providers";
+import type { TransformerEnvelope } from "./transformer-model";
 import {
   box,
   circle,
@@ -67,6 +68,7 @@ interface DatabaseSkin {
   id: string;
   height: number;
   rear: string;
+  envelope: TransformerEnvelope;
   front: string;
   motion: string;
   labelTransform: string;
@@ -170,6 +172,7 @@ function postgresqlSkin(): DatabaseSkin {
   return {
     id: "postgresql",
     height: TOP,
+    envelope: { x: X, y: Y, z: Z, width: W, depth: D, height: TOP - Z },
     rear,
     front: overlay,
     motion,
@@ -284,6 +287,7 @@ function mysqlSkin(): DatabaseSkin {
   return {
     id: "mysql",
     height: FIN,
+    envelope: { x: X, y: Y, z: Z, width: W, depth: D, height: TOP - Z },
     rear,
     front: overlay,
     motion,
@@ -387,6 +391,7 @@ function sqliteSkin(): DatabaseSkin {
   return {
     id: "sqlite",
     height: LID,
+    envelope: { x: X, y: Y, z: Z, width: W, depth: D, height: LID - Z },
     rear,
     front: overlay,
     motion,
@@ -502,6 +507,7 @@ function mongodbSkin(): DatabaseSkin {
   return {
     id: "mongodb",
     height: LID,
+    envelope: { x: X, y: Y, z: Z, width: W, depth: D, height: LID - Z },
     rear,
     front: overlay,
     motion,
@@ -635,4 +641,12 @@ export function databaseProviderHeight(
 ): number | null {
   const theme = findProvider(provider, "database-rack");
   return theme ? (SKINS[theme.id]?.height ?? null) : null;
+}
+
+/** Model-space cabinet bounds for any registered database artwork, or null. */
+export function databaseProviderEnvelope(
+  provider: string | undefined,
+): TransformerEnvelope | null {
+  const theme = findProvider(provider, "database-rack");
+  return theme ? (SKINS[theme.id]?.envelope ?? null) : null;
 }

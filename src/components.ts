@@ -1,5 +1,6 @@
 import {
   DATABASE_ANCHOR,
+  DATABASE_ENVELOPE,
   DATABASE_HEIGHT,
   DatabaseRack,
   project,
@@ -8,8 +9,10 @@ import type { PlacedInstance } from "./design";
 import { REDIS_LOGO_ART, findProvider } from "./providers";
 import {
   createProviderDatabaseRack,
+  databaseProviderEnvelope,
   databaseProviderHeight,
 } from "./database-skins";
+import type { TransformerEnvelope } from "./transformer-model";
 
 const NS = "http://www.w3.org/2000/svg";
 
@@ -644,6 +647,7 @@ interface ComponentVariant {
    */
   motion?: string;
   height: number;
+  envelope?: TransformerEnvelope;
   /** Overrides the default instance-label face for this skin. */
   labelTransform?: string;
   labelX?: number;
@@ -669,6 +673,7 @@ const PROVIDER_VARIANTS: Readonly<
       markup: redisCacheGeometry(),
       motion: redisCacheMotion(),
       height: REDIS_CACHE_HEIGHT,
+      envelope: { x: -76, y: -74, z: 16, width: 152, depth: 148, height: 155 },
       labelTransform: frontFace(-80, 80, 16),
       labelX: 10,
       labelY: 7.6,
@@ -691,10 +696,8 @@ function variantOf(
 /**
  * Build the live detail layer for one provider skin, if it has one.
  *
- * Split from `createComponent` so a bulk provider swap can render the static
- * artwork first and append the animated LEDs/packets once the rebuild settles.
- * The returned group is the same element the normal render path uses, keeping
- * painter order (base, motion, label) and the raster cache contract intact.
+ * Kept outside the static base so rasterization never freezes activity LEDs
+ * or packets. The group follows the base and precedes the live nameplate.
  *
  * @param instance - Placed instance; type and provider select the variant.
  * @returns The motion group, or null for skins without live detail.
@@ -754,11 +757,9 @@ export function componentHeight(
 ): number {
   const variant = variantOf(type, provider);
   if (variant) return variant.height;
-  const databaseHeight = databaseProviderHeight(provider);
-  if (databaseHeight !== null) return databaseHeight;
   switch (type) {
     case "database-rack":
-      return DATABASE_HEIGHT;
+      return databaseProviderHeight(provider) ?? DATABASE_HEIGHT;
     case "compute-server":
       return COMPUTE_HEIGHT;
     case "webpage":
@@ -768,14 +769,29 @@ export function componentHeight(
   }
 }
 
-/** Options for `createComponent`; bulk morphs defer the live layer. */
-export interface ComponentOptions {
-  /**
-   * Include the provider's live detail layer. Bulk provider swaps set false
-   * and append it through `createComponentMotion` after the rebuild, which
-   * avoids creating paused LED/packet timelines for every replica at once.
-   */
-  motion?: boolean;
+/**
+ * Physical enclosure coordinates used by the layered assembly.
+ * Artwork without dedicated metadata inherits its renderer's envelope; the
+ * choreography never contains source/target provider-pair branches.
+ */
+export function componentEnvelope(
+  type: PlacedInstance["type"],
+  provider?: string,
+): TransformerEnvelope | null {
+  if (type === "database-rack")
+    return databaseProviderEnvelope(provider) ?? DATABASE_ENVELOPE;
+  if (type === "cache")
+    return (
+      variantOf(type, provider)?.envelope ?? {
+        x: -112,
+        y: -50,
+        z: 21,
+        width: 224,
+        depth: 100,
+        height: 82,
+      }
+    );
+  return null;
 }
 
 /**
@@ -795,10 +811,7 @@ export interface ComponentOptions {
  * @param instance - Validated, placed instance.
  * @returns Group ready to append to the scene; no event handlers are attached.
  */
-export function createComponent(
-  instance: PlacedInstance,
-  options: ComponentOptions = {},
-): SVGGElement {
+export function createComponent(instance: PlacedInstance): SVGGElement {
   const element = document.createElementNS(NS, "g"),
     [x, y] = project(
       instance.position.x,
@@ -856,10 +869,8 @@ export function createComponent(
   geometry.innerHTML = `<g class="component-static-base">${
     variant?.markup ?? COMPONENT_GEOMETRY[instance.type]
   }</g>`;
-  if (options.motion !== false) {
-    const motion = createComponentMotion(instance);
-    if (motion) geometry.append(motion);
-  }
+  const motion = createComponentMotion(instance);
+  if (motion) geometry.append(motion);
   element.append(geometry);
 
   // Identity sits on the server's top rail, cache controller strip, or browser

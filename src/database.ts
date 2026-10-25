@@ -1,4 +1,5 @@
 import type { PlacedInstance } from "./design";
+import type { TransformerEnvelope } from "./transformer-model";
 
 const NS = "http://www.w3.org/2000/svg";
 
@@ -195,6 +196,16 @@ const SZ = nextZ,
 
 /** Cabinet height above its base, in world units; used for view fitting. */
 export const DATABASE_HEIGHT = TOPZ;
+
+/** Physical neutral-rack envelope, sharing the stationary artwork's dimensions. */
+export const DATABASE_ENVELOPE: TransformerEnvelope = {
+  x: RX,
+  y: RY,
+  z: RZ,
+  width: RW,
+  depth: RD,
+  height: TOPZ - RZ,
+};
 
 /**
  * Face-local X of a network jack (0–80 on the narrow end).

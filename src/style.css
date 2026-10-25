@@ -128,9 +128,16 @@ a {
   cursor: default;
   user-select: none;
 }
-.platforms,
-.platform-ghost {
+.platforms {
   pointer-events: none;
+}
+
+/* The exposed top of each assembling section stays solid until the next seats. */
+.assembly-deck {
+  fill: var(--deck);
+  stroke: var(--line);
+  stroke-width: 0.65;
+  stroke-linejoin: round;
 }
 
 /* ---------- hover callout ---------- */
@@ -1285,31 +1292,6 @@ aside.detail.open {
 /* Entry motion belongs to a wrapper, never the projected component itself. */
 .instance-enter {
   animation: instance-drop 520ms both;
-}
-/*
- * Outgoing provider skin during a morph. The scene clones the previous skin,
- * strips its identity/raster markers, and fades it out behind the incoming
- * build. It must never intercept pointer or hover targeting.
- */
-.skin-ghost {
-  pointer-events: none;
-}
-/*
- * The outgoing skin is a transient clone; its LEDs and packets would double
- * the live compositor work for the length of the rebuild. The incoming skin
- * carries the motion instead, so the scene paints exactly one live detail
- * layer per node while parts move.
- */
-.skin-ghost .component-motion {
-  display: none;
-}
-/*
- * An incoming skin keeps its live detail layer, but the LEDs and packets stay
- * paused while artwork parts are moving. Resuming them after the rebuild
- * avoids a second set of per-frame compositor updates on top of the morph.
- */
-[data-skin-morph] :is(.component-motion, .component-motion *) {
-  animation-play-state: paused;
 }
 @keyframes instance-drop {
   0% {

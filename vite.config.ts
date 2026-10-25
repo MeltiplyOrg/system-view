@@ -46,15 +46,22 @@ export default defineConfig({
     },
   },
   test: {
-    // Unit tests cover deterministic geometry and validation. Browser/gesture
-    // wiring is exercised by Playwright, so those modules are excluded from
-    // this coverage gate instead of being mocked here.
+    // Unit coverage gates deterministic geometry, document edits and assembly
+    // timing. Real SVG projection, image decoding, scene clocks and gestures
+    // run in Playwright, rather than mocked browser lifecycle in happy-dom.
     include: ["tests/**/*.test.ts"],
     environment: "happy-dom",
     coverage: {
       provider: "v8",
       include: ["src/**/*.ts"],
-      exclude: ["src/main.ts", "src/scene.ts"],
+      exclude: [
+        "src/main.ts",
+        "src/scene.ts",
+        "src/component-raster.ts",
+        "src/transformer.ts",
+        "src/transformer-transitions.ts",
+        "src/transformer-model.ts",
+      ],
       reporter: ["text", "lcov"],
       skipFull: false,
       thresholds: {

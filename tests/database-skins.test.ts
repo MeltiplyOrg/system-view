@@ -90,4 +90,17 @@ describe("provider database skins", () => {
     const redis = findProvider("redis", "cache")!;
     expect(createProviderDatabaseRack(placed, redis)).toBeNull();
   });
+
+  test("keeps the product mark when a theme uses the shared enamel plate", () => {
+    const { plate: _plate, ...theme } = findProvider(
+      "postgresql",
+      "database-rack",
+    )!;
+    const rack = createProviderDatabaseRack(placed, theme)!;
+    expect(rack.querySelectorAll(".rack-provider-badge svg")).toHaveLength(1);
+    expect(rack.getAttribute("aria-label")).toContain("PostgreSQL");
+    expect(rack.querySelector(".instance-label")?.textContent).toBe(
+      placed.label,
+    );
+  });
 });

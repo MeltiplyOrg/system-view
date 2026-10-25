@@ -25,20 +25,22 @@ this guide adds the app's mechanics.
 
 ## Ownership map
 
-| Surface                                           | Owner                     | Collaborators                                                          |
-| ------------------------------------------------- | ------------------------- | ---------------------------------------------------------------------- |
-| Document shape, validation, examples              | `src/design.ts`           | `src/main.ts` editor; `src/layout.ts` inputs                           |
-| Placement, color, cluster bounds                  | `src/layout.ts`           | `src/platform.ts`, `src/scene.ts`, `src/routing.ts`                    |
-| Provider catalog, accent, footprint, mark         | `src/providers.ts`        | `src/components.ts`, `src/database.ts`, `src/style.css`, `src/main.ts` |
-| Renderer artwork, height, label placement, motion | `src/components.ts`       | `src/style.css`, `src/component-raster.ts`                             |
-| Database rack geometry and shared `<defs>`        | `src/database.ts`         | `src/components.ts` wrapper                                            |
-| Provider database cabinets                        | `src/database-skins.ts`   | `src/database.ts`, `src/providers.ts`, `src/style.css`                 |
-| Platform union and rendering                      | `src/platform.ts`         | `src/layout.ts` footprints                                             |
-| Canvas render pass, camera, selection, morph      | `src/scene.ts`            | `src/components.ts`, `src/component-raster.ts`, `src/main.ts` overlays |
-| Raster cache and shared images                    | `src/component-raster.ts` | `src/scene.ts`, `src/style.css` palettes                               |
-| Shell, editor, callout, detail, theme             | `src/main.ts`             | `index.html`, `src/style.css`                                          |
-| Replica document mutation                         | `src/replicas.ts`         | `src/layout.ts`, `src/main.ts` stepper                                 |
-| Orthogonal cable routing                          | `src/routing.ts`          | `src/scene.ts` obstacles and ports                                     |
+| Surface                                           | Owner                            | Collaborators                                                          |
+| ------------------------------------------------- | -------------------------------- | ---------------------------------------------------------------------- |
+| Document shape, validation, examples              | `src/design.ts`                  | `src/main.ts` editor; `src/layout.ts` inputs                           |
+| Placement, color, cluster bounds                  | `src/layout.ts`                  | `src/platform.ts`, `src/scene.ts`, `src/routing.ts`                    |
+| Provider catalog, accent, footprint, mark         | `src/providers.ts`               | `src/components.ts`, `src/database.ts`, `src/style.css`, `src/main.ts` |
+| Renderer artwork, height, label placement, motion | `src/components.ts`              | `src/style.css`, `src/component-raster.ts`                             |
+| Database rack geometry and shared `<defs>`        | `src/database.ts`                | `src/components.ts` wrapper                                            |
+| Provider database cabinets                        | `src/database-skins.ts`          | `src/database.ts`, `src/providers.ts`, `src/style.css`                 |
+| Platform union and rendering                      | `src/platform.ts`                | `src/layout.ts` footprints                                             |
+| Canvas render pass, camera, selection             | `src/scene.ts`                   | `src/components.ts`, `src/component-raster.ts`, `src/main.ts` overlays |
+| Raster cache and shared images                    | `src/component-raster.ts`        | `src/scene.ts`, `src/style.css` palettes                               |
+| Mechanical provider changes                       | `src/transformer-transitions.ts` | `src/transformer.ts` rig; renderer envelope metadata; raster leases    |
+| Layer partition and assembly timing               | `src/assembly.ts`                | `src/transformer.ts`; pure ordering/travel regression tests            |
+| Shell, editor, callout, detail, theme             | `src/main.ts`                    | `index.html`, `src/style.css`                                          |
+| Replica document mutation                         | `src/replicas.ts`                | `src/layout.ts`, `src/main.ts` stepper                                 |
+| Orthogonal cable routing                          | `src/routing.ts`                 | `src/scene.ts` obstacles and ports                                     |
 
 ## Render pass
 
@@ -90,7 +92,8 @@ One pass explains where most edits belong:
 - Faces are opaque and painter order is the only depth sort. A new part must
   paint back-to-front around the existing box and detail groups.
 - `componentHeight` feeds camera fit and callout anchors. Height and footprint
-  are provider-aware through the variant and theme.
+  are provider-aware through the variant and theme. Unsupported providers must
+  not change fitting height or assembly bounds for another renderer type.
 - Provider artwork has three layers: static `.component-static-base`, live
   `.component-motion`, then `.component-label`. Labels use `textContent` so
   imported strings cannot inject markup; only trusted constants use
@@ -126,27 +129,41 @@ One pass explains where most edits belong:
   inside `.component-static-base` are frozen in the image.
 - Static fills that resolve from CSS variables must stay in
   `PALETTE_PROPERTIES`, or a theme change will serve a stale image.
-- A skin mid-morph carries `data-skin-morph` and is skipped until the scene
-  calls `sync` again. Keep that marker on the geometry root and let the scene
-  own its lifetime.
 - `data-raster-ready` marks a component with images installed. Existing roots
   survive replica edits; removing and re-adding a replica reuses shared pixels.
+- `capture` borrows decoded image references; release every lease when a rig
+  completes or is cancelled. Theme invalidation retires leased URLs until their
+  last borrower releases them. `requestSnapshot` prioritizes the normal target
+  job, retaining the existing pixel budget and single-encode queue.
 
 ### Provider transitions
 
-- Transitions are derived from the rendered DOM: top-level paint groups are
-  wrapped and moved. The generic morph is the only transition path, so a new
-  skin participates as soon as it renders through `createComponent`.
-- Animation uses `transform` and `opacity` only. Detailed part motion is for
-  small swaps; above three simultaneous skins the scene cross-fades whole
-  objects and mounts live detail after the rebuild.
-- Borders animate through the affine matrix of their old and new projected
-  rectangles. The path is the hit target, so pointer geometry follows the
-  drawn line.
-- The merged platform cross-fades as a reused underlay plus the incoming
-  group. It stays non-interactive.
-- `prefers-reduced-motion` swaps the DOM without animation and stops provider
-  detail layers.
+- Provider changes synchronously mount final artwork, border, and platform.
+  Selection is rebound without refocusing the camera: another camera glide
+  would delay target rasterization and obscure the mechanical movement.
+- `transformer.ts` assembles the target bottom-to-top: base, stacked body
+  sections, then cap. The source un-stacks top-down first. The full cycle takes
+  800 ms; only the next section moves, seating from nine model units above.
+  Completed sections remain fixed. No hinged doors, wireframe chassis, fading,
+  whole-cabinet scaling, or large part travel.
+- Sections follow the cabinet's isometric front/side contour, not horizontal
+  screen-space strips. Temporary horizontal decks close exposed sections;
+  the final cap restores the exact original artwork. Seated sections share
+  one clipped image to avoid seams, plus one image for the seating section.
+- Envelope metadata belongs to each renderer, not a provider pair. Surface
+  textures reference the existing shared bitmaps. Never expand or clone the
+  detailed stationary vector trees, allocate transition-only canvases, or add
+  filters/compositing layers. The previous live-vector experiments caused a
+  reported system crash; those resource-heavy paths must stay removed.
+- `TransformerTransitions` owns one 30 Hz clock, at most three active rigs,
+  and at most twelve total jobs. Queued changes retain stationary source
+  pixels. Reduced motion, an unavailable source snapshot, offscreen artwork,
+  or an exhausted queue uses immediate static replacement instead.
+- Completion, interruption, removal, Apply/Reset, theme changes, reduced-motion
+  changes, and backgrounding settle to final artwork and release both leases.
+  A cold target uses the normal prioritized raster job, never a second encoder.
+- Renderer activity and new-replica entry remain separate. Reduced motion
+  disables decorative movement and bypasses the mechanical rig.
 
 ### Shell and state
 
@@ -182,13 +199,13 @@ One pass explains where most edits belong:
    badge; set a dark `plate` tone so the mark stays legible.
 3. Add skin classes to `style.css`. Put animated fills and strokes outside the
    static base. Add the reduced-motion rule.
-4. The generic morph handles transitions; a new skin participates
-   automatically.
+4. Supply the physical cabinet envelope alongside its artwork. The shared
+   mechanism consumes these dimensions; never add provider-pair choreography.
 5. Prove color and footprint through `layoutDesign` and supported-type gating
    through `providersFor`; add that focused provider test. Then switch provider
    on a cache or database node in the browser: exactly one artwork mark
-   (inspect before the raster cache replaces vectors), the build, border,
-   platform, and cleanup.
+   (inspect before the raster cache replaces vectors), final border/platform,
+   live selection, bounded connected motion, and no leftover rig after settling.
 6. Check `bun run size`; provider art ships in the JS bundle.
 
 ## Proof matrix
@@ -203,7 +220,7 @@ One pass explains where most edits belong:
 | Rack geometry and projection             | `tests/database.test.ts`                                  | boot scene and theme switch in `e2e/app.spec.ts`              |
 | Replica mutation                         | `tests/replicas.test.ts`                                  | replica stepper and ten-replica layout                        |
 | Shell, editor, theme, a11y               | —                                                         | `e2e/app.spec.ts`                                             |
-| Canvas, raster, selection, morph         | pure helpers only                                         | `e2e/app.spec.ts`, `e2e/component-cache.spec.ts`              |
+| Canvas, raster, selection, assembly      | `tests/transformer.test.ts` ordering and travel bounds    | `e2e/app.spec.ts`, `e2e/component-cache.spec.ts`              |
 
 Gates: `bun run check` (format, lint, types), `bun run build`, `bun run size`.
 
@@ -213,8 +230,11 @@ Notes:
   otherwise the browser proves the previous bundle.
 - E2E defaults to reduced motion. A transition test opts out with
   `test.use({ reducedMotion: "no-preference" })`.
-- Unit coverage includes every `src` module except `main.ts` and `scene.ts`.
-  Check `vite.config.ts` before assuming a module is exempt.
+- Unit coverage gates deterministic geometry, validation, replica edits and
+  `assembly.ts` timing. Browser-only scene, cache, assembly rendering and
+  scheduling modules run in Playwright rather than mocked DOM lifecycle tests;
+  `transformer-model.ts` contains only types. `vite.config.ts` lists those
+  exclusions explicitly. Per-file coverage thresholds remain unchanged.
 - Gate timing is owned by `AGENTS.md`: targeted unit tests in the inner loop,
   fast unit gate before scope expands, browser and `verify` at milestones.
 
