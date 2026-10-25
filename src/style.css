@@ -828,6 +828,147 @@ aside.detail.open {
 .provider-skin .face.recess {
   fill: color-mix(in srgb, var(--recess) 90%, var(--cable-color));
 }
+/*
+ * Redis skin. The provider tint supplies the red anodized metal; these marks
+ * add the appliance detail the shared cache language cannot: cartridge sleds,
+ * an accent spine, key activity, and etched DIMM banks. Every fill resolves
+ * through theme variables so the raster cache snapshots one palette per skin.
+ */
+.redis-sled {
+  fill: color-mix(in srgb, var(--recess) 86%, var(--fg));
+  stroke: var(--detail);
+  stroke-width: 0.55;
+  vector-effect: non-scaling-stroke;
+}
+.redis-bay {
+  fill: color-mix(in srgb, var(--recess) 92%, var(--cable-color));
+  stroke: var(--detail);
+  stroke-width: 0.55;
+  vector-effect: non-scaling-stroke;
+}
+.redis-edge {
+  fill: var(--cable-color);
+  opacity: 0.72;
+}
+.redis-handle {
+  fill: color-mix(in srgb, var(--cable-color) 82%, var(--body));
+  stroke: color-mix(in srgb, var(--cable-color) 82%, var(--line));
+  stroke-width: 0.6;
+  vector-effect: non-scaling-stroke;
+}
+.redis-handle-line {
+  fill: none;
+  stroke: color-mix(in srgb, var(--cable-color) 24%, var(--fg));
+  stroke-width: 0.7;
+  stroke-linecap: round;
+  vector-effect: non-scaling-stroke;
+}
+.redis-gauge {
+  fill: none;
+  stroke: color-mix(in srgb, var(--cable-color) 62%, var(--detail));
+  stroke-width: 1.5;
+  stroke-linecap: round;
+  vector-effect: non-scaling-stroke;
+}
+.redis-gauge-hot {
+  stroke: var(--cable-color);
+}
+.redis-dimm {
+  fill: color-mix(in srgb, var(--deck) 90%, var(--cable-color));
+  stroke: var(--line);
+  stroke-width: 0.6;
+  vector-effect: non-scaling-stroke;
+}
+.redis-spine {
+  fill: color-mix(in srgb, var(--cable-color) 80%, var(--body));
+  stroke: color-mix(in srgb, var(--cable-color) 42%, var(--line));
+  stroke-width: 0.6;
+  vector-effect: non-scaling-stroke;
+}
+.redis-wordmark {
+  fill: var(--cable-color);
+  font-weight: 700;
+  letter-spacing: 0.16em;
+}
+/*
+ * Live Redis layer. Animation is limited to opacity, short translations, and
+ * a dash offset, so replicas stay cheap while their static pixels are shared.
+ * Negative delays are supplied inline per sled to decorrelate replicas.
+ */
+.redis-blink {
+  animation: redis-blink 2.8s ease-in-out infinite;
+  animation-delay: var(--delay, 0s);
+}
+@keyframes redis-blink {
+  0%,
+  100% {
+    opacity: 0.22;
+  }
+  9% {
+    opacity: 1;
+  }
+  18% {
+    opacity: 0.3;
+  }
+  27% {
+    opacity: 0.92;
+  }
+  45% {
+    opacity: 0.24;
+  }
+  70% {
+    opacity: 0.68;
+  }
+}
+.redis-packet {
+  animation: redis-packet 2.6s cubic-bezier(0.4, 0, 0.2, 1) infinite;
+  animation-delay: var(--delay, 0s);
+}
+.redis-packet rect {
+  fill: var(--cable-color);
+}
+@keyframes redis-packet {
+  0%,
+  8% {
+    transform: translateX(0);
+    opacity: 0;
+  }
+  18% {
+    opacity: 0.95;
+  }
+  82% {
+    opacity: 0.95;
+  }
+  100% {
+    transform: translateX(44px);
+    opacity: 0;
+  }
+}
+.redis-orbit {
+  fill: none;
+  stroke: var(--cable-color);
+  stroke-width: 1.4;
+  stroke-dasharray: 12 88;
+  opacity: 0.9;
+  animation: redis-orbit 4.5s linear infinite;
+}
+@keyframes redis-orbit {
+  to {
+    stroke-dashoffset: -100;
+  }
+}
+.redis-core {
+  animation: redis-core 3.2s ease-in-out infinite;
+}
+@keyframes redis-core {
+  0%,
+  100% {
+    opacity: 0.35;
+  }
+  50% {
+    opacity: 1;
+  }
+}
 .face.drawer-front {
   fill: var(--deck);
 }
@@ -1112,6 +1253,14 @@ aside.detail.open {
 .instance-enter {
   animation: instance-drop 520ms both;
 }
+/*
+ * Outgoing provider skin during a morph. The scene clones the previous skin,
+ * strips its identity/raster markers, and fades it out behind the incoming
+ * build. It must never intercept pointer or hover targeting.
+ */
+.skin-ghost {
+  pointer-events: none;
+}
 @keyframes instance-drop {
   0% {
     transform: translateY(-100px);
@@ -1140,6 +1289,15 @@ aside.detail.open {
   }
   .instance-enter {
     animation: none;
+  }
+  .redis-blink,
+  .redis-packet,
+  .redis-orbit,
+  .redis-core {
+    animation: none;
+  }
+  .redis-packet {
+    opacity: 0.55;
   }
   .scene-frame.focused {
     animation: none;
