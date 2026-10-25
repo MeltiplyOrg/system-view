@@ -3,7 +3,11 @@ import type { Design, PlacedInstance } from "./design";
 import { instanceFootprint, layoutDesign } from "./layout";
 import type { Layout, PlacedCluster } from "./layout";
 import { createPlatforms } from "./platform";
-import { componentHeight, createComponent } from "./components";
+import {
+  componentHeight,
+  createComponent,
+  createComponentMotion,
+} from "./components";
 import { ComponentRasterCache } from "./component-raster";
 import { routeOrthogonal } from "./routing";
 import type { RoutePoint, RouteRect } from "./routing";
@@ -249,14 +253,13 @@ const CABLE_LABEL_MAX_CHARS = 36;
 const CABLE_LABEL_WIDTH = 180;
 
 /**
- * Transform/opacity animations shared by every skin swap in one render.
+ * Transform/opacity animations shared by detailed skin swaps in one render.
  *
  * Both the outgoing ghost and the incoming skin animate, so this is split
  * across twice the number of swapping instances. Complex skins are chunked
- * into at most this many parts. Bounding the count keeps a ten-replica
- * provider change from allocating hundreds of compositor-promoted groups on
- * a weak device; motion stays visually complete because chunks still move
- * independently.
+ * into at most this many parts. Bounding the count keeps a small cluster from
+ * allocating hundreds of compositor-promoted groups on a weak device; larger
+ * swaps switch to the whole-skin cross-fade instead.
  */
 const SKIN_PART_ANIMATION_BUDGET = 96;
 
@@ -646,6 +649,8 @@ export class SystemScene {
       wraps: SkinPartWrap[];
       /** Incoming geometry root carrying the raster skip marker. */
       geometry: SVGGElement | null;
+      /** Lazy live-detail layer for bulk swaps. */
+      motion: (() => SVGGElement | null) | null;
     }
   >();
 
@@ -1033,13 +1038,18 @@ export class SystemScene {
         )
           skinSwaps += 1;
       }
-    const partBudget = Math.max(
-      3,
-      Math.min(
-        SKIN_PART_LIMIT,
-        Math.floor(SKIN_PART_ANIMATION_BUDGET / (2 * Math.max(1, skinSwaps))),
-      ),
-    );
+    // Part-level builds are only legible when the objects are large on
+    // screen. Small swaps get the full per-part detail; cluster-wide swaps
+    // use a single whole-skin cross-fade so ten replicas cannot multiply
+    // wrappers and paint work on a weak device.
+    const detailed = skinSwaps > 0 && skinSwaps <= 3,
+      partBudget = Math.max(
+        3,
+        Math.min(
+          SKIN_PART_LIMIT,
+          Math.floor(SKIN_PART_ANIMATION_BUDGET / (2 * Math.max(1, skinSwaps))),
+        ),
+      );
 
     // Every draggable node gets a border. A declared cluster is one group
     // border around all its members; each unclustered instance gets its own.
@@ -1376,7 +1386,7 @@ export class SystemScene {
           record.type !== instance.type ||
           record.provider !== instance.provider;
         if (animate && skinChanged) {
-          const element = createComponent(instance),
+          const element = createComponent(instance, { motion: detailed }),
             { origin, placed } = record;
           // Reset the placement root before the skin is measured. The new
           // element is built at the current projected point, and the ghost
@@ -1391,13 +1401,16 @@ export class SystemScene {
             record.element,
             element,
             {
-              fromX: placed[0] - origin[0],
-              fromY: placed[1] - origin[1],
-              toX: position[0] - origin[0],
-              toY: position[1] - origin[1],
+              shift: {
+                fromX: placed[0] - origin[0],
+                fromY: placed[1] - origin[1],
+                toX: position[0] - origin[0],
+                toY: position[1] - origin[1],
+              },
+              maxParts: partBudget,
+              detailed,
+              motion: detailed ? null : () => createComponentMotion(instance),
             },
-            partBudget,
-            skinSwaps <= 2,
           );
           record.element = element;
           record.label = instance.label;
@@ -1543,35 +1556,37 @@ export class SystemScene {
    * holder: incoming parts rise from below and settle, outgoing parts lift
    * and fade, staggered from the bottom of the drawing upward. The outgoing
    * skin still glides between derived positions when a footprint change moves
-   * the node. When many skins swap at once the outgoing side fades as one
-   * layer, which keeps the animation count bounded without losing the
-   * incoming rebuild.
+   * the node. When many skins swap at once both sides cross-fade as whole
+   * layers and the live detail is mounted afterwards, which keeps the
+   * animation count low without leaving the node static.
    *
    * Nothing names a provider or renderer pair. Part lists come from the
    * rendered DOM, so any future skin participates automatically. A shared
-   * animation budget chunks complex skins and caps a cluster-wide swap; all
-   * motion uses only `transform` and `opacity` — no path geometry, filters,
-   * or clip paths animate. Reduced motion swaps the DOM without motion.
+   * animation budget chunks complex skins in detailed mode; larger swaps use
+   * one whole-skin cross-fade. All motion uses only `transform` and `opacity`
+   * — no path geometry, filters, or clip paths animate. Reduced motion swaps
+   * the DOM without motion.
    *
    * @param id - Stable instance id.
    * @param slot - Holder whose single child is the skin.
    * @param outgoing - Element being replaced.
    * @param incoming - Newly rendered element.
-   * @param shift - Ghost glide in user units, from old to new.
-   * @param maxParts - Per-skin part-animation cap from the render budget.
-   * @param ghostParts - Animate outgoing parts; otherwise fade the ghost as
-   *   one layer. Cluster-wide swaps use the cheaper fade so a provider change
-   *   does not double every skin's part count.
+   * @param options - Transition parameters: ghost glide, per-skin part cap,
+   *   whether to build parts, and a lazy live-detail layer for bulk swaps.
    */
   private startSkinMorph(
     id: string,
     slot: SVGGElement,
     outgoing: SVGGElement,
     incoming: SVGGElement,
-    shift: { fromX: number; fromY: number; toX: number; toY: number },
-    maxParts: number,
-    ghostParts: boolean,
+    options: {
+      shift: { fromX: number; fromY: number; toX: number; toY: number };
+      maxParts: number;
+      detailed: boolean;
+      motion: (() => SVGGElement | null) | null;
+    },
   ): void {
+    const { shift, maxParts, detailed, motion } = options;
     this.endSkinMorph(id);
     slot.classList.remove("instance-enter");
     for (const animation of slot.getAnimations()) animation.cancel();
@@ -1583,7 +1598,7 @@ export class SystemScene {
     // Part-level ghosts need real vectors; one cached bitmap cannot animate
     // as individual pieces. Bulk swaps keep the bitmap, which is far cheaper
     // to carry, and fade it as one layer.
-    if (ghostParts) this.componentRaster.materializeVectors(outgoing);
+    if (detailed) this.componentRaster.materializeVectors(outgoing);
     // Reuse the outgoing node instead of cloning it: it leaves the slot in
     // this same frame, and moving it avoids duplicating cached images or a
     // whole vector tree for every swapping replica.
@@ -1615,10 +1630,30 @@ export class SystemScene {
     );
     geometry?.setAttribute("data-skin-morph", "true");
 
-    const ghostMotion = ghostParts
+    const ghostMotion = detailed
         ? this.wrapSkinParts(ghost, maxParts, "disperse")
         : { wraps: [], animations: [] },
-      incomingMotion = this.wrapSkinParts(incoming, maxParts, "assemble");
+      incomingMotion = detailed
+        ? this.wrapSkinParts(incoming, maxParts, "assemble")
+        : {
+            wraps: [],
+            animations: [
+              // Bulk fallback: one opacity/rise per object. The outgoing
+              // ghost still fades and the layout still glides, but no part
+              // wrappers are created for a cluster-sized swap.
+              slot.animate(
+                [
+                  { opacity: 0, transform: "translateY(14px)" },
+                  { opacity: 1, transform: "translateY(0px)" },
+                ],
+                {
+                  duration: 360,
+                  easing: "cubic-bezier(0.22, 0.9, 0.24, 1)",
+                  fill: "backwards",
+                },
+              ),
+            ],
+          };
 
     // Fade-mode ghosts carry opacity in the glide; part-mode ghosts only
     // glide while their parts fade independently.
@@ -1629,12 +1664,12 @@ export class SystemScene {
           transform: `translate(${shift.fromX}px,${shift.fromY}px)`,
         },
         {
-          opacity: ghostParts ? 1 : 0,
+          opacity: detailed ? 1 : 0,
           transform: `translate(${shift.toX}px,${shift.toY}px)`,
         },
       ],
       {
-        duration: ghostParts ? 520 : 420,
+        duration: detailed ? 520 : 420,
         easing: "cubic-bezier(0.2, 0.7, 0.2, 1)",
         fill: "forwards",
       },
@@ -1649,6 +1684,7 @@ export class SystemScene {
       animations,
       wraps: incomingMotion.wraps,
       geometry,
+      motion,
     };
     this.skinMorphs.set(id, state);
     void Promise.allSettled(
@@ -1658,6 +1694,14 @@ export class SystemScene {
       if (this.skinMorphs.get(id) !== state) return;
       this.skinMorphs.delete(id);
       ghost.remove();
+      if (state.motion && state.geometry) {
+        const live = state.motion();
+        if (live)
+          state.geometry.insertBefore(
+            live,
+            state.geometry.querySelector(".component-label"),
+          );
+      }
       this.restoreSkinParts(state.wraps, state.geometry);
       // The final vectors can now be measured and shared again.
       this.componentRaster.sync();

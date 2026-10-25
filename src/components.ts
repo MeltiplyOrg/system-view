@@ -684,6 +684,29 @@ function variantOf(
   return theme ? PROVIDER_VARIANTS[theme.id]?.[type] : undefined;
 }
 
+/**
+ * Build the live detail layer for one provider skin, if it has one.
+ *
+ * Split from `createComponent` so a bulk provider swap can render the static
+ * artwork first and append the animated LEDs/packets once the rebuild settles.
+ * The returned group is the same element the normal render path uses, keeping
+ * painter order (base, motion, label) and the raster cache contract intact.
+ *
+ * @param instance - Placed instance; type and provider select the variant.
+ * @returns The motion group, or null for skins without live detail.
+ */
+export function createComponentMotion(
+  instance: PlacedInstance,
+): SVGGElement | null {
+  const variant = variantOf(instance.type, instance.provider);
+  if (!variant?.motion) return null;
+  const motion = document.createElementNS(NS, "g");
+  motion.classList.add("component-motion");
+  motion.setAttribute("aria-hidden", "true");
+  motion.innerHTML = variant.motion;
+  return motion;
+}
+
 // Shared, immutable markup. Per-instance color flows through CSS variables and
 // the label is appended with textContent, so no user input enters these strings.
 const COMPUTE_GEOMETRY = computeGeometry();
@@ -739,6 +762,16 @@ export function componentHeight(
   }
 }
 
+/** Options for `createComponent`; bulk morphs defer the live layer. */
+export interface ComponentOptions {
+  /**
+   * Include the provider's live detail layer. Bulk provider swaps set false
+   * and append it through `createComponentMotion` after the rebuild, which
+   * avoids creating paused LED/packet timelines for every replica at once.
+   */
+  motion?: boolean;
+}
+
 /**
  * Create one world-positioned scene instance.
  *
@@ -756,7 +789,10 @@ export function componentHeight(
  * @param instance - Validated, placed instance.
  * @returns Group ready to append to the scene; no event handlers are attached.
  */
-export function createComponent(instance: PlacedInstance): SVGGElement {
+export function createComponent(
+  instance: PlacedInstance,
+  options: ComponentOptions = {},
+): SVGGElement {
   const element = document.createElementNS(NS, "g"),
     [x, y] = project(
       instance.position.x,
@@ -810,11 +846,11 @@ export function createComponent(instance: PlacedInstance): SVGGElement {
   geometry.setAttribute("aria-hidden", "true");
   geometry.innerHTML = `<g class="component-static-base">${
     variant?.markup ?? COMPONENT_GEOMETRY[instance.type]
-  }</g>${
-    variant?.motion
-      ? `<g class="component-motion" aria-hidden="true">${variant.motion}</g>`
-      : ""
-  }`;
+  }</g>`;
+  if (options.motion !== false) {
+    const motion = createComponentMotion(instance);
+    if (motion) geometry.append(motion);
+  }
   element.append(geometry);
 
   // Identity sits on the server's top rail, cache controller strip, or browser
