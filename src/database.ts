@@ -1,4 +1,5 @@
 import type { PlacedInstance } from "./design";
+import { findProvider } from "./providers";
 
 const NS = "http://www.w3.org/2000/svg";
 
@@ -415,6 +416,31 @@ export function createDatabaseDefinitions(): SVGDefsElement {
 }
 
 /**
+ * Print one provider mark on the roof fascia's enamel plate.
+ *
+ * The provider theme carries the exact upstream SVG once, for both the tooltip
+ * and this object badge. Re-wrap its inner artwork with a fixed viewBox so the
+ * mark scales onto the face-local plate without altering any path. The plate is
+ * light in both themes; the mark variants are chosen for contrast on it, and
+ * the whole badge is part of the rasterized roof overlay.
+ *
+ * @param logo - Self-contained provider SVG from `ProviderTheme.logo`.
+ * @returns Face-local badge group, or an empty string if the mark is malformed.
+ */
+function providerBadge(logo: string): string {
+  const viewBox = /viewBox="([^"]+)"/.exec(logo)?.[1],
+    art = logo
+      .replace(/^[\s\S]*?<svg[^>]*>/, "")
+      .replace(/<\/svg>[\s\S]*$/, "");
+  if (!viewBox || !art) return "";
+  return `<g class="rack-provider-badge" transform="${front(RX, RF, TOPZ)}">
+    <rect class="rack-accent-line" x="8" y="1.2" width="184" height="1.2" rx=".6"/>
+    <rect class="brand-plate" x="198" y="1.5" width="38" height="17" rx="2.2"/>
+    <svg x="203" y="3" width="28" height="14" viewBox="${viewBox}" preserveAspectRatio="xMidYMid meet">${art}</svg>
+  </g>`;
+}
+
+/**
  * SVG renderer for one Database Rack.
  *
  * The element is a `<g>` containing two static layers (shared rear markup plus
@@ -450,7 +476,9 @@ export class DatabaseRack {
     this.element.dataset.rendererType = "database-rack";
     this.element.dataset.instanceId = instance.id;
     this.element.style.setProperty("--cable-color", instance.color);
-    this.element.innerHTML = `<g class="rack-static rack-static-base component-static-base" aria-hidden="true"><use href="#rack-rear"/>${cables}</g><g class="rack-pulses component-motion" aria-hidden="true">${cablePulses}</g><g class="rack-static rack-static-roof component-static-overlay" aria-hidden="true"><use href="#rack-front"/></g>`;
+    const theme = findProvider(instance.provider, "database-rack"),
+      badge = theme ? providerBadge(theme.logo) : "";
+    this.element.innerHTML = `<g class="rack-static rack-static-base component-static-base" aria-hidden="true"><use href="#rack-rear"/>${cables}</g><g class="rack-pulses component-motion" aria-hidden="true">${cablePulses}</g><g class="rack-static rack-static-roof component-static-overlay" aria-hidden="true"><use href="#rack-front"/>${badge}</g>`;
 
     // Plain identity lettering on the top strip of the narrow drawer face.
     const nameplate = document.createElementNS(NS, "g");

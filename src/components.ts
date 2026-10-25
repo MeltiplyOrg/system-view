@@ -812,6 +812,7 @@ export function createComponent(
     `${instance.label} (${instance.id}) · ${typeLabel}`,
   );
   element.style.setProperty("--cable-color", instance.color);
+  if (theme?.plate) element.style.setProperty("--provider-plate", theme.plate);
 
   if (instance.type === "database-rack") {
     element.setAttribute(

@@ -74,6 +74,8 @@ const PALETTE_PROPERTIES = [
   "--muted",
   "--cable-color",
   "--glow-opacity",
+  "--brand-plate",
+  "--provider-plate",
 ] as const;
 
 /**

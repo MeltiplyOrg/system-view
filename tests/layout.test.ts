@@ -222,6 +222,17 @@ describe("automatic layout", () => {
     expect(right.x - (left.x + left.width)).toBe(132);
   });
 
+  test("uses each database provider accent", () => {
+    for (const [provider, color] of [
+      ["postgresql", "#4169e1"],
+      ["mysql", "#00758f"],
+      ["sqlite", "#0f80cc"],
+      ["mongodb", "#00ed64"],
+    ] as const)
+      expect(instanceColor("database-rack", provider)).toBe(color);
+    expect(instanceColor("database-rack", "redis")).toBe("#42d9e8");
+  });
+
   test("normalizes one color per renderer type", () => {
     const types = [
       "database-rack",

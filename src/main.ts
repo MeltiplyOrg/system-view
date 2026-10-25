@@ -349,9 +349,15 @@ function setCalloutProvider(provider: string | undefined): void {
   if (theme) {
     calloutProvider.innerHTML = theme.logo;
     calloutProvider.title = theme.label;
+    calloutProvider.style.setProperty("--provider-color", theme.color);
+    if (theme.plate)
+      calloutProvider.style.setProperty("--provider-plate", theme.plate);
+    else calloutProvider.style.removeProperty("--provider-plate");
   } else {
     calloutProvider.replaceChildren();
     calloutProvider.removeAttribute("title");
+    calloutProvider.style.removeProperty("--provider-color");
+    calloutProvider.style.removeProperty("--provider-plate");
   }
 }
 

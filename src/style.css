@@ -23,6 +23,7 @@
   --pulse: #fff4df;
   --accent: #ffac6b;
   --cluster-hover: #facc15;
+  --brand-plate: #eef2f4;
 }
 /*
  * Default follows the operating system. An explicit data-theme attribute set
@@ -240,8 +241,14 @@ a {
   top: 8px;
   right: 9px;
   display: grid;
+  place-items: center;
   width: 47px;
   height: 40px;
+  padding: 5px;
+  border: 1px solid
+    color-mix(in srgb, var(--provider-color, var(--border)) 55%, var(--border));
+  border-radius: 3px;
+  background: var(--provider-plate, var(--brand-plate));
 }
 .callout-provider[hidden] {
   display: none;
@@ -828,6 +835,26 @@ aside.detail.open {
 }
 .provider-skin .face.recess {
   fill: color-mix(in srgb, var(--recess) 90%, var(--cable-color));
+}
+/* Drawer fascias carry the provider tint on database racks; the neutral rack
+ * keeps the deck color. */
+.provider-skin .face.drawer-front {
+  fill: color-mix(in srgb, var(--deck) 86%, var(--cable-color));
+}
+/*
+ * Database badges. One enamel plate on the roof fascia prints the provider's
+ * exact upstream mark; the accent line and plate border inherit the skin
+ * color so the same markup serves every database provider.
+ */
+.brand-plate {
+  fill: var(--provider-plate, var(--brand-plate));
+  stroke: color-mix(in srgb, var(--cable-color) 62%, var(--line));
+  stroke-width: 0.7;
+  vector-effect: non-scaling-stroke;
+}
+.rack-accent-line {
+  fill: var(--cable-color);
+  opacity: 0.8;
 }
 /*
  * Redis skin. The provider tint supplies the red anodized metal; these marks
