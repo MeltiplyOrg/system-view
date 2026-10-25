@@ -144,14 +144,14 @@ One pass explains where most edits belong:
 
 ## Change paths
 
-| Goal                             | Edit in this order                                                                                                                                         | Close with                                           |
-| -------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------- |
-| Add a provider skin              | `providers.ts` theme → `components.ts` variant and optional motion → `style.css` skin → picker tests                                                       | color/footprint unit proof; provider morph e2e       |
-| Add a renderer type              | `design.ts` type → `layout.ts` prefix/color/footprint → `components.ts` geometry/height/label → `component-raster.ts` renderer list → scene/callout labels | unit tests per pure owner; boot scene e2e            |
-| Tune replica spacing or groups   | `layout.ts` constants and packing → `tests/layout.test.ts` → verify border ports, platform union, routing                                                  | layout, platform, routing, replica e2e               |
-| Reshape artwork                  | `components.ts` variant → `style.css` palette/animation → reduced-motion block                                                                             | app/cache e2e; visual smoke at overview and close-up |
-| Change shell, editor, inspector  | `main.ts` → `index.html` → `style.css`                                                                                                                     | `e2e/app.spec.ts`, including a11y                    |
-| Change camera, selection, cables | `scene.ts`; extract pure math for unit proof where possible                                                                                                | `tests/scene-*.test.ts`, `e2e/app.spec.ts`           |
+| Goal                             | Edit in this order                                                                                                                                         | Close with                                               |
+| -------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------- |
+| Add a provider skin              | `providers.ts` theme → `components.ts` variant and optional motion → `style.css` skin → provider gating test                                               | provider catalog and footprint proof; provider morph e2e |
+| Add a renderer type              | `design.ts` type → `layout.ts` prefix/color/footprint → `components.ts` geometry/height/label → `component-raster.ts` renderer list → scene/callout labels | unit tests per pure owner; boot scene e2e                |
+| Tune replica spacing or groups   | `layout.ts` constants and packing → `tests/layout.test.ts` → verify border ports, platform union, routing                                                  | layout, platform, routing, replica e2e                   |
+| Reshape artwork                  | `components.ts` variant → `style.css` palette/animation → reduced-motion block                                                                             | app/cache e2e; visual smoke at overview and close-up     |
+| Change shell, editor, inspector  | `main.ts` → `index.html` → `style.css`                                                                                                                     | `e2e/app.spec.ts`, including a11y                        |
+| Change camera, selection, cables | `scene.ts`; extract pure math for unit proof where possible                                                                                                | `tests/scene-*.test.ts`, `e2e/app.spec.ts`               |
 
 ### Provider skin checklist
 
@@ -163,8 +163,9 @@ One pass explains where most edits belong:
    static base. Add the reduced-motion rule.
 4. The generic morph handles transitions; a new skin participates
    automatically.
-5. Prove color and footprint through `layoutDesign`, then switch provider on a
-   cache node in the browser: exactly one artwork mark (inspect before the
+5. Prove color and footprint through `layoutDesign` and supported-type gating
+   through `providersFor`; add that focused provider test. Then switch provider
+   on a cache node in the browser: exactly one artwork mark (inspect before the
    raster cache replaces vectors), the build, border, platform, and cleanup.
 6. Check `bun run size`; provider art ships in the JS bundle.
 
