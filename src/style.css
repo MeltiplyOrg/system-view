@@ -228,6 +228,28 @@ a {
   border-right-width: 1px;
   border-bottom-width: 1px;
 }
+/*
+ * Provider mark occupies the card's free top-right corner. Its height matches
+ * the three summary rows (kind, name, meta) so the badge stays inside the
+ * header block. It is absolutely positioned and reserves no extra card width;
+ * the HUD keeps the size its text already asks for.
+ */
+.callout-provider {
+  position: absolute;
+  top: 8px;
+  right: 9px;
+  display: grid;
+  width: 47px;
+  height: 40px;
+}
+.callout-provider[hidden] {
+  display: none;
+}
+.callout-provider svg {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
 .callout-kind {
   color: var(--muted);
   font: 8px var(--mono);
@@ -665,6 +687,19 @@ aside.detail.open {
   letter-spacing: 0.16em;
   text-transform: uppercase;
 }
+.detail-provider-select {
+  width: 100%;
+  height: 32px;
+  padding: 0 10px;
+  border: 1px solid var(--border);
+  border-radius: 0;
+  background: var(--raised);
+  color: var(--fg);
+  font: 11px var(--mono);
+}
+.detail-provider-select:hover {
+  border-color: var(--muted);
+}
 .replica-stepper {
   display: inline-flex;
   align-items: center;
@@ -778,6 +813,20 @@ aside.detail.open {
 }
 .face.recess {
   fill: var(--recess);
+}
+/*
+ * A provider skin tints the shared neutral chassis toward its accent. The
+ * accent itself still comes from --cable-color, so the raster cache snapshots
+ * a distinct palette per provider and reuses it across replicas.
+ */
+.provider-skin .face {
+  stroke: color-mix(in srgb, var(--cable-color) 30%, var(--line));
+}
+.provider-skin .face.top {
+  fill: color-mix(in srgb, var(--deck) 84%, var(--cable-color));
+}
+.provider-skin .face.recess {
+  fill: color-mix(in srgb, var(--recess) 90%, var(--cable-color));
 }
 .face.drawer-front {
   fill: var(--deck);
@@ -902,6 +951,22 @@ aside.detail.open {
   stroke: var(--cluster-hover, #facc15);
   opacity: 1;
 }
+/*
+ * A selected node keeps the highlight after the pointer leaves and marches
+ * the dash continuously, so the pinned target is readable at a glance. The
+ * scene sets `.focused` from the selection key and clears it on deselection;
+ * two dash periods per cycle keep the loop seamless.
+ */
+.scene-frame.focused {
+  stroke: var(--cluster-hover, #facc15);
+  opacity: 1;
+  animation: frame-trace 1.1s linear infinite;
+}
+@keyframes frame-trace {
+  to {
+    stroke-dashoffset: -26;
+  }
+}
 .space-grid {
   fill: none;
   stroke: var(--grid);
@@ -984,7 +1049,8 @@ aside.detail.open {
     stroke-dashoffset: -108;
   }
 }
-.paused .pulse {
+.paused .pulse,
+.paused .scene-frame.focused {
   animation-play-state: paused;
 }
 /*
@@ -1073,6 +1139,9 @@ aside.detail.open {
     transition: none;
   }
   .instance-enter {
+    animation: none;
+  }
+  .scene-frame.focused {
     animation: none;
   }
   .callout.visible .callout-card,

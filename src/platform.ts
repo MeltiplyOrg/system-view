@@ -1,5 +1,6 @@
 import { project } from "./database";
 import type { PlacedInstance } from "./design";
+import { instanceFootprint } from "./layout";
 
 /** A world-space X/Y vertex; platform contours never carry elevation. */
 type Point = readonly [number, number];
@@ -47,13 +48,14 @@ function coordinateIndex(
 }
 
 /**
- * Union the actual 288 × 150 rack feet at each elevation.
+ * Union the actual rack feet and provider footprints at each elevation.
  *
  * Disconnected islands and enclosed holes remain empty; only coplanar,
  * touching/overlapping bases merge. This is a true union, not a bounding box
  * or convex hull, so distant racks never connect across empty space. Each
- * footprint is a rectangle centered on `position` with half-width 144 and
- * half-depth 75.
+ * footprint is a rectangle centered on `position` with the half extents from
+ * `instanceFootprint` — the shared 288 × 150 rack foot by default, or the
+ * provider's own shape (the Redis cache is square).
  *
  * The algorithm coordinate-compresses rectangle edges, fills a bit grid,
  * emits only boundary edges, then traces directed loops with a right-turn
@@ -63,7 +65,8 @@ function coordinateIndex(
  *
  * Runs once per design change, never inside the animation loop.
  *
- * @param instances - Validated racks; only `position` is needed.
+ * @param instances - Validated instances; position, type, and provider drive
+ *   the footprint.
  * @returns Platforms sorted by ascending elevation; empty for no instances.
  * @throws Error only if an internal lookup or contour closure invariant fails.
  */
@@ -81,12 +84,15 @@ export function mergePlatformFootprints(
 
   const platforms: PlatformFootprint[] = [];
   for (const [elevation, group] of levels) {
-    const rectangles = group.map(({ position }) => ({
-      x0: position.x - 144,
-      x1: position.x + 144,
-      y0: position.y - 75,
-      y1: position.y + 75,
-    }));
+    const rectangles = group.map(({ position, type, provider }) => {
+      const { halfWidth, halfDepth } = instanceFootprint(type, provider);
+      return {
+        x0: position.x - halfWidth,
+        x1: position.x + halfWidth,
+        y0: position.y - halfDepth,
+        y1: position.y + halfDepth,
+      };
+    });
 
     // Compression keeps the occupancy grid proportional to distinct edges
     // rather than to arbitrary world coordinates or off-screen space.

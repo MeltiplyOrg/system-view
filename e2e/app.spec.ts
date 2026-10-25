@@ -53,6 +53,19 @@ async function openSidebar(page: Page) {
 }
 
 /**
+ * Load the three-replica database example through the picker.
+ *
+ * Boot now starts on the all-renderer web-app scene, so tests that depend on a
+ * database cluster or ten database racks select this catalogue entry first.
+ */
+async function useDatabaseCluster(page: Page) {
+  await openSidebar(page);
+  await page.locator("#example").selectOption("horizontal-scaling");
+  await page.getByRole("button", { name: "Close design sidebar" }).click();
+  await expect(page.locator("#sidebar")).toBeHidden();
+}
+
+/**
  * Find a client point that hit-tests inside a rack.
  *
  * Rack groups reference shared `<use>` definitions, and Chromium reports stale
@@ -80,18 +93,26 @@ async function rackPoint(page: Page) {
 }
 
 test.describe("minimal isometric canvas", () => {
-  test("renders only the grid until Design is expanded", async ({ page }) => {
+  test("renders the all-renderer boot scene until Design is expanded", async ({
+    page,
+  }) => {
     await page.goto("/");
     await expect(page.locator("#scene")).toBeVisible();
-    await expect(page.locator(".database-rack")).toHaveCount(3);
-    await expect(page.locator(".connection")).toHaveCount(2);
-    await expect(page.locator(".wire-label")).toHaveCount(2);
-    await expect(page.locator(".wire-label").first()).toHaveText("replicates");
-    await expect(page.locator(".cluster-label")).toHaveText("Database cluster");
-    await expect(page.locator(".cluster-frame")).toHaveCount(1);
-    await expect(page.locator(".cluster-frame")).toHaveAttribute(
-      "data-cluster-id",
-      "cluster-1",
+    await expect(page.locator(".scene-instance")).toHaveCount(4);
+    await expect(page.locator(".database-rack")).toHaveCount(1);
+    await expect(page.locator(".connection")).toHaveCount(3);
+    await expect(page.locator(".wire-label")).toHaveText([
+      "HTTPS / JSON",
+      "GET / SET",
+      "SQL on miss",
+    ]);
+    await expect(page.locator(".cluster-label")).toHaveCount(0);
+    await expect(page.locator(".cluster-frame")).toHaveCount(0);
+    // The boot scene carries the provider skin so the default view exercises
+    // provider artwork alongside all four renderer types.
+    await expect(page.locator('[data-renderer-type="cache"]')).toHaveAttribute(
+      "data-renderer-provider",
+      "redis",
     );
     await expect(page.locator(".space-grid")).toHaveAttribute("d", /M/);
     await expect(page.locator("#sidebar")).toBeHidden();
@@ -102,8 +123,8 @@ test.describe("minimal isometric canvas", () => {
     await page.goto("/");
     await openSidebar(page);
     const picker = page.locator("#example");
-    await expect(picker).toHaveValue("horizontal-scaling");
-    await expect(page.locator("#example-hint")).toContainText("replication");
+    await expect(picker).toHaveValue("web-app");
+    await expect(page.locator("#example-hint")).toContainText("request");
 
     await picker.selectOption("sharding");
     await expect(page.locator("#scene-title")).toHaveText("Database sharding");
@@ -133,8 +154,8 @@ test.describe("minimal isometric canvas", () => {
     await expect(page.locator(".connection[data-cluster-id]")).toHaveCount(2);
 
     await page.locator("#reset").click();
-    await expect(picker).toHaveValue("horizontal-scaling");
-    await expect(page.locator("#scene-title")).toHaveText("Horizontal scaling");
+    await expect(picker).toHaveValue("web-app");
+    await expect(page.locator("#scene-title")).toHaveText("Simple web app");
   });
 
   test("promoting a database keeps its cluster in place", async ({ page }) => {
@@ -181,6 +202,7 @@ test.describe("minimal isometric canvas", () => {
     page,
   }) => {
     await page.goto("/");
+    await useDatabaseCluster(page);
     const tip = page.locator("#callout");
     const card = tip.locator(".callout-card");
     await expect(tip).not.toHaveClass(/visible/);
@@ -422,6 +444,7 @@ test.describe("minimal isometric canvas", () => {
   test("exports the applied JSON document", async ({ page }) => {
     await page.goto("/");
     await openSidebar(page);
+    await page.locator("#example").selectOption("horizontal-scaling");
     const downloadPromise = page.waitForEvent("download");
     await page.getByRole("button", { name: "Export JSON" }).click();
     const download = await downloadPromise;
@@ -514,10 +537,12 @@ test.describe("instance selection", () => {
     await page.mouse.click(point.x, point.y);
 
     await expect(page.locator("#detail")).toBeVisible();
-    await expect(page.locator("#detail-kind")).toHaveText("Cluster");
-    await expect(page.locator("#detail-title")).toHaveText("Database cluster");
-    await expect(page.locator(".detail-replica")).toHaveCount(3);
-    await expect(page.locator(".detail-link")).toHaveCount(2);
+    await expect(page.locator("#detail-kind")).toHaveText("Instance");
+    await expect(page.locator("#detail-title")).toHaveText(
+      "Application database",
+    );
+    await expect(page.locator(".detail-replica")).toHaveCount(1);
+    await expect(page.locator(".detail-link")).toHaveCount(1);
     await expect(page.locator("#callout")).toHaveClass(/visible/);
 
     // Sample the viewBox across the transition: a smooth pan produces several
@@ -664,6 +689,7 @@ test.describe("instance selection", () => {
   }) => {
     await page.emulateMedia({ reducedMotion: "reduce" });
     await page.goto("/");
+    await useDatabaseCluster(page);
     const point = await rackPoint(page);
     if (!point) throw new Error("No rack point found.");
     await page.mouse.click(point.x, point.y);
@@ -695,6 +721,7 @@ test.describe("instance selection", () => {
   }) => {
     await page.emulateMedia({ reducedMotion: "reduce" });
     await page.goto("/");
+    await useDatabaseCluster(page);
     const point = await rackPoint(page);
     if (!point) throw new Error("No rack point found.");
     await page.mouse.click(point.x, point.y);
@@ -765,6 +792,7 @@ test.describe("instance selection", () => {
   }) => {
     await page.emulateMedia({ reducedMotion: "reduce" });
     await page.goto("/");
+    await useDatabaseCluster(page);
     const point = await rackPoint(page);
     if (!point) throw new Error("No rack point found.");
     await page.mouse.click(point.x, point.y);
@@ -808,6 +836,7 @@ test.describe("instance selection", () => {
   }) => {
     await page.emulateMedia({ reducedMotion: "reduce" });
     await page.goto("/");
+    await useDatabaseCluster(page);
     const point = await rackPoint(page);
     if (!point) throw new Error("No rack point found.");
     await page.mouse.click(point.x, point.y);

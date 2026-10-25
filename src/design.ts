@@ -2,9 +2,10 @@
  * JSON design document model and validation.
  *
  * The persisted document is deliberately small: an instance is an ID and an
- * optional label, a connection names two IDs, and a cluster groups IDs. Type,
- * color, and position are render-time derivations owned by `layout.ts`, so an
- * exported document never accumulates generated data.
+ * optional label, provider, and description; a connection names two IDs, and a
+ * cluster groups IDs. Type, color, and position are render-time derivations
+ * owned by `layout.ts`, so an exported document never accumulates generated
+ * data.
  */
 export interface Position {
   /** Generated rack-center X in world units. */
@@ -28,6 +29,8 @@ export interface PlacedInstance {
   label: string;
   position: Position;
   color: string;
+  /** Provider key carried from the document, when one was declared. */
+  provider?: string;
 }
 
 /**
@@ -41,6 +44,17 @@ export interface DesignInstance {
   label?: string;
   /** Optional tooltip body; plain text, up to 2,000 characters. */
   description?: string;
+  /**
+   * Optional product/provider key (for example `redis`).
+   *
+   * Known providers select a dedicated skin for the renderer types they
+   * support: accent palette, optional artwork, tooltip mark, and component
+   * footprint. A provider on an unsupported renderer is ignored, and unknown
+   * providers keep the default appearance, so documents can name providers
+   * this build does not style yet. Matched case-insensitively against
+   * `providers.ts`.
+   */
+  provider?: string;
 }
 
 /**
@@ -91,11 +105,13 @@ export interface Design {
 }
 
 /**
- * Default scene: three peers grouped into one cluster with replication links.
+ * Horizontal-scaling example: three peers grouped into one cluster with
+ * replication links.
  *
  * IDs intentionally use the `db-` prefix; the layout pass turns that prefix
  * into the database-rack renderer, lays the three racks out in one column, and
  * assigns their shared database palette. A dashed floor frame groups replicas.
+ * `webAppExample` is the boot scene because it exercises every renderer.
  */
 export const example: Design = {
   version: 1,
@@ -122,7 +138,8 @@ export const example: Design = {
  * which reads and writes through a cache server. On a cache miss the cache
  * server loads from the database itself, so the backend never talks to the
  * database directly. Prefixes select visuals; connections describe requests,
- * not replica membership.
+ * not replica membership. The cache names the Redis provider, which also makes
+ * this the boot scene: one of every renderer, all inside the initial fit.
  */
 export const webAppExample: Design = {
   version: 1,
@@ -143,6 +160,7 @@ export const webAppExample: Design = {
     {
       id: "cache-server",
       label: "Cache server",
+      provider: "redis",
       description:
         "Keeps frequently requested data in memory. On a cache miss it queries the database itself and stores the result.",
     },
@@ -467,7 +485,9 @@ function text(value: unknown, path: string, maxLength = 100): string {
  * fields from the previous schema are ignored and never returned.
  *
  * Limits: 64 instances, 256 links, 64 clusters, 100-character strings except
- * optional descriptions (up to 2,000 characters, preserved as plain text).
+ * optional descriptions (up to 2,000 characters, preserved as plain text) and
+ * provider keys (up to 40 characters). Provider keys are trimmed and kept
+ * verbatim; the renderer matches them case-insensitively.
  */
 export function parseDesign(source: string): Design {
   const root = record(JSON.parse(source) as unknown, "Design");
@@ -503,6 +523,11 @@ export function parseDesign(source: string): Design {
               2000,
             ),
           }),
+      // Providers name a product skin. Unknown values are preserved so the
+      // document remains portable to builds that register more themes.
+      ...(instance.provider === undefined
+        ? {}
+        : { provider: text(instance.provider, `${path}.provider`, 40).trim() }),
     };
   });
 

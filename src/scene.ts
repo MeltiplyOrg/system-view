@@ -1,6 +1,6 @@
 import { createDatabaseDefinitions, project } from "./database";
 import type { Design, PlacedInstance } from "./design";
-import { layoutDesign, RACK_HALF_DEPTH, RACK_HALF_WIDTH } from "./layout";
+import { instanceFootprint, layoutDesign } from "./layout";
 import type { Layout, PlacedCluster } from "./layout";
 import { createPlatforms } from "./platform";
 import { componentHeight, createComponent } from "./components";
@@ -104,18 +104,32 @@ function segmentsIntersect(
     crossB = orient(c, d, b),
     crossC = orient(a, b, c),
     crossD = orient(a, b, d);
-  if (((crossA > 0 && crossB < 0) || (crossA < 0 && crossB > 0)) &&
-      ((crossC > 0 && crossD < 0) || (crossC < 0 && crossD > 0)))
+  if (
+    ((crossA > 0 && crossB < 0) || (crossA < 0 && crossB > 0)) &&
+    ((crossC > 0 && crossD < 0) || (crossC < 0 && crossD > 0))
+  )
     return true;
   return (
-    (crossA === 0 && Math.min(c[0], d[0]) <= a[0] && a[0] <= Math.max(c[0], d[0]) &&
-      Math.min(c[1], d[1]) <= a[1] && a[1] <= Math.max(c[1], d[1])) ||
-    (crossB === 0 && Math.min(c[0], d[0]) <= b[0] && b[0] <= Math.max(c[0], d[0]) &&
-      Math.min(c[1], d[1]) <= b[1] && b[1] <= Math.max(c[1], d[1])) ||
-    (crossC === 0 && Math.min(a[0], b[0]) <= c[0] && c[0] <= Math.max(a[0], b[0]) &&
-      Math.min(a[1], b[1]) <= c[1] && c[1] <= Math.max(a[1], b[1])) ||
-    (crossD === 0 && Math.min(a[0], b[0]) <= d[0] && d[0] <= Math.max(a[0], b[0]) &&
-      Math.min(a[1], b[1]) <= d[1] && d[1] <= Math.max(a[1], b[1]))
+    (crossA === 0 &&
+      Math.min(c[0], d[0]) <= a[0] &&
+      a[0] <= Math.max(c[0], d[0]) &&
+      Math.min(c[1], d[1]) <= a[1] &&
+      a[1] <= Math.max(c[1], d[1])) ||
+    (crossB === 0 &&
+      Math.min(c[0], d[0]) <= b[0] &&
+      b[0] <= Math.max(c[0], d[0]) &&
+      Math.min(c[1], d[1]) <= b[1] &&
+      b[1] <= Math.max(c[1], d[1])) ||
+    (crossC === 0 &&
+      Math.min(a[0], b[0]) <= c[0] &&
+      c[0] <= Math.max(a[0], b[0]) &&
+      Math.min(a[1], b[1]) <= c[1] &&
+      c[1] <= Math.max(a[1], b[1])) ||
+    (crossD === 0 &&
+      Math.min(a[0], b[0]) <= d[0] &&
+      d[0] <= Math.max(a[0], b[0]) &&
+      Math.min(a[1], b[1]) <= d[1] &&
+      d[1] <= Math.max(a[1], b[1]))
   );
 }
 
@@ -131,8 +145,7 @@ function polylineIntersectsPolygon(
   polygon: ScreenPoint[],
 ): boolean {
   if (points.length < 2 || polygon.length < 3) return false;
-  if (points.some((point) => pointInConvexPolygon(point, polygon)))
-    return true;
+  if (points.some((point) => pointInConvexPolygon(point, polygon))) return true;
   for (let index = 0; index < points.length - 1; index++)
     for (let edge = 0; edge < polygon.length; edge++)
       if (
@@ -261,10 +274,14 @@ function contentExtent(layout: Layout): {
   };
 
   for (const instance of layout.instances) {
-    const { x, y, z } = instance.position;
-    for (const dx of [-RACK_HALF_WIDTH, RACK_HALF_WIDTH])
-      for (const dy of [-RACK_HALF_DEPTH, RACK_HALF_DEPTH])
-        for (const dz of [0, componentHeight(instance.type)])
+    const { x, y, z } = instance.position,
+      { halfWidth, halfDepth } = instanceFootprint(
+        instance.type,
+        instance.provider,
+      );
+    for (const dx of [-halfWidth, halfWidth])
+      for (const dy of [-halfDepth, halfDepth])
+        for (const dz of [0, componentHeight(instance.type, instance.provider)])
           add(x + dx, y + dy, z + dz);
   }
   for (const cluster of layout.clusters) {
@@ -568,6 +585,7 @@ export class SystemScene {
       origin: readonly [number, number];
       label: string;
       type: PlacedInstance["type"];
+      provider?: string;
       /** Cached root visibility so pans only write style on state changes. */
       hidden: boolean;
     }
@@ -704,6 +722,16 @@ export class SystemScene {
   /** Focus key the dim set was last computed for, to re-apply after renders. */
   private focusKey: string | null = null;
 
+  /**
+   * Wall-clock start of the current focus, in milliseconds.
+   *
+   * A render replaces the frame layer, so the focused border's CSS animation
+   * restarts from zero on every drag frame. The negative `animation-delay`
+   * derived from this instant resumes each replacement mid-cycle, keeping the
+   * dash marching continuously for the whole selection.
+   */
+  private focusStartedAt = 0;
+
   /** Projected top-center per hover target key, for the pinned callout. */
   private readonly topPoints = new Map<string, readonly [number, number]>();
 
@@ -744,6 +772,9 @@ export class SystemScene {
 
   /** ViewBox subscribers; the shell aligns screen-space overlays. */
   private readonly viewListeners = new Set<() => void>();
+
+  /** Geometry subscribers; overlays re-anchor without moving their cards. */
+  private readonly layoutListeners = new Set<() => void>();
 
   /**
    * @param svg Full-viewport SVG element. The caller should not append other
@@ -911,15 +942,19 @@ export class SystemScene {
       this.borderFrames.set(cluster.id, cluster);
     for (const instance of layout.instances) {
       if (this.instanceCluster.has(instance.id)) continue;
-      const { x, y } = instance.position;
+      const { x, y } = instance.position,
+        { halfWidth, halfDepth } = instanceFootprint(
+          instance.type,
+          instance.provider,
+        );
       this.borderFrames.set(`${INSTANCE_KEY}${instance.id}`, {
         id: `${INSTANCE_KEY}${instance.id}`,
         label: instance.label,
         bounds: {
-          x: x - RACK_HALF_WIDTH,
-          y: y - RACK_HALF_DEPTH,
-          width: RACK_HALF_WIDTH * 2,
-          height: RACK_HALF_DEPTH * 2,
+          x: x - halfWidth,
+          y: y - halfDepth,
+          width: halfWidth * 2,
+          height: halfDepth * 2,
         },
       });
     }
@@ -937,7 +972,15 @@ export class SystemScene {
     >();
     for (const instance of layout.instances) {
       const { x, y, z } = instance.position,
-        top = project(x, y, z + componentHeight(instance.type)),
+        { halfWidth, halfDepth } = instanceFootprint(
+          instance.type,
+          instance.provider,
+        ),
+        top = project(
+          x,
+          y,
+          z + componentHeight(instance.type, instance.provider),
+        ),
         key = `${INSTANCE_KEY}${instance.id}`,
         bounds = {
           minX: Infinity,
@@ -947,9 +990,12 @@ export class SystemScene {
         };
       this.topPoints.set(key, top);
       const corners: ScreenPoint[] = [];
-      for (const dx of [-RACK_HALF_WIDTH, RACK_HALF_WIDTH])
-        for (const dy of [-RACK_HALF_DEPTH, RACK_HALF_DEPTH])
-          for (const dz of [0, componentHeight(instance.type)]) {
+      for (const dx of [-halfWidth, halfWidth])
+        for (const dy of [-halfDepth, halfDepth])
+          for (const dz of [
+            0,
+            componentHeight(instance.type, instance.provider),
+          ]) {
             const [screenX, screenY] = project(x + dx, y + dy, z + dz);
             corners.push([screenX, screenY]);
             bounds.minX = Math.min(bounds.minX, screenX);
@@ -1014,9 +1060,7 @@ export class SystemScene {
         internal = fromCluster !== undefined && fromCluster === toCluster,
         fromFrame = internal
           ? undefined
-          : this.borderFrames.get(
-              fromCluster ?? `${INSTANCE_KEY}${from.id}`,
-            ),
+          : this.borderFrames.get(fromCluster ?? `${INSTANCE_KEY}${from.id}`),
         toFrame = internal
           ? undefined
           : this.borderFrames.get(toCluster ?? `${INSTANCE_KEY}${to.id}`),
@@ -1044,7 +1088,11 @@ export class SystemScene {
               instance.position.x > Math.min(fromPoint.x, toPoint.x) &&
               instance.position.x < Math.max(fromPoint.x, toPoint.x),
           );
-        const laneY = fromPoint.y + RACK_HALF_DEPTH * 2;
+        const laneDepth = Math.max(
+          instanceFootprint(from.type, from.provider).halfDepth,
+          instanceFootprint(to.type, to.provider).halfDepth,
+        );
+        const laneY = fromPoint.y + laneDepth * 2;
         worldPath = crossesInstance
           ? [
               fromPoint,
@@ -1171,7 +1219,9 @@ export class SystemScene {
       const isNew = !record;
       if (
         record &&
-        (record.label !== instance.label || record.type !== instance.type)
+        (record.label !== instance.label ||
+          record.type !== instance.type ||
+          record.provider !== instance.provider)
       ) {
         record.root.remove();
         this.renderedInstances.delete(instance.id);
@@ -1193,6 +1243,9 @@ export class SystemScene {
           origin: position,
           label: instance.label,
           type: instance.type,
+          ...(instance.provider === undefined
+            ? {}
+            : { provider: instance.provider }),
           hidden: false,
         };
         this.renderedInstances.set(instance.id, record);
@@ -1270,6 +1323,10 @@ export class SystemScene {
       this.updateAnchorPosition();
       this.setHoveredFrame(this.anchorKey);
     }
+    // An animated render moves geometry without a camera write (node drag,
+    // replica edit); let screen-space overlays re-anchor to the new bounds.
+    // Non-animated renders fit the camera and already notify view listeners.
+    if (animate) for (const listener of this.layoutListeners) listener();
   }
 
   /**
@@ -1306,7 +1363,11 @@ export class SystemScene {
   }
 
   /**
-   * Dim only the nodes whose artwork covers the focused target's wires.
+   * Dim covered nodes and highlight the focused border.
+   *
+   * The focused frame uses the hover highlight color and marches its dash
+   * until the key is cleared. Dimming applies only to nodes whose artwork
+   * covers one of the focused target's cables.
    *
    * Racks always paint after the link layer, so any node whose projected
    * silhouette overlaps a cable hides that stretch of wire. When a target is
@@ -1323,14 +1384,32 @@ export class SystemScene {
    *   null to restore the undimmed scene.
    */
   setFocus(key: string | null): void {
+    if (key !== this.focusKey) this.focusStartedAt = performance.now();
     this.focusKey = key;
-    const dimmed = this.focusCoveredIds(key);
+    const dimmed = this.focusCoveredIds(key),
+      // Frame keys drop the `cluster:` prefix; instance frames already use
+      // the full `instance:<id>` key.
+      frameKey = key?.startsWith(CLUSTER_KEY)
+        ? key.slice(CLUSTER_KEY.length)
+        : key;
     this.svg.classList.toggle("focus-dim", dimmed.size > 0);
     for (const element of this.content.querySelectorAll<SVGGElement>(
       ".scene-instance",
     )) {
       const id = element.dataset.instanceId;
       if (id) element.classList.toggle("focus-dimmed", dimmed.has(id));
+    }
+    // The selected border keeps its highlight and marches; clearing the key
+    // removes both, so the animation only runs while the focus is held. A
+    // newly focused path (including one rebuilt by a render) starts from the
+    // current phase instead of restarting the trace.
+    for (const frame of this.content.querySelectorAll<SVGPathElement>(
+      ".scene-frame",
+    )) {
+      const focused = frame.dataset.clusterId === frameKey;
+      if (focused && !frame.classList.contains("focused"))
+        frame.style.animationDelay = `${this.focusStartedAt - performance.now()}ms`;
+      frame.classList.toggle("focused", focused);
     }
   }
 
@@ -1501,25 +1580,38 @@ export class SystemScene {
     for (const instance of layout.instances) {
       const clusterId = this.instanceCluster.get(instance.id);
       if (!clusterId) continue;
-      const { x, y } = instance.position;
+      const { x, y } = instance.position,
+        { halfWidth, halfDepth } = instanceFootprint(
+          instance.type,
+          instance.provider,
+        ),
+        left = x - halfWidth,
+        right = x + halfWidth,
+        top = y - halfDepth,
+        bottom = y + halfDepth;
       const box = boxes.get(clusterId);
       if (!box)
-        boxes.set(clusterId, { minX: x, minY: y, maxX: x, maxY: y });
+        boxes.set(clusterId, {
+          minX: left,
+          minY: top,
+          maxX: right,
+          maxY: bottom,
+        });
       else {
-        box.minX = Math.min(box.minX, x);
-        box.maxX = Math.max(box.maxX, x);
-        box.minY = Math.min(box.minY, y);
-        box.maxY = Math.max(box.maxY, y);
+        box.minX = Math.min(box.minX, left);
+        box.maxX = Math.max(box.maxX, right);
+        box.minY = Math.min(box.minY, top);
+        box.maxY = Math.max(box.maxY, bottom);
       }
     }
     for (const cluster of layout.clusters) {
       const box = boxes.get(cluster.id);
       if (!box) continue;
       cluster.bounds = {
-        x: box.minX - RACK_HALF_WIDTH,
-        y: box.minY - RACK_HALF_DEPTH,
-        width: box.maxX - box.minX + RACK_HALF_WIDTH * 2,
-        height: box.maxY - box.minY + RACK_HALF_DEPTH * 2,
+        x: box.minX,
+        y: box.minY,
+        width: box.maxX - box.minX,
+        height: box.maxY - box.minY,
       };
     }
   }
@@ -1575,7 +1667,8 @@ export class SystemScene {
     this.anchor.setAttribute(
       "transform",
       `translate(${((bounds.minX + bounds.maxX) / 2).toFixed(1)} ${(
-        (bounds.minY + bounds.maxY) / 2
+        (bounds.minY + bounds.maxY) /
+        2
       ).toFixed(1)})`,
     );
   }
@@ -1680,6 +1773,17 @@ export class SystemScene {
    */
   onViewChange(listener: () => void): void {
     this.viewListeners.add(listener);
+  }
+
+  /**
+   * Subscribe to geometry changes that leave the camera in place.
+   *
+   * Dragging a node or editing replicas re-renders the scene without a
+   * viewBox write. Screen-space overlays use this to re-anchor a leader line
+   * while keeping their card fixed.
+   */
+  onLayoutChange(listener: () => void): void {
+    this.layoutListeners.add(listener);
   }
 
   /**
