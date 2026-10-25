@@ -3,11 +3,11 @@
  * L-shapes, elevation separation), not only that a path string was emitted.
  */
 import { expect, test } from "vite-plus/test";
-import type { DatabaseNode } from "../src/design";
+import type { DatabaseInstance } from "../src/design";
 import { mergePlatformFootprints } from "../src/platform";
 
-/** Minimal validated node with a centered 288 × 150 foot. */
-function rack(id: string, x: number, y: number, z = 0): DatabaseNode {
+/** Minimal validated instance with a centered 288 × 150 foot. */
+function rack(id: string, x: number, y: number, z = 0): DatabaseInstance {
   return {
     id,
     type: "database-rack",
@@ -70,11 +70,12 @@ test("an L-shaped group keeps the empty corner and removes shared interior edges
 });
 
 test("a ring retains its hole instead of covering the empty center", () => {
-  const nodes: DatabaseNode[] = [];
+  const instances: DatabaseInstance[] = [];
   for (let x = 0; x < 3; x++)
     for (let y = 0; y < 3; y++)
-      if (x !== 1 || y !== 1) nodes.push(rack(`${x}-${y}`, 288 * x, 150 * y));
-  const [platform] = mergePlatformFootprints(nodes);
+      if (x !== 1 || y !== 1)
+        instances.push(rack(`${x}-${y}`, 288 * x, 150 * y));
+  const [platform] = mergePlatformFootprints(instances);
   expect(platform.contours).toHaveLength(2);
   expect(platform.contours.map(area).sort((a, b) => a - b)).toEqual([
     -288 * 150,

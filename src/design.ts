@@ -1,7 +1,7 @@
 /**
  * JSON design document model and validation.
  *
- * The persisted document is deliberately small: a node is an ID and an
+ * The persisted document is deliberately small: an instance is an ID and an
  * optional label, a connection names two IDs, and a cluster groups IDs. Type,
  * color, and position are render-time derivations owned by `layout.ts`, so an
  * exported document never accumulates generated data.
@@ -22,7 +22,7 @@ export interface Position {
  * shape. `id` stays the stable key connections target; `label` is the
  * user-facing name (an omitted imported label falls back to `id`).
  */
-export interface DatabaseNode {
+export interface DatabaseInstance {
   id: string;
   type: "database-rack";
   label: string;
@@ -31,18 +31,18 @@ export interface DatabaseNode {
 }
 
 /**
- * One imported object. Only identity and presentation are persisted.
+ * One imported instance. Only identity and presentation are persisted.
  *
- * IDs are the source of truth for both the node type (via prefix) and link
+ * IDs are the source of truth for both the renderer type (via prefix) and link
  * endpoints. The renderer derives everything else.
  */
-export interface DesignNode {
+export interface DesignInstance {
   id: string;
   label?: string;
 }
 
 /**
- * Directed link between two distinct nodes.
+ * Directed link between two distinct instances.
  *
  * `id` is optional: the renderer falls back to `from->to`, which keeps simple
  * documents free of bookkeeping. `relation` is optional prose for the link
@@ -56,7 +56,7 @@ export interface Connection {
 }
 
 /**
- * A named group of nodes that should share a platform and be laid out together.
+ * A named group of instances sharing a platform and laid out together.
  *
  * `id` and `label` are optional. The layout pass derives a stable fallback from
  * the declaration order and uses the label for the on-canvas group caption.
@@ -64,7 +64,7 @@ export interface Connection {
 export interface Cluster {
   id?: string;
   label?: string;
-  nodes: string[];
+  instances: string[];
 }
 
 /**
@@ -78,7 +78,7 @@ export interface Cluster {
 export interface Design {
   version: 1;
   name: string;
-  nodes: DesignNode[];
+  instances: DesignInstance[];
   connections: Connection[];
   clusters: Cluster[];
 }
@@ -93,7 +93,7 @@ export interface Design {
 export const example: Design = {
   version: 1,
   name: "Horizontal scaling",
-  nodes: [
+  instances: [
     { id: "db-01", label: "Database Rack 01" },
     { id: "db-02", label: "Database Rack 02" },
     { id: "db-03", label: "Database Rack 03" },
@@ -105,7 +105,7 @@ export const example: Design = {
   clusters: [
     {
       label: "Database cluster",
-      nodes: ["db-01", "db-02", "db-03"],
+      instances: ["db-01", "db-02", "db-03"],
     },
   ],
 };
@@ -141,37 +141,39 @@ function text(value: unknown, path: string): string {
  *
  * Validation is all-or-nothing: malformed JSON throws `SyntaxError`, schema
  * violations throw `Error`, and the caller keeps the previous scene. Empty
- * scenes are valid. Duplicate node/link/cluster IDs, dangling endpoints,
- * self-links, and a node appearing in two clusters are rejected because the
- * renderer resolves all of them by ID.
+ * scenes are valid. Duplicate instance/link/cluster IDs, dangling endpoints,
+ * self-links, and an instance appearing in two clusters are rejected because
+ * the renderer resolves all of them by ID.
  *
- * `connections` and `clusters` are optional. Node entries may be strings
+ * `connections` and `clusters` are optional. Instance entries may be strings
  * (`"db-01"`) or objects (`{ "id": "db-01", "label": "Primary" }`). Generated
  * fields from the previous schema are ignored and never returned.
  *
- * Limits: 64 nodes, 256 links, 64 clusters, 100-character strings.
+ * Limits: 64 instances, 256 links, 64 clusters, 100-character strings.
  */
 export function parseDesign(source: string): Design {
   const root = record(JSON.parse(source) as unknown, "Design");
   if (root.version !== 1) throw new Error("version must be 1.");
-  if (!Array.isArray(root.nodes) || root.nodes.length > 64)
-    throw new Error("nodes must be an array of at most 64 node objects.");
+  if (!Array.isArray(root.instances) || root.instances.length > 64)
+    throw new Error(
+      "instances must be an array of at most 64 instance objects.",
+    );
 
   // IDs are collected before links and clusters are parsed so every reference
-  // can be checked against the final node set, not declaration order.
+  // can be checked against the final instance set, not declaration order.
   const ids = new Set<string>();
-  const nodes = root.nodes.map((value, index): DesignNode => {
-    const path = `nodes[${index}]`,
-      node: Record<string, unknown> =
+  const instances = root.instances.map((value, index): DesignInstance => {
+    const path = `instances[${index}]`,
+      instance: Record<string, unknown> =
         typeof value === "string" ? { id: value } : record(value, path);
-    const id = text(node.id, `${path}.id`);
-    if (ids.has(id)) throw new Error(`Duplicate node id: ${id}`);
+    const id = text(instance.id, `${path}.id`);
+    if (ids.has(id)) throw new Error(`Duplicate instance id: ${id}`);
     ids.add(id);
     // `type`, `position`, and `color` are intentionally not read. They are
     // derived from the ID and graph by the layout pass.
-    return node.label === undefined
+    return instance.label === undefined
       ? { id }
-      : { id, label: text(node.label, `${path}.label`) };
+      : { id, label: text(instance.label, `${path}.label`) };
   });
 
   const connectionInput =
@@ -179,8 +181,8 @@ export function parseDesign(source: string): Design {
   if (!Array.isArray(connectionInput) || connectionInput.length > 256)
     throw new Error("connections must be an array of at most 256 links.");
 
-  // Link validation reuses the node ID set and rejects duplicate effective IDs
-  // so DOM nodes and CSS variables remain unambiguous.
+  // Link validation reuses the instance ID set and rejects duplicate effective
+  // IDs so DOM elements and CSS variables remain unambiguous.
   const linkIds = new Set<string>();
   const connections = connectionInput.map((value, index): Connection => {
     const path = `connections[${index}]`,
@@ -188,9 +190,9 @@ export function parseDesign(source: string): Design {
     const from = text(link.from, `${path}.from`),
       to = text(link.to, `${path}.to`);
     if (!ids.has(from) || !ids.has(to))
-      throw new Error(`${path} references an unknown node.`);
+      throw new Error(`${path} references an unknown instance.`);
     if (from === to)
-      throw new Error(`${path} must connect two different nodes.`);
+      throw new Error(`${path} must connect two different instances.`);
 
     const explicitId =
       link.id === undefined ? undefined : text(link.id, `${path}.id`);
@@ -212,9 +214,9 @@ export function parseDesign(source: string): Design {
   if (!Array.isArray(clusterInput) || clusterInput.length > 64)
     throw new Error("clusters must be an array of at most 64 groups.");
 
-  // A node belongs to at most one cluster: two groups would place the same rack
-  // at conflicting coordinates. Cross-cluster membership is therefore treated
-  // as a validation error rather than silently picking the first group.
+  // An instance belongs to at most one cluster: two groups would place the
+  // same rack at conflicting coordinates. Cross-cluster membership is therefore
+  // treated as a validation error rather than silently picking the first group.
   const clusterIds = new Set<string>(),
     clustered = new Set<string>();
   const clusters = clusterInput.map((value, index): Cluster => {
@@ -227,20 +229,20 @@ export function parseDesign(source: string): Design {
     clusterIds.add(id);
 
     if (
-      !Array.isArray(cluster.nodes) ||
-      cluster.nodes.length === 0 ||
-      cluster.nodes.length > 64
+      !Array.isArray(cluster.instances) ||
+      cluster.instances.length === 0 ||
+      cluster.instances.length > 64
     )
-      throw new Error(`${path}.nodes must contain 1–64 node IDs.`);
+      throw new Error(`${path}.instances must contain 1–64 instance IDs.`);
 
-    const members = cluster.nodes.map((nodeId, memberIndex) => {
-      const member = text(nodeId, `${path}.nodes[${memberIndex}]`);
+    const members = cluster.instances.map((instanceId, memberIndex) => {
+      const member = text(instanceId, `${path}.instances[${memberIndex}]`);
       if (!ids.has(member))
-        throw new Error(`${path} references an unknown node.`);
+        throw new Error(`${path} references an unknown instance.`);
       return member;
     });
     if (new Set(members).size !== members.length)
-      throw new Error(`${path}.nodes must not repeat a node.`);
+      throw new Error(`${path}.instances must not repeat an instance.`);
     for (const member of members) {
       if (clustered.has(member))
         throw new Error(`${member} appears in more than one cluster.`);
@@ -252,14 +254,14 @@ export function parseDesign(source: string): Design {
       ...(cluster.label === undefined
         ? {}
         : { label: text(cluster.label, `${path}.label`) }),
-      nodes: members,
+      instances: members,
     };
   });
 
   return {
     version: 1,
     name: text(root.name, "name"),
-    nodes,
+    instances,
     connections,
     clusters,
   };

@@ -1,12 +1,13 @@
 import {
   createDatabaseDefinitions,
   DATABASE_ANCHOR,
+  DATABASE_HEIGHT,
   DatabaseRack,
   project,
 } from "./database";
 import type { Design } from "./design";
-import { layoutDesign } from "./layout";
-import type { PlacedCluster } from "./layout";
+import { layoutDesign, RACK_HALF_DEPTH, RACK_HALF_WIDTH } from "./layout";
+import type { Layout, PlacedCluster } from "./layout";
 import { createPlatforms } from "./platform";
 
 const NS = "http://www.w3.org/2000/svg";
@@ -27,6 +28,55 @@ const CLUSTER_FRAME_MARGIN = 36;
 
 /** Screen-space gap between a cluster frame's bottom corner and its caption. */
 const CLUSTER_LABEL_GAP = 20;
+
+/**
+ * Projected bounds of the design content.
+ *
+ * Rack instances are measured from their layout boxes rather than
+ * `getBBox()`: `<use>` instances can report stale geometry before the shared
+ * definitions are laid out, which would shrink the fitted view to a stamp.
+ */
+function contentExtent(layout: Layout): {
+  minX: number;
+  minY: number;
+  maxX: number;
+  maxY: number;
+} {
+  let minX = Infinity,
+    minY = Infinity,
+    maxX = -Infinity,
+    maxY = -Infinity;
+  const add = (x: number, y: number, z: number): void => {
+    const [screenX, screenY] = project(x, y, z);
+    minX = Math.min(minX, screenX);
+    maxX = Math.max(maxX, screenX);
+    minY = Math.min(minY, screenY);
+    maxY = Math.max(maxY, screenY);
+  };
+
+  for (const instance of layout.instances) {
+    const { x, y, z } = instance.position;
+    for (const dx of [-RACK_HALF_WIDTH, RACK_HALF_WIDTH])
+      for (const dy of [-RACK_HALF_DEPTH, RACK_HALF_DEPTH])
+        for (const dz of [0, DATABASE_HEIGHT]) add(x + dx, y + dy, z + dz);
+  }
+  for (const cluster of layout.clusters) {
+    const { x, y, width, height } = cluster.bounds;
+    for (const cornerX of [
+      x - CLUSTER_FRAME_MARGIN,
+      x + width + CLUSTER_FRAME_MARGIN,
+    ])
+      for (const cornerY of [
+        y - CLUSTER_FRAME_MARGIN,
+        y + height + CLUSTER_FRAME_MARGIN,
+      ])
+        add(cornerX, cornerY, 0);
+  }
+
+  return Number.isFinite(minX)
+    ? { minX, minY, maxX, maxY }
+    : { minX: -100, minY: -100, maxX: 100, maxY: 100 };
+}
 
 /**
  * Build the optional cluster captions as one non-interactive SVG group.
@@ -160,6 +210,21 @@ export class SystemScene {
   /** ID of the cluster currently hovered by the pointer, if any. */
   private hoveredClusterId: string | null = null;
 
+  /** Projected top-center per hover target key, for the pinned callout. */
+  private readonly topPoints = new Map<string, readonly [number, number]>();
+
+  /** Projected world bounds per hover target key, for camera framing. */
+  private readonly targetBounds = new Map<
+    string,
+    { minX: number; minY: number; maxX: number; maxY: number }
+  >();
+
+  /** Pending requestAnimationFrame id for the camera move, if any. */
+  private cameraFrame: number | null = null;
+
+  /** ViewBox subscribers; the shell aligns screen-space overlays. */
+  private readonly viewListeners = new Set<() => void>();
+
   /**
    * @param svg Full-viewport SVG element. The caller should not append other
    *   defs or content; this class owns its child order.
@@ -182,6 +247,7 @@ export class SystemScene {
         // preventDefault is required because the listener is non-passive;
         // the page itself must never scroll around this fixed canvas.
         event.preventDefault();
+        this.stopCamera();
         const factor = Math.exp(-event.deltaY * 0.0015);
         this.zoomBy(factor, event.clientX, event.clientY);
       },
@@ -192,6 +258,8 @@ export class SystemScene {
       // Primary button only: secondary clicks and context menus stay native.
       if (event.button !== 0) return;
       event.preventDefault();
+      // A new gesture owns the camera; never fight the user's drag.
+      this.stopCamera();
       // Settle a pending pan before the new contact changes the gesture mode.
       this.flushPointerUpdate();
       this.activePointers.set(event.pointerId, {
@@ -287,38 +355,91 @@ export class SystemScene {
    *
    * @param design - Already validated document. The defensive endpoint check
    *   protects against callers bypassing the parser.
-   * @throws Error when a connection references a missing node.
+   * @throws Error when a connection references a missing instance.
    */
   render(design: Design): void {
     this.hoveredClusterId = null;
-    const nodeCluster = new Map<string, string>();
+    const instanceCluster = new Map<string, string>();
     for (const [index, cluster] of design.clusters.entries()) {
       const clusterId = cluster.id ?? `cluster-${index + 1}`;
-      for (const nodeId of cluster.nodes) {
-        nodeCluster.set(nodeId, clusterId);
+      for (const instanceId of cluster.instances) {
+        instanceCluster.set(instanceId, clusterId);
       }
     }
-    const layout = layoutDesign(design),
-      layer = document.createElementNS(NS, "g");
+    const layout = layoutDesign(design);
+
+    // Top points anchor the pinned callout above the highest member, and
+    // target bounds drive the zoom-to-fit on selection.
+    this.topPoints.clear();
+    this.targetBounds.clear();
+    const clusterTops = new Map<string, readonly [number, number]>();
+    const clusterBounds = new Map<
+      string,
+      { minX: number; minY: number; maxX: number; maxY: number }
+    >();
+    for (const instance of layout.instances) {
+      const { x, y, z } = instance.position,
+        top = project(x, y, z + DATABASE_HEIGHT),
+        key = `instance:${instance.id}`,
+        bounds = {
+          minX: Infinity,
+          minY: Infinity,
+          maxX: -Infinity,
+          maxY: -Infinity,
+        };
+      this.topPoints.set(key, top);
+      for (const dx of [-RACK_HALF_WIDTH, RACK_HALF_WIDTH])
+        for (const dy of [-RACK_HALF_DEPTH, RACK_HALF_DEPTH])
+          for (const dz of [0, DATABASE_HEIGHT]) {
+            const [screenX, screenY] = project(x + dx, y + dy, z + dz);
+            bounds.minX = Math.min(bounds.minX, screenX);
+            bounds.maxX = Math.max(bounds.maxX, screenX);
+            bounds.minY = Math.min(bounds.minY, screenY);
+            bounds.maxY = Math.max(bounds.maxY, screenY);
+          }
+      this.targetBounds.set(key, bounds);
+
+      const clusterId = instanceCluster.get(instance.id);
+      if (!clusterId) continue;
+      const currentTop = clusterTops.get(clusterId);
+      if (!currentTop || top[1] < currentTop[1])
+        clusterTops.set(clusterId, top);
+      const currentBounds = clusterBounds.get(clusterId);
+      if (!currentBounds) clusterBounds.set(clusterId, { ...bounds });
+      else {
+        currentBounds.minX = Math.min(currentBounds.minX, bounds.minX);
+        currentBounds.minY = Math.min(currentBounds.minY, bounds.minY);
+        currentBounds.maxX = Math.max(currentBounds.maxX, bounds.maxX);
+        currentBounds.maxY = Math.max(currentBounds.maxY, bounds.maxY);
+      }
+    }
+    for (const [clusterId, top] of clusterTops)
+      this.topPoints.set(`cluster:${clusterId}`, top);
+    for (const [clusterId, bounds] of clusterBounds)
+      this.targetBounds.set(`cluster:${clusterId}`, bounds);
+
+    const layer = document.createElementNS(NS, "g");
     layer.append(
       createClusterFrames(layout.clusters),
-      createPlatforms(layout.nodes),
+      createPlatforms(layout.instances),
       createClusterLabels(layout.clusters),
     );
 
-    const byId = new Map(layout.nodes.map((node) => [node.id, node]));
+    const byId = new Map(
+      layout.instances.map((instance) => [instance.id, instance]),
+    );
     for (const [index, link] of design.connections.entries()) {
       const from = byId.get(link.from),
         to = byId.get(link.to);
       const connectionId = link.id ?? `${link.from}->${link.to}`;
       if (!from || !to)
         throw new Error(
-          `Connection ${connectionId} references an unknown node.`,
+          `Connection ${connectionId} references an unknown instance.`,
         );
 
       // Links attach just above the base. The quadratic control point at the
       // source Y / target X approximates an orthogonal cable while staying
-      // smooth at iso angles; elevated nodes keep their own z endpoints.
+      // smooth at iso angles; elevated instances keep their own z endpoints.
       const a = project(from.position.x, from.position.y, from.position.z + 4);
       const b = project(to.position.x, to.position.y, to.position.z + 4);
       const middle = project(
@@ -333,8 +454,8 @@ export class SystemScene {
       group.dataset.connectionId = connectionId;
       group.style.setProperty("--cable-color", from.color);
       group.innerHTML = `<path class="wire-glow" d="${d}"/><path class="wire" d="${d}"/><path class="pulse" pathLength="100" style="--duration:3s;--delay:${-index * 0.6}s" d="${d}"/>`;
-      const fromCluster = nodeCluster.get(from.id),
-        toCluster = nodeCluster.get(to.id);
+      const fromCluster = instanceCluster.get(from.id),
+        toCluster = instanceCluster.get(to.id);
       if (fromCluster && fromCluster === toCluster) {
         group.dataset.clusterId = fromCluster;
       }
@@ -342,20 +463,24 @@ export class SystemScene {
     }
 
     // Back to front; no depth sorting or geometry generation during animation.
-    for (const node of layout.nodes
+    for (const instance of layout.instances
       .slice()
       .sort(
         (a, b) =>
           a.position.x + a.position.y - (b.position.x + b.position.y) ||
           a.position.z - b.position.z,
       )) {
-      const object = new DatabaseRack(node),
-        p = project(node.position.x, node.position.y, node.position.z);
+      const object = new DatabaseRack(instance),
+        p = project(
+          instance.position.x,
+          instance.position.y,
+          instance.position.z,
+        );
       object.element.setAttribute(
         "transform",
         `translate(${p[0] - DATABASE_ANCHOR[0]} ${p[1] - DATABASE_ANCHOR[1]})`,
       );
-      const clusterId = nodeCluster.get(node.id);
+      const clusterId = instanceCluster.get(instance.id);
       if (clusterId) {
         object.element.dataset.clusterId = clusterId;
       }
@@ -363,16 +488,21 @@ export class SystemScene {
     }
 
     this.content.replaceChildren(layer);
-    const bounds = layer.getBBox(),
-      pad = 55;
+    const extent = contentExtent(layout),
+      pad = 55,
+      // The hover callout is screen-space and hangs above the topmost rack,
+      // so the fitted view keeps extra headroom above the drawing. The bottom
+      // pad clears the projected cluster caption.
+      topPad = pad + 90,
+      bottomPad = pad + 40;
 
     // Padding leaves room for labels and cable bows without shrinking the
     // racks to a postage stamp. The 200-unit floor keeps an empty scene valid.
     this.contentBounds = {
-      x: bounds.x - pad,
-      y: bounds.y - pad,
-      width: Math.max(200, bounds.width + 2 * pad),
-      height: Math.max(200, bounds.height + 2 * pad),
+      x: extent.minX - pad,
+      y: extent.minY - topPad,
+      width: Math.max(200, extent.maxX - extent.minX + 2 * pad),
+      height: Math.max(200, extent.maxY - extent.minY + topPad + bottomPad),
     };
     this.fit();
   }
@@ -388,8 +518,128 @@ export class SystemScene {
     }
   }
 
+  /**
+   * Subscribe to viewBox changes.
+   *
+   * Screen-space overlays (the pinned callout) use this to stay attached while
+   * the camera animates, pans, or zooms. The scene never touches that markup.
+   */
+  onViewChange(listener: () => void): void {
+    this.viewListeners.add(listener);
+  }
+
+  /**
+   * Smoothly frame a rendered target inside a client-space area.
+   *
+   * Selection uses this to fill the free area beside the detail panel: the
+   * zoom is solved so the target's projected bounds fit with a small margin,
+   * then center and zoom are interpolated together. Reduced-motion users jump
+   * straight to the final frame; any pan, zoom, or fit cancels the move.
+   *
+   * @param key - `instance:<id>` or `cluster:<id>` key from the last render.
+   * @param area - Client-space rectangle the target should fit inside.
+   */
+  focus(
+    key: string,
+    area: { x: number; y: number; width: number; height: number },
+  ): void {
+    const target = this.targetBounds.get(key);
+    if (!target) return;
+    const box = this.svg.getBoundingClientRect();
+    if (!box.width || !box.height) return;
+
+    const worldWidth = target.maxX - target.minX,
+      worldHeight = target.maxY - target.minY;
+    if (worldWidth <= 0 || worldHeight <= 0) return;
+
+    // Client pixels per user unit is `box.width * zoom / base.width`, so the
+    // fit zoom is the smaller of the width and height solutions.
+    const padding = 0.86,
+      zoom = Math.max(
+        MIN_ZOOM,
+        Math.min(
+          (area.width * padding * this.base.width) / (worldWidth * box.width),
+          (area.height * padding * this.base.height) /
+            (worldHeight * box.height),
+          MAX_ZOOM,
+        ),
+      ),
+      width = this.base.width / zoom,
+      height = this.base.height / zoom,
+      center: [number, number] = [
+        (target.minX + target.maxX) / 2 -
+          ((area.x + area.width / 2 - box.left) / box.width - 0.5) * width,
+        (target.minY + target.maxY) / 2 -
+          ((area.y + area.height / 2 - box.top) / box.height - 0.5) * height,
+      ];
+    this.animateCamera(center, zoom);
+  }
+
+  /**
+   * Client-space point at the top center of a rendered target.
+   *
+   * The pinned callout uses this instead of `getBoundingClientRect()` on the
+   * rack group: `<use>` instances can report stale geometry in Chromium, while
+   * the projected layout point is always correct.
+   */
+  targetTopPoint(key: string): { x: number; y: number } | null {
+    const point = this.topPoints.get(key);
+    if (!point) return null;
+    const bounds = this.svg.getBoundingClientRect(),
+      width = this.base.width / this.zoom,
+      height = this.base.height / this.zoom;
+    return {
+      x:
+        bounds.left +
+        ((point[0] - (this.center[0] - width / 2)) / width) * bounds.width,
+      y:
+        bounds.top +
+        ((point[1] - (this.center[1] - height / 2)) / height) * bounds.height,
+    };
+  }
+
+  /**
+   * Interpolate center and zoom together, or jump under reduced motion.
+   *
+   * Zoom is interpolated geometrically (`from * ratio ** t`) so the perceived
+   * zoom rate stays even instead of accelerating near the end.
+   */
+  private animateCamera(target: [number, number], zoom: number): void {
+    this.stopCamera();
+    if (matchMedia("(prefers-reduced-motion: reduce)").matches) {
+      this.center = target;
+      this.zoom = zoom;
+      this.updateViewport();
+      return;
+    }
+
+    const from: [number, number] = [this.center[0], this.center[1]],
+      fromZoom = this.zoom,
+      ratio = zoom / fromZoom,
+      duration = 620,
+      start = performance.now();
+    const step = (now: number) => {
+      const t = Math.min(1, (now - start) / duration),
+        eased = t < 0.5 ? 4 * t * t * t : 1 - (-2 * t + 2) ** 3 / 2;
+      this.center[0] = from[0] + (target[0] - from[0]) * eased;
+      this.center[1] = from[1] + (target[1] - from[1]) * eased;
+      this.zoom = fromZoom * ratio ** eased;
+      this.updateViewport();
+      this.cameraFrame = t < 1 ? requestAnimationFrame(step) : null;
+    };
+    this.cameraFrame = requestAnimationFrame(step);
+  }
+
+  /** Cancel an in-flight camera move so a gesture or fit takes over. */
+  private stopCamera(): void {
+    if (this.cameraFrame === null) return;
+    cancelAnimationFrame(this.cameraFrame);
+    this.cameraFrame = null;
+  }
+
   /** Reset zoom and pan so the whole design is framed again. */
   fit(): void {
+    this.stopCamera();
     this.zoom = 1;
     this.center = [
       this.contentBounds.x + this.contentBounds.width / 2,
@@ -592,6 +842,7 @@ export class SystemScene {
       y = this.center[1] - height / 2;
     this.svg.setAttribute("viewBox", `${x} ${y} ${width} ${height}`);
     this.drawGrid(x, y, width, height);
+    for (const listener of this.viewListeners) listener();
   }
 
   /**

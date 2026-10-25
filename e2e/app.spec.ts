@@ -12,18 +12,21 @@ import { expect, test } from "@playwright/test";
 import type { Design } from "../src/design";
 
 /** Smallest valid document used to prove apply/import replace the scene. */
-const oneRack: Design = {
+const oneInstance: Design = {
   version: 1,
   name: "Single rack",
-  nodes: [{ id: "db-only", label: "Only Rack" }],
+  instances: [{ id: "db-only", label: "Only Rack" }],
   connections: [],
   clusters: [],
 };
-/** Two-node document with a link and a cluster, used to verify file import. */
+/** Two-instance document with a link and a cluster, used to verify file import. */
 const imported: Design = {
   version: 1,
   name: "Imported layout",
-  nodes: [...oneRack.nodes, { id: "db-second", label: "Second Rack" }],
+  instances: [
+    ...oneInstance.instances,
+    { id: "db-second", label: "Second Rack" },
+  ],
   connections: [
     { id: "copy", from: "db-only", to: "db-second", relation: "copies" },
   ],
@@ -31,7 +34,7 @@ const imported: Design = {
     {
       id: "imported-cluster",
       label: "Imported cluster",
-      nodes: ["db-only", "db-second"],
+      instances: ["db-only", "db-second"],
     },
   ],
 };
@@ -49,6 +52,33 @@ async function openSidebar(page: Page) {
   await expect(sidebar).toHaveCSS("opacity", "1");
 }
 
+/**
+ * Find a client point that hit-tests inside a rack.
+ *
+ * Rack groups reference shared `<use>` definitions, and Chromium reports stale
+ * geometry for those groups, so Playwright's own bounding boxes cannot locate
+ * them. Scanning painted pixels finds a point a real pointer can reach; the
+ * second probe keeps the point clear of the rack edge for small movements.
+ */
+async function rackPoint(page: Page) {
+  return page.evaluate(() => {
+    const rect = document.querySelector("#scene")?.getBoundingClientRect();
+    if (!rect) return null;
+    for (let y = rect.top + 40; y < rect.bottom - 60; y += 12)
+      for (let x = rect.left + 40; x < rect.right - 60; x += 12) {
+        const rack = document
+          .elementFromPoint(x, y)
+          ?.closest?.(".database-rack");
+        if (!rack) continue;
+        const next = document
+          .elementFromPoint(x + 20, y + 10)
+          ?.closest?.(".database-rack");
+        if (next === rack) return { x, y };
+      }
+    return null;
+  });
+}
+
 test.describe("minimal isometric canvas", () => {
   test("renders only the grid until Design is expanded", async ({ page }) => {
     await page.goto("/");
@@ -64,6 +94,140 @@ test.describe("minimal isometric canvas", () => {
     await expect(page.locator(".space-grid")).toHaveAttribute("d", /M/);
     await expect(page.locator("#sidebar")).toBeHidden();
     await expect(page.getByRole("button", { name: "Design" })).toBeVisible();
+  });
+
+  test("hovering an instance raises a corner-bracketed callout", async ({
+    page,
+  }) => {
+    await page.goto("/");
+    const tip = page.locator("#callout");
+    const card = tip.locator(".callout-card");
+    await expect(tip).not.toHaveClass(/visible/);
+
+    // Instances overlap in projection; the nearest one is painted last, so its
+    // center is the only one Playwright can hover without interception.
+    // It belongs to the cluster, so the callout reports the cluster, not the
+    // individual replica.
+    const pointer = await rackPoint(page);
+    if (!pointer) throw new Error("No rack point found.");
+    await page.mouse.move(pointer.x, pointer.y);
+    await expect(tip).toHaveClass(/visible/);
+    await expect(card).toBeVisible();
+    await expect(tip.locator(".callout-kind")).toHaveText("Cluster");
+    await expect(tip.locator(".callout-name")).toHaveText("Database cluster");
+    await expect(tip.locator(".callout-meta")).toHaveText("3 replicas");
+
+    // Both the leader and the card follow the cursor: the wrapper sits on the
+    // pointer and the card hangs 41.6px right and 24px up from it.
+    const anchorBox = await tip.evaluate((element) =>
+      element.getBoundingClientRect().toJSON(),
+    );
+    expect(Math.abs(anchorBox.left - pointer.x)).toBeLessThan(1.5);
+    expect(Math.abs(anchorBox.top - pointer.y)).toBeLessThan(1.5);
+
+    const cardBox = await card.evaluate((element) =>
+      element.getBoundingClientRect().toJSON(),
+    );
+    expect(Math.abs(cardBox.x - (pointer.x + 41.6))).toBeLessThan(1.5);
+    expect(
+      Math.abs(cardBox.y + cardBox.height - (pointer.y - 64)),
+    ).toBeLessThan(1.5);
+
+    // Moving inside the same cluster carries the card with the cursor.
+    const movedPointer = { x: pointer.x + 20, y: pointer.y + 10 };
+    await page.mouse.move(movedPointer.x, movedPointer.y);
+    const movedCard = await card.evaluate((element) =>
+      element.getBoundingClientRect().toJSON(),
+    );
+    expect(Math.abs(movedCard.x - (cardBox.x + 20))).toBeLessThan(1.5);
+    expect(Math.abs(movedCard.y - (cardBox.y + 10))).toBeLessThan(1.5);
+
+    // The leader ends on the card corner nearest the cursor.
+    const corners = [
+      [movedCard.left, movedCard.top],
+      [movedCard.right, movedCard.top],
+      [movedCard.left, movedCard.bottom],
+      [movedCard.right, movedCard.bottom],
+    ];
+    const [nearX, nearY] = corners.reduce((best, corner) =>
+      Math.hypot(corner[0] - movedPointer.x, corner[1] - movedPointer.y) <
+      Math.hypot(best[0] - movedPointer.x, best[1] - movedPointer.y)
+        ? corner
+        : best,
+    );
+    const expectedAngle =
+      (Math.atan2(nearY - movedPointer.y, nearX - movedPointer.x) * 180) /
+      Math.PI;
+    const leader = await tip.evaluate((element) => {
+      const style = getComputedStyle(element, "::before");
+      const matrix = style.transform.match(/matrix\(([^)]+)\)/)?.[1];
+      const [a, b] = matrix?.split(",").map(Number) ?? [];
+      return {
+        width: style.width,
+        height: style.height,
+        angle: (Math.atan2(b, a) * 180) / Math.PI,
+      };
+    });
+    expect(
+      Math.abs(
+        Number.parseFloat(leader.width) -
+          Math.hypot(nearX - movedPointer.x, nearY - movedPointer.y),
+      ),
+    ).toBeLessThan(1.5);
+    expect(leader.height).toBe("1px");
+    expect(Math.abs(leader.angle - expectedAngle)).toBeLessThan(1);
+    // A leader that is neither horizontal nor vertical reads as diagonal.
+    expect(Math.abs(leader.angle)).toBeGreaterThan(5);
+    expect(Math.abs(leader.angle)).toBeLessThan(85);
+
+    // Only two opposing corners carry a border; the other sides stay open.
+    const borders = await card.evaluate((element) => {
+      const before = getComputedStyle(element, "::before");
+      const after = getComputedStyle(element, "::after");
+      return [
+        before.borderTopWidth,
+        before.borderLeftWidth,
+        before.borderRightWidth,
+        before.borderBottomWidth,
+        after.borderTopWidth,
+        after.borderLeftWidth,
+        after.borderRightWidth,
+        after.borderBottomWidth,
+      ];
+    });
+    expect(borders).toEqual([
+      "1px",
+      "1px",
+      "0px",
+      "0px",
+      "0px",
+      "0px",
+      "1px",
+      "1px",
+    ]);
+
+    await page.mouse.move(4, 4);
+    await expect(tip).not.toHaveClass(/visible/);
+  });
+
+  test("hovering a standalone instance reports the instance", async ({
+    page,
+  }) => {
+    await page.goto("/");
+    await openSidebar(page);
+    await page.locator("#source").fill(JSON.stringify(oneInstance));
+    await page.getByRole("button", { name: "Apply", exact: true }).click();
+    await page.locator("#panel-close").click();
+    await expect(page.locator(".database-rack")).toHaveCount(1);
+
+    const point = await rackPoint(page);
+    if (!point) throw new Error("No rack point found.");
+    await page.mouse.move(point.x, point.y);
+    const tip = page.locator("#callout");
+    await expect(tip).toHaveClass(/visible/);
+    await expect(tip.locator(".callout-kind")).toHaveText("Instance");
+    await expect(tip.locator(".callout-name")).toHaveText("Only Rack");
+    await expect(tip.locator(".callout-meta")).toHaveText("db-only");
   });
 
   test("the expanded sidebar is an overlay that never moves the scene", async ({
@@ -139,7 +303,7 @@ test.describe("minimal isometric canvas", () => {
   }) => {
     await page.goto("/");
     await openSidebar(page);
-    await page.locator("#source").fill(JSON.stringify(oneRack));
+    await page.locator("#source").fill(JSON.stringify(oneInstance));
     await page.getByRole("button", { name: "Apply", exact: true }).click();
     await expect(page.locator(".database-rack")).toHaveCount(1);
     await expect(page.locator(".cluster-label")).toHaveCount(0);
@@ -161,12 +325,12 @@ test.describe("minimal isometric canvas", () => {
     );
 
     const invalid = {
-      ...oneRack,
+      ...oneInstance,
       connections: [{ id: "bad", from: "db-only", to: "missing" }],
     };
     await page.locator("#source").fill(JSON.stringify(invalid));
     await page.getByRole("button", { name: "Apply", exact: true }).click();
-    await expect(page.locator("#message")).toContainText("unknown node");
+    await expect(page.locator("#message")).toContainText("unknown instance");
     await expect(page.locator("#message")).toHaveClass(/error/);
     await expect(page.locator("#scene-title")).toHaveText("Imported layout");
     await expect(page.locator(".database-rack")).toHaveCount(2);
@@ -183,23 +347,23 @@ test.describe("minimal isometric canvas", () => {
     if (!path) throw new Error("Download did not produce a local file.");
     const exported = JSON.parse(readFileSync(path, "utf8")) as Design;
     expect(exported.name).toBe("Horizontal scaling");
-    expect(exported.nodes).toHaveLength(3);
-    expect(exported.nodes[0]).toEqual({
+    expect(exported.instances).toHaveLength(3);
+    expect(exported.instances[0]).toEqual({
       id: "db-01",
       label: "Database Rack 01",
     });
     expect(
-      exported.nodes.every(
-        (node) =>
-          !Object.hasOwn(node, "type") &&
-          !Object.hasOwn(node, "position") &&
-          !Object.hasOwn(node, "color"),
+      exported.instances.every(
+        (instance) =>
+          !Object.hasOwn(instance, "type") &&
+          !Object.hasOwn(instance, "position") &&
+          !Object.hasOwn(instance, "color"),
       ),
     ).toBe(true);
     expect(exported.clusters).toEqual([
       {
         label: "Database cluster",
-        nodes: ["db-01", "db-02", "db-03"],
+        instances: ["db-01", "db-02", "db-03"],
       },
     ]);
   });
@@ -220,6 +384,117 @@ test.describe("minimal isometric canvas", () => {
     expect(await scan()).toEqual([]);
     await openSidebar(page);
     expect(await scan()).toEqual([]);
+  });
+});
+
+test.describe("hover callout motion", () => {
+  // The rest of the suite forces reduced motion; this block opts back in so
+  // the staggered entry is exercised rather than skipped.
+  test.use({ reducedMotion: "no-preference" });
+
+  test("plays the staggered entry animation", async ({ page }) => {
+    await page.goto("/");
+    const point = await rackPoint(page);
+    if (!point) throw new Error("No rack point found.");
+    await page.mouse.move(point.x, point.y);
+    const tip = page.locator("#callout");
+    const card = tip.locator(".callout-card");
+    await expect(card).toHaveCSS("animation-name", "tip-card");
+    expect(
+      await tip.evaluate(
+        (element) => getComputedStyle(element, "::before").animationName,
+      ),
+    ).toBe("tip-line");
+    expect(
+      await card.evaluate(
+        (element) => getComputedStyle(element, "::before").animationName,
+      ),
+    ).toBe("tip-corner");
+  });
+});
+
+test.describe("instance selection", () => {
+  // The camera glides unless reduced motion is requested, so this block opts
+  // back in to prove the transition is animated rather than snapped.
+  test.use({ reducedMotion: "no-preference" });
+
+  test("clicking a target pins the callout, opens details, and pans the camera", async ({
+    page,
+  }) => {
+    await page.goto("/");
+    const point = await rackPoint(page);
+    if (!point) throw new Error("No rack point found.");
+    const initial = await page.locator("#scene").getAttribute("viewBox");
+    await page.mouse.click(point.x, point.y);
+
+    await expect(page.locator("#detail")).toBeVisible();
+    await expect(page.locator("#detail-kind")).toHaveText("Cluster");
+    await expect(page.locator("#detail-title")).toHaveText("Database cluster");
+    await expect(page.locator(".detail-replica")).toHaveCount(3);
+    await expect(page.locator(".detail-link")).toHaveCount(2);
+    await expect(page.locator("#callout")).toHaveClass(/visible/);
+
+    // Sample the viewBox across the transition: a smooth pan produces several
+    // distinct frames instead of one jump.
+    const frames = await page.evaluate(async () => {
+      const scene = document.querySelector("#scene");
+      const values = new Set<string>();
+      const start = performance.now();
+      const { promise, resolve } = Promise.withResolvers<void>();
+      const tick = () => {
+        values.add(scene?.getAttribute("viewBox") ?? "");
+        if (performance.now() - start < 220) requestAnimationFrame(tick);
+        else resolve();
+      };
+      requestAnimationFrame(tick);
+      await promise;
+      return values.size;
+    });
+    expect(frames).toBeGreaterThan(2);
+    await expect
+      .poll(() => page.locator("#scene").getAttribute("viewBox"))
+      .not.toBe(initial);
+
+    // Framing zooms in: the final viewBox is narrower than the fitted scene.
+    const final = await page.locator("#scene").getAttribute("viewBox");
+    const viewWidth = (value: string | null) => Number(value?.split(" ")[2]);
+    expect(viewWidth(final)).toBeLessThan(viewWidth(initial));
+
+    // The target settles left of the panel.
+    const geometry = await page.evaluate(() => ({
+      calloutX: document.querySelector("#callout")?.getBoundingClientRect()
+        .left,
+      detailLeft: document.querySelector("#detail")?.getBoundingClientRect()
+        .left,
+    }));
+    expect(geometry.calloutX).toBeLessThan(geometry.detailLeft! - 100);
+
+    // The pinned callout ignores pointer movement inside the target.
+    await page.waitForTimeout(700);
+    const pinned = await page
+      .locator("#callout")
+      .evaluate((element) => element.style.transform);
+    await page.mouse.move(point.x + 20, point.y + 10);
+    await page.waitForTimeout(120);
+    expect(
+      await page
+        .locator("#callout")
+        .evaluate((element) => element.style.transform),
+    ).toBe(pinned);
+  });
+
+  test("Escape closes the detail panel and releases the callout", async ({
+    page,
+  }) => {
+    await page.goto("/");
+    const point = await rackPoint(page);
+    if (!point) throw new Error("No rack point found.");
+    await page.mouse.click(point.x, point.y);
+    await expect(page.locator("#detail")).toBeVisible();
+
+    await page.keyboard.press("Escape");
+    await expect(page.locator("#detail")).toBeHidden();
+    await expect(page.locator("#callout")).not.toHaveClass(/visible/);
   });
 });
 
