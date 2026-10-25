@@ -1,4 +1,4 @@
-import type { DatabaseNode } from "./design";
+import type { DatabaseInstance } from "./design";
 
 const NS = "http://www.w3.org/2000/svg";
 
@@ -21,7 +21,7 @@ export const project = (
   (x + y) * 0.5 - z,
 ];
 
-/** Projected rack-foot center; the scene aligns a node position to this point. */
+/** Projected rack-foot center; the scene aligns an instance position to it. */
 export const DATABASE_ANCHOR = project(144, 75, 0);
 
 /**
@@ -130,8 +130,8 @@ function box(
 /**
  * Build repeated vertical detail lines as one path.
  *
- * Used for vents and slot texture. Batching avoids hundreds of SVG nodes and
- * keeps the shared definitions small; values are face-local units.
+ * Used for vents and slot texture. Batching avoids hundreds of SVG elements
+ * and keeps the shared definitions small; values are face-local units.
  */
 function slits(
   start: number,
@@ -149,8 +149,8 @@ function slits(
 /**
  * Build a circle path using two arcs.
  *
- * Circles are merged into one path when used as screws or LEDs, reducing node
- * count. Coordinates are face-local units; the caller owns placement.
+ * Circles are merged into one path when used as screws or LEDs, reducing the
+ * element count. Coordinates are face-local units; the caller owns placement.
  */
 function circle(x: number, y: number, r: number): string {
   return `M${x - r} ${y}a${r} ${r} 0 1 0 ${2 * r} 0a${r} ${r} 0 1 0 ${-2 * r} 0`;
@@ -192,6 +192,9 @@ const SZ = nextZ,
   SH = 11.5,
   ZT = SZ + 16,
   TOPZ = ZT + 20;
+
+/** Cabinet height above its base, in world units; used for view fitting. */
+export const DATABASE_HEIGHT = TOPZ;
 
 /**
  * Face-local X of a network jack (0–80 on the narrow end).
@@ -395,20 +398,20 @@ export class DatabaseRack {
   readonly element = document.createElementNS(NS, "g");
 
   /**
-   * Render a validated node.
+   * Render a validated instance.
    *
-   * The node color becomes `--cable-color` and is inherited by cables, ports,
-   * LEDs, and glass tint. The label is assigned with `textContent`, so imported
-   * text cannot inject markup. Labels longer than 16 characters are compressed
-   * into the 74-unit clip region; aria-label exposes the full name to
-   * assistive technology without triggering browser hover tooltips.
+   * The instance color becomes `--cable-color` and is inherited by cables,
+   * ports, LEDs, and glass tint. The label is assigned with `textContent`, so
+   * imported text cannot inject markup. Labels longer than 16 characters are
+   * compressed into the 74-unit clip region; aria-label exposes the full name
+   * to assistive technology without triggering browser hover tooltips.
    *
    * @throws Error indirectly if the DOM or shared defs are unavailable.
    */
-  constructor(node: DatabaseNode) {
+  constructor(instance: DatabaseInstance) {
     this.element.classList.add("database-rack");
-    this.element.dataset.nodeId = node.id;
-    this.element.style.setProperty("--cable-color", node.color);
+    this.element.dataset.instanceId = instance.id;
+    this.element.style.setProperty("--cable-color", instance.color);
     this.element.innerHTML = `<use href="#rack-rear"/>${cables}<use href="#rack-front"/>`;
 
     // Plain identity lettering on the top strip of the narrow drawer face.
@@ -418,9 +421,9 @@ export class DatabaseRack {
     label.setAttribute("x", "8");
     label.setAttribute("y", "12.5");
     label.setAttribute("clip-path", "url(#rack-name-clip)");
-    label.classList.add("node-label");
-    label.textContent = node.label;
-    if (node.label.length > 16) {
+    label.classList.add("instance-label");
+    label.textContent = instance.label;
+    if (instance.label.length > 16) {
       label.setAttribute("textLength", "74");
       label.setAttribute("lengthAdjust", "spacingAndGlyphs");
     }
@@ -430,7 +433,7 @@ export class DatabaseRack {
     this.element.setAttribute("role", "img");
     this.element.setAttribute(
       "aria-label",
-      `${node.label} (${node.id}) · Database Rack`,
+      `${instance.label} (${instance.id}) · Database Rack`,
     );
   }
 }

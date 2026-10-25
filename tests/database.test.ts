@@ -14,7 +14,7 @@ import { example } from "../src/design";
 import { layoutDesign } from "../src/layout";
 
 /** First placed rack from the default clustered design. */
-const placed = layoutDesign(example).nodes[0];
+const placed = layoutDesign(example).instances[0];
 
 describe("Database Rack geometry", () => {
   test("projects model axes to the isometric plane", () => {
@@ -41,14 +41,14 @@ describe("Database Rack geometry", () => {
   test("creates a colored rack with shared layers, cables, and an identity plate", () => {
     const rack = new DatabaseRack(placed);
     expect(rack.element.classList.contains("database-rack")).toBe(true);
-    expect(rack.element.dataset.nodeId).toBe("db-01");
+    expect(rack.element.dataset.instanceId).toBe("db-01");
     expect(rack.element.style.getPropertyValue("--cable-color")).toBe(
       "#ff9d52",
     );
     expect(rack.element.querySelectorAll("use")).toHaveLength(2);
     expect(rack.element.querySelectorAll(".cable")).toHaveLength(7);
     expect(rack.element.querySelectorAll(".pulse")).toHaveLength(7);
-    expect(rack.element.querySelector(".node-label")?.textContent).toBe(
+    expect(rack.element.querySelector(".instance-label")?.textContent).toBe(
       "Database Rack 01",
     );
     expect(rack.element.getAttribute("aria-label")).toBe(
@@ -61,7 +61,7 @@ describe("Database Rack geometry", () => {
       ...placed,
       label: "Extremely long imported database rack name",
     });
-    const label = rack.element.querySelector(".node-label");
+    const label = rack.element.querySelector(".instance-label");
     expect(label?.getAttribute("textLength")).toBe("74");
     expect(label?.getAttribute("lengthAdjust")).toBe("spacingAndGlyphs");
     expect(label?.getAttribute("clip-path")).toBe("url(#rack-name-clip)");

@@ -1,5 +1,5 @@
 import { project } from "./database";
-import type { DatabaseNode } from "./design";
+import type { DatabaseInstance } from "./design";
 
 /** A world-space X/Y vertex; platform contours never carry elevation. */
 type Point = readonly [number, number];
@@ -63,20 +63,20 @@ function coordinateIndex(
  *
  * Runs once per design change, never inside the animation loop.
  *
- * @param nodes - Validated racks; only `position` is needed.
- * @returns Platforms sorted by ascending elevation; empty for no nodes.
+ * @param instances - Validated racks; only `position` is needed.
+ * @returns Platforms sorted by ascending elevation; empty for no instances.
  * @throws Error only if an internal lookup or contour closure invariant fails.
  */
 export function mergePlatformFootprints(
-  nodes: readonly DatabaseNode[],
+  instances: readonly DatabaseInstance[],
 ): PlatformFootprint[] {
   // Elevation is exact: racks on different floors must not share a base, and
   // inputs are validated numbers, so no epsilon merge is appropriate.
-  const levels = new Map<number, DatabaseNode[]>();
-  for (const node of nodes) {
-    const level = levels.get(node.position.z);
-    if (level) level.push(node);
-    else levels.set(node.position.z, [node]);
+  const levels = new Map<number, DatabaseInstance[]>();
+  for (const instance of instances) {
+    const level = levels.get(instance.position.z);
+    if (level) level.push(instance);
+    else levels.set(instance.position.z, [instance]);
   }
 
   const platforms: PlatformFootprint[] = [];
@@ -204,11 +204,13 @@ export function mergePlatformFootprints(
  * decorative screws sit on long convex corners. The result is static markup
  * with no listeners, created fresh for each design render.
  */
-export function createPlatforms(nodes: readonly DatabaseNode[]): SVGGElement {
+export function createPlatforms(
+  instances: readonly DatabaseInstance[],
+): SVGGElement {
   const group = document.createElementNS("http://www.w3.org/2000/svg", "g");
   group.classList.add("platforms");
 
-  for (const { elevation, contours } of mergePlatformFootprints(nodes)) {
+  for (const { elevation, contours } of mergePlatformFootprints(instances)) {
     const platform = document.createElementNS(
       "http://www.w3.org/2000/svg",
       "g",

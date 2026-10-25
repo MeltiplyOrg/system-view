@@ -3,7 +3,8 @@
  * these custom properties, so theme swaps never require re-rendering markup.
  */
 :root {
-  font-family: "Manrope", ui-sans-serif, system-ui, sans-serif;
+  --sans: "Manrope", ui-sans-serif, system-ui, sans-serif;
+  font-family: var(--sans);
   color-scheme: dark;
   --page: #0c0e10;
   --panel: #121518;
@@ -129,6 +130,151 @@ a {
   pointer-events: none;
 }
 
+/* ---------- hover callout ---------- */
+/*
+ * A minimal readout raised from the cursor while it is over an instance. The
+ * wrapper is a zero-size anchor translated to the pointer, so the leader line
+ * starts exactly where the user is pointing. The card hangs above and to the
+ * right, and the diagonal leader always meets its nearest corner. Only two
+ * opposing corner brackets are drawn.
+ */
+.callout {
+  position: absolute;
+  top: 0;
+  left: 0;
+  z-index: 10;
+  width: 0;
+  height: 0;
+  pointer-events: none;
+  opacity: 0;
+  visibility: hidden;
+  transition:
+    opacity 0.14s ease,
+    visibility 0s 0.14s;
+}
+.callout.visible {
+  opacity: 1;
+  visibility: visible;
+  transition:
+    opacity 0.14s ease,
+    visibility 0s;
+}
+/*
+ * Leader line from the cursor to the card. Length and angle are measured in
+ * JS so the line always meets the nearest card corner; the defaults only
+ * cover the first paint.
+ */
+.callout::before {
+  content: "";
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  width: var(--tip-line-length, 48px);
+  height: 1px;
+  transform: rotate(var(--tip-line-angle, -30deg));
+  transform-origin: left center;
+  background: var(--muted);
+  opacity: 0.75;
+}
+.callout-card {
+  position: absolute;
+  top: var(--tip-y, -94px);
+  left: var(--tip-x, 41.6px);
+  display: grid;
+  justify-items: start;
+  gap: 3px;
+  padding: 8px 13px 9px;
+  border: 1px solid var(--border);
+  background: var(--panel);
+  text-align: left;
+  white-space: nowrap;
+}
+/*
+ * Entry animation: the card settles in, the leader line grows out of the
+ * cursor, and the two brackets snap into place a beat later. Keeping the
+ * three parts staggered is what makes the callout read as an instrument
+ * readout rather than a plain popover.
+ */
+.callout.visible .callout-card {
+  animation: tip-card 0.24s cubic-bezier(0.2, 0.8, 0.2, 1) both;
+}
+.callout.visible::before {
+  animation: tip-line 0.3s cubic-bezier(0.2, 0.8, 0.2, 1) both;
+}
+.callout.visible .callout-card::before,
+.callout.visible .callout-card::after {
+  animation: tip-corner 0.3s ease-out 0.08s both;
+}
+/* Two opposing corner brackets, no full outline. */
+.callout-card::before,
+.callout-card::after {
+  content: "";
+  position: absolute;
+  width: 9px;
+  height: 9px;
+  border: 0 solid var(--muted);
+}
+.callout-card::before {
+  top: 0;
+  left: 0;
+  transform-origin: top left;
+  border-top-width: 1px;
+  border-left-width: 1px;
+}
+.callout-card::after {
+  right: 0;
+  bottom: 0;
+  transform-origin: bottom right;
+  border-right-width: 1px;
+  border-bottom-width: 1px;
+}
+.callout-kind {
+  color: var(--muted);
+  font: 8px var(--mono);
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+}
+.callout-name {
+  color: var(--fg);
+  font: 11px/1.4 var(--mono);
+  letter-spacing: 0.02em;
+}
+.callout-meta {
+  color: var(--muted);
+  font: 9px var(--mono);
+  letter-spacing: 0.06em;
+}
+@keyframes tip-card {
+  from {
+    opacity: 0;
+    transform: translate(6px, 8px);
+    filter: blur(1.5px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+    filter: none;
+  }
+}
+@keyframes tip-line {
+  from {
+    transform: rotate(var(--tip-line-angle, -30deg)) scaleX(0);
+  }
+  to {
+    transform: rotate(var(--tip-line-angle, -30deg)) scaleX(1);
+  }
+}
+@keyframes tip-corner {
+  from {
+    opacity: 0;
+    transform: scale(0.4);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
 /* ---------- floating panel trigger ---------- */
 /* The only persistent chrome: a compact control that expands the overlay. */
 .panel-toggle {
@@ -142,9 +288,7 @@ a {
   height: 38px;
   padding: 0 15px;
   border: 1px solid var(--border);
-  border-radius: 999px;
   background: var(--panel);
-  box-shadow: 0 10px 30px rgb(0 0 0 / 0.22);
   color: var(--fg);
   font: 11px var(--mono);
   letter-spacing: 0.04em;
@@ -187,9 +331,7 @@ a {
   flex-direction: column;
   overflow: hidden;
   border: 1px solid var(--border);
-  border-radius: 14px;
   background: var(--panel);
-  box-shadow: 0 28px 90px rgb(0 0 0 / 0.38);
   opacity: 0;
   visibility: hidden;
   transform: translateX(calc(100% + 24px));
@@ -229,15 +371,13 @@ a {
   letter-spacing: -0.025em;
 }
 .icon-button {
-  width: 30px;
-  height: 30px;
+  width: 28px;
+  height: 28px;
   padding: 0;
-  border: 1px solid transparent;
-  border-radius: 50%;
+  border: 1px solid var(--border);
   background: transparent;
   color: var(--muted);
-  font-size: 19px;
-  line-height: 1;
+  font: 400 16px/1 var(--mono);
 }
 .icon-button:hover {
   background: var(--raised);
@@ -296,7 +436,7 @@ select {
   height: 36px;
   padding: 0 10px;
   border: 1px solid var(--border);
-  border-radius: 8px;
+  border-radius: 0;
   background: var(--raised);
   color: var(--fg);
   font-size: 12px;
@@ -315,7 +455,7 @@ select:hover {
   height: 36px;
   padding: 0 12px;
   border: 1px solid var(--border);
-  border-radius: 8px;
+  border-radius: 0;
   background: transparent;
   color: var(--fg);
   font: 11px var(--mono);
@@ -341,7 +481,7 @@ textarea {
   padding: 12px;
   resize: vertical;
   border: 1px solid var(--border);
-  border-radius: 8px;
+  border-radius: 0;
   background: color-mix(in srgb, var(--page) 78%, transparent);
   color: var(--fg);
   font: 11px / 1.75 var(--mono);
@@ -409,6 +549,158 @@ textarea[aria-invalid="true"] {
   clip-path: inset(50%);
   white-space: nowrap;
   border: 0;
+}
+
+/* ---------- detail panel ---------- */
+/*
+ * Read-only inspector for the selected instance or cluster. Sharp edges, flat
+ * surfaces, and hairline rules keep it in the drawing's technical register;
+ * the sidebar it replaces used rounded chrome and drop shadows.
+ */
+.detail {
+  position: fixed;
+  z-index: 25;
+  top: 14px;
+  right: 14px;
+  bottom: 14px;
+  width: min(360px, calc(100vw - 28px));
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  border: 1px solid var(--border);
+  background: var(--panel);
+  opacity: 0;
+  visibility: hidden;
+  transform: translateX(calc(100% + 24px));
+  will-change: transform, opacity;
+  transition:
+    transform 0.28s cubic-bezier(0.2, 0.7, 0.2, 1),
+    opacity 0.2s ease,
+    visibility 0s 0.28s;
+}
+.detail.open {
+  opacity: 1;
+  visibility: visible;
+  transform: none;
+  transition:
+    transform 0.28s cubic-bezier(0.2, 0.7, 0.2, 1),
+    opacity 0.2s ease,
+    visibility 0s;
+}
+.detail-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 18px 18px 16px;
+  border-bottom: 1px solid var(--border);
+}
+.detail-title {
+  margin: 6px 0 0;
+  font: 600 20px/1.2 var(--sans);
+  letter-spacing: -0.03em;
+}
+.detail-body {
+  flex: 1;
+  overflow-y: auto;
+  scrollbar-width: thin;
+  scrollbar-color: var(--detail) transparent;
+}
+.detail-spec {
+  display: grid;
+  margin: 0;
+  padding: 8px 18px 12px;
+  border-bottom: 1px solid var(--border);
+}
+.detail-spec-row {
+  display: grid;
+  grid-template-columns: 96px minmax(0, 1fr);
+  gap: 12px;
+  padding: 5px 0;
+}
+.detail-spec dt {
+  color: var(--muted);
+  font: 9px var(--mono);
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+}
+.detail-spec dd {
+  margin: 0;
+  overflow: hidden;
+  color: var(--fg);
+  font: 11px var(--mono);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.detail-section {
+  padding: 14px 18px 16px;
+  border-bottom: 1px solid var(--border);
+}
+.detail-section:last-child {
+  border-bottom: 0;
+}
+.detail-label {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 10px;
+  color: var(--muted);
+  font: 9px var(--mono);
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+}
+.detail-replicas,
+.detail-links {
+  display: grid;
+  gap: 9px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.detail-replica {
+  display: grid;
+  grid-template-columns: 18px 8px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 9px;
+  font: 12px var(--sans);
+}
+.detail-index {
+  color: var(--muted);
+  font: 9px var(--mono);
+}
+.detail-dot {
+  width: 8px;
+  height: 8px;
+  background: var(--dot);
+}
+.detail-replica-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.detail-replica-id {
+  color: var(--muted);
+  font: 9px var(--mono);
+}
+.detail-link {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 12px;
+  color: var(--fg);
+  font: 10px var(--mono);
+}
+.detail-relation {
+  padding: 2px 6px;
+  border: 1px solid var(--border);
+  color: var(--muted);
+  font: 8px var(--mono);
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+.detail-empty {
+  color: var(--muted);
+  font: 10px var(--mono);
 }
 
 /* ---------- isometric drawing ---------- */
@@ -497,7 +789,7 @@ textarea[aria-invalid="true"] {
   stroke-width: 0.8;
   vector-effect: non-scaling-stroke;
 }
-.node-label {
+.instance-label {
   fill: var(--fg);
   font: 7px var(--mono);
   letter-spacing: 0.035em;
@@ -596,8 +888,16 @@ textarea[aria-invalid="true"] {
 @media (prefers-reduced-motion: reduce) {
   .panel-toggle,
   .sidebar,
-  .cluster-frame {
+  .detail,
+  .cluster-frame,
+  .callout {
     transition: none;
+  }
+  .callout.visible .callout-card,
+  .callout.visible::before,
+  .callout.visible .callout-card::before,
+  .callout.visible .callout-card::after {
+    animation: none;
   }
   .pulse {
     animation: none;
@@ -612,15 +912,19 @@ textarea[aria-invalid="true"] {
     height: 36px;
     padding: 0 12px;
   }
-  .sidebar {
+  .sidebar,
+  .detail {
     top: 8px;
     right: 8px;
     bottom: 8px;
     width: calc(100vw - 16px);
-    border-radius: 12px;
   }
-  .sidebar-header {
+  .sidebar-header,
+  .detail-header {
     padding: 16px 16px 14px;
+  }
+  .detail-body {
+    padding: 14px 16px 18px;
   }
   .sidebar-body {
     padding: 14px 16px 18px;
