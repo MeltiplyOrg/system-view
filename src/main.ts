@@ -1,8 +1,9 @@
 import "./style.css";
 import type { Design } from "./design";
-import { example, examples, parseDesign } from "./design";
+import { examples, parseDesign, webAppExample } from "./design";
 import { inferInstanceType, instanceColor } from "./layout";
 import { resizeReplicas } from "./replicas";
+import { findProvider, providersFor } from "./providers";
 import { SystemScene } from "./scene";
 
 /**
@@ -35,6 +36,7 @@ app.innerHTML = `
     </svg>
     <div id="callout" class="callout" aria-hidden="true">
       <div class="callout-card">
+        <span class="callout-provider" hidden></span>
         <span class="callout-kind"></span>
         <span class="callout-name"></span>
         <span class="callout-meta"></span>
@@ -51,6 +53,10 @@ app.innerHTML = `
       </header>
       <div class="detail-body">
         <dl id="detail-spec" class="detail-spec"></dl>
+        <section id="detail-provider-section" class="detail-section">
+          <label class="detail-label" for="detail-provider"><span>Provider</span></label>
+          <select id="detail-provider" class="detail-provider-select"></select>
+        </section>
         <section class="detail-section">
           <div class="detail-label"><span>Replicas</span><span class="replica-stepper"><button id="replica-decrease" type="button" aria-label="Decrease replicas"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="m10 4-4 4 4 4"/></svg></button><span id="detail-count" aria-live="polite"></span><button id="replica-increase" type="button" aria-label="Increase replicas"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="m6 4 4 4-4 4"/></svg></button></span></div>
           <ul id="detail-replicas" class="detail-replicas"></ul>
@@ -122,10 +128,11 @@ app.innerHTML = `
 
         <section class="section schema-note">
           <div class="section-label">Dynamic design</div>
-          <code>instances: [{ id, label?, description? }]<br>connections: [{ from, to, relation? }]<br>clusters: [{ label?, description?, instances }]</code>
+          <code>instances: [{ id, label?, description?, provider? }]<br>connections: [{ from, to, relation? }]<br>clusters: [{ label?, description?, instances }]</code>
           <p>ID prefixes pick the visual: db- for databases, compute- or server- for backend servers, web- for frontend pages, cache- for in-memory caches. Connect IDs with from/to and describe traffic with relation. Positions and colors are generated; cluster members keep separate platforms.</p>
+          <p>An optional provider switches a component to a product skin. Redis applies only to cache nodes: it reworks the cache silhouette and platform, replaces the accent with Redis red, and adds the provider mark to its tooltip. Other renderers ignore providers they do not support, so documents stay portable.</p>
           <p>Select a component and use the replica arrows to scale from 1 to 10. Each row holds at most five replicas; additional rows sit behind it. New replicas drop onto their platforms (unless reduced motion is enabled), and rapid additions keep existing drops running. Multiple replicas become a cluster; returning to one restores an instance. Changes update the JSON. Links on removed replicas move to the surviving instance.</p>
-          <p>Each renderer has one palette: databases cyan, backend servers orange, frontend pages violet, caches green. Every node type shares cached artwork by type, so replicas and repeated designs reuse the same images. Visible nodes are prewarmed while idle, and removing a replica keeps shared images available for re-addition. Zoom reuses the previous image until a sharper tier is ready; labels remain live. Internal cable pulses pause during navigation and resume at rest. Offscreen nodes are culled and return when panned into view. Links between components remain visible.</p>
+          <p>Each renderer has a default palette: databases cyan, backend servers orange, frontend pages violet, caches green. A provider may supply its own accent and artwork, cached per skin. Every node shares cached artwork by type and provider, so replicas and repeated designs reuse the same images. Visible nodes are prewarmed while idle, and removing a replica keeps shared images available for re-addition. Zoom reuses the previous image until a sharper tier is ready; labels remain live. Internal cable pulses pause during navigation and resume at rest. Offscreen nodes are culled and return when panned into view. Links between components remain visible.</p>
         </section>
       </div>
       <footer class="sidebar-footer">
@@ -159,8 +166,13 @@ const calloutMeta = mustQuery<HTMLElement>("#callout .callout-meta");
 const calloutDescription = mustQuery<HTMLElement>(
   "#callout .callout-description",
 );
+const calloutProvider = mustQuery<HTMLElement>("#callout .callout-provider");
 
 const detail = mustQuery<HTMLElement>("#detail");
+const detailProvider = mustQuery<HTMLSelectElement>("#detail-provider");
+const detailProviderSection = mustQuery<HTMLElement>(
+  "#detail-provider-section",
+);
 const detailKind = mustQuery<HTMLElement>("#detail-kind");
 const detailTitle = mustQuery<HTMLElement>("#detail-title");
 const detailSpec = mustQuery<HTMLElement>("#detail-spec");
@@ -251,6 +263,128 @@ function targetMembers(ids: TargetIds, anchor: Element): SVGGElement[] {
   );
 }
 
+/**
+ * Provider declared on an instance in the applied design.
+ *
+ * A registered theme resolves to its canonical id only when the instance's
+ * renderer supports it, and a provider on an unsupported renderer is treated
+ * as absent. Unknown keys on a renderer that has provider support are returned
+ * verbatim so the picker can preserve them.
+ */
+function instanceProvider(
+  instanceId: string | null | undefined,
+): string | undefined {
+  if (!instanceId) return undefined;
+  const instance = current.instances.find((item) => item.id === instanceId),
+    type = inferInstanceType(instanceId),
+    theme = findProvider(instance?.provider, type);
+  if (theme) return theme.id;
+  return providersFor(type).length > 0 ? instance?.provider : undefined;
+}
+
+/** Select value used when a cluster's members declare different providers. */
+const MIXED_PROVIDER = "__mixed";
+
+/**
+ * Provider state for a set of instance ids.
+ *
+ * A cluster can mix providers, and claiming one product's mark for the whole
+ * group would be misleading, so `mixed` reports the disagreement and
+ * `provider` is set only when the declaration is unanimous. A single instance
+ * trivially shares its own provider, including "none".
+ */
+function providerState(instanceIds: readonly (string | undefined)[]): {
+  provider?: string;
+  mixed: boolean;
+} {
+  const providers = new Set(instanceIds.map(instanceProvider));
+  return providers.size === 1
+    ? { provider: [...providers][0], mixed: false }
+    : { provider: undefined, mixed: true };
+}
+
+/**
+ * Providers every member of a target supports.
+ *
+ * A mixed-type cluster only offers a provider that can skin every one of its
+ * members; a database target returns none, so the inspector hides the field.
+ */
+function providerOptions(instanceIds: readonly string[]) {
+  if (instanceIds.length === 0) return [];
+  return providersFor(inferInstanceType(instanceIds[0])).filter((theme) =>
+    instanceIds.every((id) => theme.types.includes(inferInstanceType(id))),
+  );
+}
+
+/**
+ * Registered provider shared by every callout target member, if any.
+ *
+ * The tooltip only shows a logo that the target's renderer actually accepts;
+ * an incompatible or unknown provider stays invisible.
+ */
+function calloutProviderName(
+  members: readonly SVGGElement[],
+): string | undefined {
+  const providers = new Set(
+    members.map((member) => {
+      const id = member.dataset.instanceId;
+      if (!id) return undefined;
+      const instance = current.instances.find((item) => item.id === id);
+      return findProvider(instance?.provider, inferInstanceType(id))?.id;
+    }),
+  );
+  return providers.size === 1 ? [...providers][0] : undefined;
+}
+
+/**
+ * Show or hide the provider mark in the callout.
+ *
+ * The mark is trusted registry markup, so assigning it as HTML is safe. It is
+ * absolutely positioned inside the card's header block and reserves no width,
+ * so showing a logo never resizes the tooltip.
+ */
+function setCalloutProvider(provider: string | undefined): void {
+  const theme = findProvider(provider);
+  calloutProvider.hidden = !theme;
+  if (theme) {
+    calloutProvider.innerHTML = theme.logo;
+    calloutProvider.title = theme.label;
+  } else {
+    calloutProvider.replaceChildren();
+    calloutProvider.removeAttribute("title");
+  }
+}
+
+/**
+ * Synchronize the inspector's provider picker with a target's members.
+ *
+ * The picker lives in the right-hand detail HUD. Its options are rebuilt for
+ * the target so only providers that support the member renderer types appear;
+ * databases, servers, and pages have no provider field at all. An unknown
+ * stored key gets a transient option so the control never misreports the
+ * document, and a mixed cluster shows a disabled placeholder until one value
+ * is chosen for every member.
+ */
+function syncDetailProvider(instanceIds: readonly string[]): void {
+  const allowed = providerOptions(instanceIds);
+  detailProviderSection.hidden = allowed.length === 0;
+  if (allowed.length === 0) return;
+
+  const { provider, mixed } = providerState(instanceIds),
+    options = [new Option("Default", "")];
+  for (const theme of allowed) options.push(new Option(theme.label, theme.id));
+  if (mixed) {
+    const option = new Option("Mixed", MIXED_PROVIDER);
+    option.disabled = true;
+    options.push(option);
+  } else if (provider !== undefined && !allowed.some((t) => t.id === provider))
+    options.push(new Option(provider, provider));
+  detailProvider.replaceChildren(...options);
+  detailProvider.value = mixed
+    ? MIXED_PROVIDER
+    : (allowed.find((theme) => theme.id === provider)?.id ?? provider ?? "");
+}
+
 /** Fill the callout with the target summary and cache the card size. */
 function fillCallout(
   ids: TargetIds,
@@ -280,6 +414,7 @@ function fillCallout(
       ?.description;
   calloutDescription.textContent = description ?? "";
   calloutDescription.hidden = description === undefined;
+  setCalloutProvider(calloutProviderName(members));
   tipSize = {
     width: calloutCard.offsetWidth,
     height: calloutCard.offsetHeight,
@@ -465,7 +600,12 @@ function openDetail(ids: TargetIds): void {
         id,
         label: (index >= 0 && current.instances[index].label) || id,
         color:
-          index >= 0 ? instanceColor(inferInstanceType(id)) : "var(--line)",
+          index >= 0
+            ? instanceColor(
+                inferInstanceType(id),
+                current.instances[index].provider,
+              )
+            : "var(--line)",
       };
     }),
     memberSet = new Set(memberIds),
@@ -474,6 +614,7 @@ function openDetail(ids: TargetIds): void {
     );
 
   detailKind.textContent = ids.clusterId ? "Cluster" : "Instance";
+  syncDetailProvider(memberIds);
   detailTitle.textContent = ids.clusterId
     ? (cluster?.label ?? ids.clusterId)
     : ((ids.instanceId &&
@@ -580,6 +721,62 @@ function changeReplicas(delta: number): void {
 replicaDecrease.addEventListener("click", () => changeReplicas(-1));
 replicaIncrease.addEventListener("click", () => changeReplicas(1));
 
+/**
+ * Set or clear the provider for every instance of the focused target.
+ *
+ * The document stays the source of truth: choosing Default removes the field
+ * instead of storing a "none" sentinel, which keeps old designs and unknown
+ * providers portable. The scene re-renders in place so the node keeps its
+ * position and camera; selection is rebound because provider skins rebuild
+ * geometry and may change labels and height.
+ */
+function changeProvider(provider: string | undefined): void {
+  const ids = targetIds(selectedAnchor);
+  if (!selectedAnchor || !ids) return;
+  const memberIds = new Set(
+    targetMembers(ids, selectedAnchor)
+      .map((member) => member.dataset.instanceId)
+      .filter((id): id is string => id !== undefined),
+  );
+  if (memberIds.size === 0 && ids.instanceId) memberIds.add(ids.instanceId);
+  if (memberIds.size === 0) return;
+  if (
+    provider !== undefined &&
+    !providerOptions([...memberIds]).some((theme) => theme.id === provider)
+  )
+    return;
+
+  let changed = false;
+  const instances = current.instances.map((instance) => {
+    if (!memberIds.has(instance.id)) return instance;
+    if ((instance.provider ?? "") === (provider ?? "")) return instance;
+    changed = true;
+    const { provider: _previous, ...rest } = instance;
+    return provider === undefined ? rest : { ...rest, provider };
+  });
+  if (!changed) return;
+
+  const design: Design = { ...current, instances };
+  scene.render(design, true);
+  current = design;
+  syncDesign();
+  // Provider skins rebuild the component root, so rebind the pinned target to
+  // the live node before refreshing the inspector and callout.
+  const anchor = [
+    ...sceneSvg.querySelectorAll<SVGGElement>(".scene-instance"),
+  ].find((element) => {
+    const id = element.dataset.instanceId;
+    return id !== undefined && memberIds.has(id);
+  });
+  selectTarget(anchor ?? null, true);
+}
+
+detailProvider.addEventListener("change", () => {
+  const value = detailProvider.value;
+  if (!selectedKey || value === MIXED_PROVIDER) return;
+  changeProvider(value === "" ? undefined : value);
+});
+
 sceneSvg.addEventListener("pointerover", (event) =>
   showCallout(event.target, event),
 );
@@ -627,14 +824,18 @@ sceneSvg.addEventListener("pointerup", (event) => {
   selectTarget(target);
 });
 
-scene.onViewChange(() => {
+// A camera move and a fixed-camera re-render (node drag, replica edit) both
+// move the target on screen; keep the whole pinned callout on its top center.
+const followPinnedCallout = (): void => {
   if (selectedKey) lockCallout();
-});
+};
+scene.onViewChange(followPinnedCallout);
+scene.onLayoutChange(followPinnedCallout);
 
 detailClose.addEventListener("click", clearSelection);
 
 /** Last successfully applied document; exports must never read the draft. */
-let current: Design = example;
+let current: Design = webAppExample;
 
 /**
  * Commit a validated design to the canvas and editor.
@@ -708,7 +909,7 @@ for (const item of examples) {
 
 // The default scene is one of the catalogue entries; selecting it on boot and
 // after Reset keeps the control and the canvas telling the same story.
-const defaultExample = examples.find(({ design }) => design === example);
+const defaultExample = examples.find(({ design }) => design === webAppExample);
 if (!defaultExample) throw new Error("Missing default design example.");
 const defaultExampleId = defaultExample.id;
 exampleSelect.value = defaultExampleId;
@@ -750,7 +951,7 @@ source.addEventListener("keydown", (event) => {
 });
 
 mustQuery<HTMLButtonElement>("#reset").addEventListener("click", () => {
-  apply(example);
+  apply(webAppExample);
   exampleSelect.value = defaultExampleId;
   showExampleSummary(defaultExampleId);
 });
@@ -855,7 +1056,10 @@ toggle.addEventListener("click", () => {
 closeButton.addEventListener("click", () => setPanelOpen(false));
 
 document.addEventListener("keydown", (event) => {
-  if (event.key !== "Escape") return;
+  // Escape belongs to an open select (closing its popup), not to the canvas
+  // selection; clearing both at once would fight the native control.
+  if (event.key !== "Escape" || event.target instanceof HTMLSelectElement)
+    return;
   if (sidebar.classList.contains("open")) setPanelOpen(false);
   else clearSelection();
 });
@@ -877,4 +1081,4 @@ document.addEventListener("visibilitychange", () =>
   document.documentElement.classList.toggle("paused", document.hidden),
 );
 
-apply(example);
+apply(webAppExample);

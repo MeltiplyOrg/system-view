@@ -182,6 +182,8 @@ interface ResolvedStyles {
 /** Shared decoded drawing, retained independently of any replica's DOM. */
 interface SharedDrawing {
   type: RendererType;
+  /** Canonical provider id whose artwork/palette the drawing encodes. */
+  provider: string;
   base: string;
   overlay: string | null;
   plan: RecordPlan;
@@ -196,6 +198,8 @@ interface RasterRecord {
   /** Geometry root carrying `data-renderer-type`. */
   element: SVGGElement;
   type: RendererType;
+  /** Canonical provider id from `data-renderer-provider`, or empty. */
+  provider: string;
   staticBase: SVGGElement;
   staticOverlay: SVGGElement | null;
   motion: SVGGElement | null;
@@ -595,7 +599,7 @@ export class ComponentRasterCache {
     let needsRefresh = false;
     const palettes = new Map<string, string>();
     const paletteFor = (record: RasterRecord): string => {
-      const key = `${record.type}|${record.color}`;
+      const key = `${record.type}|${record.provider}|${record.color}`;
       let palette = palettes.get(key);
       if (palette === undefined) {
         palette = this.paletteOf(record.element);
@@ -609,6 +613,7 @@ export class ComponentRasterCache {
     )) {
       const type = element.dataset.rendererType;
       if (!isRendererType(type)) continue;
+      const provider = element.dataset.rendererProvider ?? "";
       const known = this.records.get(element);
       const queryBase = element.querySelector<SVGGElement>(
         ".component-static-base",
@@ -637,17 +642,19 @@ export class ComponentRasterCache {
       if (
         record &&
         (record.type !== type ||
+          record.provider !== provider ||
           record.staticBase !== staticBase ||
           record.staticOverlay !== staticOverlay)
       ) {
         if (
-          record.type !== type &&
+          (record.type !== type || record.provider !== provider) &&
           record.staticBase === staticBase &&
           record.staticOverlay === staticOverlay &&
           record.vectorsDetached
         ) {
-          // A retained DOM root that only changed its renderer type still
-          // needs its vectors before the new record can sample or measure.
+          // A retained DOM root that only changed its renderer type or
+          // provider still needs its vectors before the new record can sample
+          // or measure.
           this.restoreVectors(record);
         }
         this.release(record);
@@ -661,11 +668,12 @@ export class ComponentRasterCache {
         element.querySelector<SVGGElement>(".component-label") ??
         record?.label ??
         null;
-      const color = this.colorOf(element, type);
+      const color = this.colorOf(element, type, provider);
       if (!record) {
         record = {
           element,
           type,
+          provider,
           staticBase,
           staticOverlay,
           motion,
@@ -762,7 +770,11 @@ export class ComponentRasterCache {
   }
 
   /** Current instance color, preferring the value the scene writes inline. */
-  private colorOf(element: SVGGElement, type: RendererType): string {
+  private colorOf(
+    element: SVGGElement,
+    type: RendererType,
+    provider = "",
+  ): string {
     const owner =
       element.style.getPropertyValue("--cable-color").trim() ||
       element
@@ -774,7 +786,7 @@ export class ComponentRasterCache {
       this.view
         .getComputedStyle(element)
         .getPropertyValue("--cable-color")
-        .trim() || instanceColor(type)
+        .trim() || instanceColor(type, provider)
     );
   }
 
@@ -972,7 +984,7 @@ export class ComponentRasterCache {
     }
     for (const [record, plan] of this.computePlans()) {
       if (!this.isCurrent(record)) continue;
-      const color = this.colorOf(record.element, record.type);
+      const color = this.colorOf(record.element, record.type, record.provider);
       if (record.color !== color) {
         record.color = color;
         this.invalidate(record);
@@ -1071,7 +1083,7 @@ export class ComponentRasterCache {
     );
   }
 
-  /** Cache key: renderer type, theme/palette, local bounds, and tier. */
+  /** Cache key: renderer type, provider, theme/palette, bounds, and tier. */
   private drawingKey(
     record: RasterRecord,
     color: string,
@@ -1080,6 +1092,7 @@ export class ComponentRasterCache {
   ): string {
     return JSON.stringify([
       record.type,
+      record.provider,
       this.themeRevision,
       color,
       palette,
@@ -1108,6 +1121,7 @@ export class ComponentRasterCache {
       if (other === record || !other.base || !shared) continue;
       if (
         shared.type !== record.type ||
+        shared.provider !== record.provider ||
         shared.color !== record.color ||
         shared.palette !== palette ||
         (shared.plan.overlay === null) !== (record.staticOverlay === null)
@@ -1122,6 +1136,7 @@ export class ComponentRasterCache {
     for (const [key, drawing] of this.drawings) {
       if (
         drawing.type !== record.type ||
+        drawing.provider !== record.provider ||
         drawing.color !== record.color ||
         drawing.palette !== palette ||
         (drawing.plan.overlay === null) !== (record.staticOverlay === null)
@@ -1148,7 +1163,7 @@ export class ComponentRasterCache {
     return (
       themeRevision !== this.themeRevision ||
       palette !== this.paletteOf(record.element) ||
-      color !== this.colorOf(record.element, record.type)
+      color !== this.colorOf(record.element, record.type, record.provider)
     );
   }
 
@@ -1164,7 +1179,7 @@ export class ComponentRasterCache {
     let baseUrl: string | null = null;
     let overlayUrl: string | null = null;
     try {
-      const color = this.colorOf(record.element, record.type);
+      const color = this.colorOf(record.element, record.type, record.provider);
       if (record.color !== color) {
         // The scene may recolor a retained component without a sync; the old
         // image cannot be trusted, so restore vectors for this job's snapshot.
@@ -1303,6 +1318,7 @@ export class ComponentRasterCache {
         (plan.overlay ? plan.overlay.width * plan.overlay.height : 0);
       const drawing: SharedDrawing = {
         type: record.type,
+        provider: record.provider,
         base: baseUrl,
         overlay: overlayUrl,
         plan,

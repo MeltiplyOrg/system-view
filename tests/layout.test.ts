@@ -161,13 +161,18 @@ describe("automatic layout", () => {
       "webpage",
       "cache",
     ] as const;
-    expect(types.map(instanceColor)).toEqual([
+    expect(types.map((type) => instanceColor(type))).toEqual([
       "#42d9e8",
       "#ff9d52",
       "#b49aff",
       "#7ee787",
     ]);
-    expect(new Set(types.map(instanceColor)).size).toBe(4);
+    expect(new Set(types.map((type) => instanceColor(type))).size).toBe(4);
+    // A registered provider replaces the renderer accent with its product
+    // color, so the two skins cache as distinct palettes.
+    expect(instanceColor("cache", "redis")).toBe("#dc382d");
+    expect(instanceColor("cache", "Redis")).toBe("#dc382d");
+    expect(instanceColor("cache", "unregistered")).toBe("#7ee787");
   });
 
   test("normalizes aliases regardless of declaration order", () => {

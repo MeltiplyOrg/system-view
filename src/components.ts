@@ -5,6 +5,7 @@ import {
   project,
 } from "./database";
 import type { PlacedInstance } from "./design";
+import { findProvider } from "./providers";
 
 const NS = "http://www.w3.org/2000/svg";
 
@@ -455,6 +456,98 @@ function cacheGeometry(): string {
   return svg;
 }
 
+/**
+ * Provider variant of the cache artwork.
+ *
+ * Redis is a square cabinet with three stacked drawer rows, so it reads as a
+ * compact appliance rather than the default cache's wide three-bank stack.
+ * The narrower footprint sits on its own plinth, and the instance label moves
+ * to that strip. Height is provider-specific so camera fitting follows the
+ * taller silhouette.
+ */
+const REDIS_CACHE_HEIGHT = 149;
+
+/** Redis cache artwork in face-local units. */
+function redisCacheGeometry(): string {
+  let svg = box(-80, -75, 7, 160, 150, 12, 3);
+  svg += `<g transform="${frontFace(-80, 75, 19)}">
+    <rect class="face recess" x="7" y="3" width="146" height="9" rx="1"/>
+    <path class="led" d="${circle(142, 7.5, 1.5)}"/>
+  </g>`;
+  // One cabinet carries the whole stack so the three drawer seams read as
+  // rows of the same appliance. A 140 × 130 front is deliberately square.
+  svg += box(-70, -65, 19, 140, 130, 130, 3);
+  svg += `<g transform="${frontFace(-70, 65, REDIS_CACHE_HEIGHT)}">
+    ${[0, 1, 2]
+      .map((row) => {
+        const top = 2 + row * 43,
+          middle = top + 19;
+        return `<rect class="face recess" x="6" y="${top}" width="128" height="40" rx="1.5"/>
+      <path class="detail" d="M12 ${top + 8}H52"/>
+      <path class="led" d="${circle(61, middle, 1.3)}"/>
+      <path class="drawer-pull" d="M104 ${middle}h34"/>`;
+      })
+      .join("")}
+  </g>`;
+  svg += `<g transform="${endFace(70, 65, REDIS_CACHE_HEIGHT)}">
+    <path class="detail" d="${slits(10, 118, 8, 8, 50)}"/>
+    <path class="led" d="${circle(112, 12, 1.4)}"/>
+  </g>`;
+  svg += `<g transform="${topFace(-70, -65, REDIS_CACHE_HEIGHT)}">
+    <rect class="face recess" x="8" y="8" width="124" height="114" rx="2"/>
+    <path class="detail" d="${rows(18, 108, 10, 18, 122)}"/>
+    <path class="led" d="${circle(16, 16, 1.4)}"/>
+  </g>`;
+  return svg;
+}
+
+/** Height, artwork, and label placement registered for a provider/renderer pair. */
+interface ComponentVariant {
+  markup: string;
+  height: number;
+  /** Overrides the default instance-label face for this skin. */
+  labelTransform?: string;
+  labelX?: number;
+  labelY?: number;
+  /** Maximum characters before the label is condensed to `labelTextLength`. */
+  labelMaxChars?: number;
+  labelTextLength?: number;
+  labelFontSize?: number;
+}
+
+/**
+ * Provider-specific artwork, keyed by canonical provider id and renderer type.
+ *
+ * Adding a provider with a distinct silhouette means registering its theme in
+ * `providers.ts` and, when needed, one variant here. Providers without an
+ * entry reuse the default renderer geometry and height.
+ */
+const PROVIDER_VARIANTS: Readonly<
+  Record<string, Partial<Record<PlacedInstance["type"], ComponentVariant>>>
+> = {
+  redis: {
+    cache: {
+      markup: redisCacheGeometry(),
+      height: REDIS_CACHE_HEIGHT,
+      labelTransform: frontFace(-80, 75, 19),
+      labelX: 12,
+      labelY: 7.8,
+      labelMaxChars: 34,
+      labelTextLength: 140,
+      labelFontSize: 6.4,
+    },
+  },
+};
+
+/** Provider artwork for a type, or undefined to use the default renderer. */
+function variantOf(
+  type: PlacedInstance["type"],
+  provider: string | undefined,
+): ComponentVariant | undefined {
+  const theme = findProvider(provider, type);
+  return theme ? PROVIDER_VARIANTS[theme.id]?.[type] : undefined;
+}
+
 // Shared, immutable markup. Per-instance color flows through CSS variables and
 // the label is appended with textContent, so no user input enters these strings.
 const COMPUTE_GEOMETRY = computeGeometry();
@@ -483,13 +576,21 @@ const TYPE_LABELS: Readonly<Record<PlacedInstance["type"], string>> = {
  *
  * The scene uses this for view fitting and callout anchors. Database racks
  * report their existing cabinet height; the newer components include their
- * plinth because their local z starts at the platform surface. Values are
- * constants, so the result never depends on label length or instance identity.
+ * plinth because their local z starts at the platform surface. A registered
+ * provider variant may supply its own height, since providers are allowed to
+ * use a different silhouette. Values are constants, so the result never
+ * depends on label length or instance identity.
  *
  * @param type - Renderer type selected by the layout pass.
+ * @param provider - Optional provider key from the document.
  * @returns Top elevation relative to `position.z`.
  */
-export function componentHeight(type: PlacedInstance["type"]): number {
+export function componentHeight(
+  type: PlacedInstance["type"],
+  provider?: string,
+): number {
+  const variant = variantOf(type, provider);
+  if (variant) return variant.height;
   switch (type) {
     case "database-rack":
       return DATABASE_HEIGHT;
@@ -525,13 +626,18 @@ export function createComponent(instance: PlacedInstance): SVGGElement {
       instance.position.x,
       instance.position.y,
       instance.position.z,
-    );
+    ),
+    theme = findProvider(instance.provider, instance.type),
+    variant = variantOf(instance.type, instance.provider),
+    typeLabel = theme
+      ? `${theme.label} ${TYPE_LABELS[instance.type]}`
+      : TYPE_LABELS[instance.type];
   element.classList.add("scene-instance");
   element.dataset.instanceId = instance.id;
   element.setAttribute("role", "img");
   element.setAttribute(
     "aria-label",
-    `${instance.label} (${instance.id}) · ${TYPE_LABELS[instance.type]}`,
+    `${instance.label} (${instance.id}) · ${typeLabel}`,
   );
   element.style.setProperty("--cable-color", instance.color);
 
@@ -547,6 +653,10 @@ export function createComponent(instance: PlacedInstance): SVGGElement {
     rack.removeAttribute("data-instance-id");
     rack.removeAttribute("role");
     rack.removeAttribute("aria-label");
+    if (theme) {
+      rack.dataset.rendererProvider = theme.id;
+      rack.classList.add("provider-skin", `provider-${theme.id}`);
+    }
     element.append(rack);
     return element;
   }
@@ -555,40 +665,46 @@ export function createComponent(instance: PlacedInstance): SVGGElement {
   const geometry = document.createElementNS(NS, "g");
   geometry.classList.add(instance.type);
   geometry.dataset.rendererType = instance.type;
+  if (theme) {
+    // Raster keys distinguish provider artwork and palettes by this marker;
+    // the generic class carries the shared surface tint.
+    geometry.dataset.rendererProvider = theme.id;
+    geometry.classList.add("provider-skin", `provider-${theme.id}`);
+  }
   geometry.setAttribute("aria-hidden", "true");
-  geometry.innerHTML = `<g class="component-static-base">${COMPONENT_GEOMETRY[instance.type]}</g>`;
+  geometry.innerHTML = `<g class="component-static-base">${
+    variant?.markup ?? COMPONENT_GEOMETRY[instance.type]
+  }</g>`;
   element.append(geometry);
 
   // Identity sits on the server's top rail, cache controller strip, or browser
-  // active tab. Text is assigned with textContent so imported
-  // names cannot inject markup; long names are condensed rather than clipped.
-  const labelGroup = document.createElementNS(NS, "g");
+  // active tab; provider variants may move it to their own face. Text is
+  // assigned with textContent so imported names cannot inject markup; long
+  // names are condensed rather than clipped.
+  const labelGroup = document.createElementNS(NS, "g"),
+    wideLabel = instance.type === "compute-server" || instance.type === "cache",
+    labelMaxChars = variant?.labelMaxChars ?? (wideLabel ? 48 : 14),
+    labelTextLength = variant?.labelTextLength ?? (wideLabel ? 230 : 68);
   labelGroup.classList.add("component-label");
   labelGroup.setAttribute(
     "transform",
-    instance.type === "compute-server"
-      ? frontFace(-130, 62, COMPUTE_TOP_Z)
-      : instance.type === "cache"
-        ? frontFace(-124, 58, 21)
-        : frontFace(-WEB_FRAME_W / 2, 13, WEBPAGE_HEIGHT),
+    variant?.labelTransform ??
+      (instance.type === "compute-server"
+        ? frontFace(-130, 62, COMPUTE_TOP_Z)
+        : instance.type === "cache"
+          ? frontFace(-124, 58, 21)
+          : frontFace(-WEB_FRAME_W / 2, 13, WEBPAGE_HEIGHT)),
   );
   const label = document.createElementNS(NS, "text");
   label.classList.add("instance-label");
-  if (instance.type === "compute-server" || instance.type === "cache") {
-    label.setAttribute("x", "11");
-    label.setAttribute("y", "7.4");
-    if (instance.label.length > 48) {
-      label.setAttribute("textLength", "230");
-      label.setAttribute("lengthAdjust", "spacingAndGlyphs");
-    }
-  } else {
-    label.setAttribute("x", "44");
-    label.setAttribute("y", "18.2");
-    label.style.fontSize = "5.2px";
-    if (instance.label.length > 14) {
-      label.setAttribute("textLength", "68");
-      label.setAttribute("lengthAdjust", "spacingAndGlyphs");
-    }
+  label.setAttribute("x", String(variant?.labelX ?? (wideLabel ? 11 : 44)));
+  label.setAttribute("y", String(variant?.labelY ?? (wideLabel ? 7.4 : 18.2)));
+  if (variant?.labelFontSize)
+    label.style.fontSize = `${variant.labelFontSize}px`;
+  else if (!wideLabel) label.style.fontSize = "5.2px";
+  if (instance.label.length > labelMaxChars) {
+    label.setAttribute("textLength", String(labelTextLength));
+    label.setAttribute("lengthAdjust", "spacingAndGlyphs");
   }
   label.textContent = instance.label;
   labelGroup.append(label);

@@ -1,4 +1,6 @@
 import type { PlacedInstance, Design, DesignInstance } from "./design";
+import { findProvider } from "./providers";
+import type { ProviderFootprint } from "./providers";
 
 /** One logical group of separate platforms, packed into rows of five. */
 interface LayoutGroup {
@@ -31,15 +33,22 @@ export interface Layout {
 }
 
 /**
- * Normalized render color for one component type.
+ * Normalized render color for one component type or provider skin.
  *
- * The raster cache bakes the color into shared images, so every instance of a
- * type must use the same value no matter its document position or ID alias.
+ * The default palette assigns one accent per renderer type. A known provider
+ * overrides it with the product's accent, which intentionally splits raster
+ * sharing: each provider palette is baked into its own cached images.
  *
  * @param type - Renderer type selected by the layout pass.
+ * @param provider - Optional provider key from the document.
  * @returns Lowercase six-digit hex suitable for `--cable-color`.
  */
-export function instanceColor(type: PlacedInstance["type"]): string {
+export function instanceColor(
+  type: PlacedInstance["type"],
+  provider?: string,
+): string {
+  const theme = findProvider(provider, type);
+  if (theme) return theme.color;
   switch (type) {
     case "database-rack":
       return "#42d9e8";
@@ -116,6 +125,34 @@ const CLUSTER_GAP_PER_ROW = RACK_SPACING;
 export const RACK_HALF_WIDTH = 144,
   RACK_HALF_DEPTH = 75;
 
+/** Half extents of one instance's ground footprint in world units. */
+export type InstanceFootprint = ProviderFootprint;
+
+/**
+ * Ground footprint under one instance.
+ *
+ * Positions and cluster spacing still use the rack grid; this footprint only
+ * changes the platform contour, the dashed node border, target bounds, and
+ * routing clearance around that node. A provider declares overrides on its
+ * theme, so adding one keeps platform geometry next to its palette and logo.
+ *
+ * @param type - Renderer type selected by the layout pass.
+ * @param provider - Optional provider key from the document.
+ * @returns Half extents in world units.
+ */
+export function instanceFootprint(
+  type: PlacedInstance["type"],
+  provider?: string,
+): InstanceFootprint {
+  const theme = findProvider(provider, type);
+  return (
+    theme?.footprints?.[type] ?? {
+      halfWidth: RACK_HALF_WIDTH,
+      halfDepth: RACK_HALF_DEPTH,
+    }
+  );
+}
+
 /**
  * Build the persisted groups in canvas order.
  *
@@ -184,9 +221,9 @@ function layoutGroups(design: Design): LayoutGroup[] {
  * scene. Existing positions are never read, which makes the imported document
  * the single source of truth.
  *
- * Colors are normalized per renderer type so replicas share rasterized
- * geometry; changing declaration order or cluster membership never recolors an
- * instance.
+ * Colors are normalized per renderer type and provider skin so replicas share
+ * rasterized geometry; changing declaration order or cluster membership never
+ * recolors an instance.
  *
  * @param design - Validated document; cluster members must reference instances.
  * @returns Placed instances and cluster bounds for captions.
@@ -222,35 +259,55 @@ export function layoutDesign(design: Design): Layout {
       return entry;
     });
 
+    let clusterBounds: {
+      minX: number;
+      minY: number;
+      maxX: number;
+      maxY: number;
+    } | null = null;
     for (const [memberIndex, instance] of members.entries()) {
-      const type = inferInstanceType(instance.id);
+      const type = inferInstanceType(instance.id),
+        footprint = instanceFootprint(type, instance.provider),
+        px = x - Math.floor(memberIndex / REPLICAS_PER_ROW) * ROW_SPACING,
+        py = (memberIndex % REPLICAS_PER_ROW) * RACK_SPACING;
       placed.push({
         id: instance.id,
         type,
         label: instance.label ?? instance.id,
-        position: {
-          x: x - Math.floor(memberIndex / REPLICAS_PER_ROW) * ROW_SPACING,
-          y: (memberIndex % REPLICAS_PER_ROW) * RACK_SPACING,
-          z: 0,
-        },
-        color: instanceColor(type),
+        position: { x: px, y: py, z: 0 },
+        color: instanceColor(type, instance.provider),
+        ...(instance.provider === undefined
+          ? {}
+          : { provider: instance.provider }),
       });
+      if (!group.caption) continue;
+      // The frame wraps the real footprints, which lets a provider with a
+      // square platform keep a square group border.
+      const left = px - footprint.halfWidth,
+        right = px + footprint.halfWidth,
+        top = py - footprint.halfDepth,
+        bottom = py + footprint.halfDepth;
+      if (!clusterBounds)
+        clusterBounds = { minX: left, minY: top, maxX: right, maxY: bottom };
+      else {
+        clusterBounds.minX = Math.min(clusterBounds.minX, left);
+        clusterBounds.minY = Math.min(clusterBounds.minY, top);
+        clusterBounds.maxX = Math.max(clusterBounds.maxX, right);
+        clusterBounds.maxY = Math.max(clusterBounds.maxY, bottom);
+      }
     }
 
     // Only declared clusters receive a caption; an unclustered rack is a
     // one-instance layout group without a visible group name.
-    if (group.caption) {
-      const height =
-        RACK_HALF_DEPTH * 2 +
-        (Math.min(members.length, REPLICAS_PER_ROW) - 1) * RACK_SPACING;
+    if (clusterBounds) {
       clusters.push({
         id: group.id,
         label: group.label ?? group.id,
         bounds: {
-          x: x - backWidth - RACK_HALF_WIDTH,
-          y: -RACK_HALF_DEPTH,
-          width: RACK_HALF_WIDTH * 2 + backWidth,
-          height,
+          x: clusterBounds.minX,
+          y: clusterBounds.minY,
+          width: clusterBounds.maxX - clusterBounds.minX,
+          height: clusterBounds.maxY - clusterBounds.minY,
         },
       });
     }
