@@ -206,6 +206,8 @@ interface TargetIds {
  *
  * A rack carries both its instance ID and its cluster ID, so the callout can
  * report the cluster that owns it. Frames and captions resolve the same way.
+ * Standalone instances get a synthetic border frame keyed `instance:<id>`;
+ * such a frame selects as the instance itself, never as a phantom cluster.
  */
 function hoveredTarget(target: EventTarget | null): Element | null {
   return (
@@ -219,6 +221,12 @@ function hoveredTarget(target: EventTarget | null): Element | null {
 function targetIds(anchor: Element | null): TargetIds | null {
   const clusterId = anchor?.getAttribute("data-cluster-id") ?? null,
     instanceId = anchor?.getAttribute("data-instance-id") ?? null;
+  if (clusterId?.startsWith("instance:"))
+    return {
+      key: clusterId,
+      clusterId: null,
+      instanceId: clusterId.slice(9) || instanceId,
+    };
   if (clusterId) return { key: `cluster:${clusterId}`, clusterId, instanceId };
   if (instanceId)
     return { key: `instance:${instanceId}`, clusterId, instanceId };
@@ -227,7 +235,17 @@ function targetIds(anchor: Element | null): TargetIds | null {
 
 /** Member racks of a target; a standalone instance is its own member. */
 function targetMembers(ids: TargetIds, anchor: Element): SVGGElement[] {
-  if (!ids.clusterId) return [anchor as SVGGElement];
+  if (!ids.clusterId) {
+    if (anchor.classList.contains("scene-instance"))
+      return [anchor as SVGGElement];
+    // A synthetic border frame was the anchor: resolve the instance it wraps.
+    const instance = ids.instanceId
+      ? sceneSvg.querySelector<SVGGElement>(
+          `[data-instance-id="${CSS.escape(ids.instanceId)}"]`,
+        )
+      : null;
+    return instance ? [instance] : [];
+  }
   return [...sceneSvg.querySelectorAll<SVGGElement>(".scene-instance")].filter(
     (rack) => rack.dataset.clusterId === ids.clusterId,
   );
@@ -628,6 +646,9 @@ let current: Design = example;
 function apply(design: Design): void {
   clearSelection();
   hideCallout();
+  // Manual placement offsets belong to the outgoing scene's instance ids and
+  // must not leak into a document whose ids may repeat with new meaning.
+  scene.clearOffsets();
   scene.render(design);
   current = design;
   syncDesign();

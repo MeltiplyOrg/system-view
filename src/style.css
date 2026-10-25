@@ -877,14 +877,14 @@ aside.detail.open {
   text-transform: uppercase;
 }
 /*
- * Cluster frames are painted on the grid plane behind the plinth. The dash
+ * Node borders are painted on the grid plane behind the plinth. The dash
  * pattern uses screen-space units (non-scaling stroke), so it stays readable
  * at every zoom instead of collapsing into a solid line at low zoom.
  */
-.cluster-frames {
+.node-frames {
   pointer-events: none;
 }
-.cluster-frame {
+.scene-frame {
   fill: transparent;
   stroke: var(--line);
   stroke-width: 1.1;
@@ -897,8 +897,8 @@ aside.detail.open {
     stroke 0.25s ease,
     opacity 0.25s ease;
 }
-.cluster-frame.hovered,
-.cluster-frame:hover {
+.scene-frame.hovered,
+.scene-frame:hover {
   stroke: var(--cluster-hover, #facc15);
   opacity: 1;
 }
@@ -1010,6 +1010,38 @@ aside.detail.open {
 #scene.focus-dim .scene-instance.focus-dimmed {
   opacity: 0.3;
 }
+/*
+ * Hover-only grab handle for manual placement. The badge sits at the middle
+ * of the hovered node (cluster bounds or single instance) as a top-level
+ * element, so painter reordering and focus dimming never bury or fade it;
+ * the scene re-derives its position on every render. The invisible hit
+ * circle enlarges the grab target around the visible badge.
+ * `touch-action: none` keeps a touch drag from scrolling the stage instead
+ * of moving the node.
+ */
+.drag-anchor {
+  cursor: grab;
+  touch-action: none;
+}
+.drag-anchor.dragging {
+  cursor: grabbing;
+}
+.drag-anchor .anchor-badge {
+  fill: var(--page);
+  stroke: var(--line);
+  stroke-width: 1.4;
+}
+.drag-anchor .anchor-glyph {
+  fill: none;
+  stroke: var(--fg);
+  stroke-width: 1.7;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+.drag-anchor .anchor-hit {
+  fill: none;
+  pointer-events: all;
+}
 /* Entry motion belongs to a wrapper, never the projected component itself. */
 .instance-enter {
   animation: instance-drop 520ms both;
@@ -1036,7 +1068,7 @@ aside.detail.open {
   .panel-toggle,
   .sidebar,
   aside.detail,
-  .cluster-frame,
+  .scene-frame,
   .callout {
     transition: none;
   }
