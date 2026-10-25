@@ -195,10 +195,11 @@ const CLUSTER_LABEL_GAP = 20;
 /**
  * Distance a cable travels straight out of a cluster port before it may turn.
  *
- * Adjacent cluster frames are always 60 world units apart (420 column pitch
- * minus two 180-unit frame halves), so a 30-unit stub stays in the gap and
- * still leaves room on both sides. The fixed outward leg also guarantees the
- * cable meets the border at a right angle instead of riding along it.
+ * Adjacent cluster frames stay at least 60 world units apart (the 420-unit
+ * base pitch minus two 180-unit frame halves; overflow replica rows only
+ * widen the gap), so a 30-unit stub stays in the gap and still leaves room
+ * on both sides. The fixed outward leg also guarantees the cable meets the
+ * border at a right angle instead of riding along it.
  */
 const CLUSTER_PORT_STUB = 30;
 
