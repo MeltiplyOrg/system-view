@@ -29,6 +29,33 @@ describe("design imports", () => {
     expect(parseDesign(JSON.stringify(imported))).toEqual(example);
   });
 
+  test("preserves optional instance and cluster descriptions as plain text", () => {
+    const described: Design = structuredClone(example);
+    described.instances[0].description = "<b>Primary</b>\nHandles writes.";
+    described.clusters[0].description = "Replicas serving application data.";
+    const imported = parseDesign(JSON.stringify(described));
+    expect(imported).toEqual(described);
+    expect(parseDesign(JSON.stringify(imported))).toEqual(described);
+    expect(Object.hasOwn(imported.instances[1], "description")).toBe(false);
+  });
+
+  test("validates description types and length on instances and clusters", () => {
+    for (const collection of ["instances", "clusters"] as const) {
+      for (const description of [null, 42, "", "   ", "x".repeat(2001)]) {
+        const document = structuredClone(example);
+        Object.assign(document[collection][0], { description });
+        expect(() => parseDesign(JSON.stringify(document))).toThrow(
+          `${collection}[0].description must contain 1–2000 characters.`,
+        );
+      }
+      const document = structuredClone(example);
+      document[collection][0].description = "x".repeat(2000);
+      expect(
+        parseDesign(JSON.stringify(document))[collection][0].description,
+      ).toBe("x".repeat(2000));
+    }
+  });
+
   test("accepts minimal instances and strips the old generated fields", () => {
     const imported = parseDesign(
       JSON.stringify({

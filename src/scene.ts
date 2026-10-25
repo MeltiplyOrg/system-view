@@ -1,14 +1,9 @@
-import {
-  createDatabaseDefinitions,
-  DATABASE_ANCHOR,
-  DATABASE_HEIGHT,
-  DatabaseRack,
-  project,
-} from "./database";
+import { createDatabaseDefinitions, project } from "./database";
 import type { Design } from "./design";
 import { layoutDesign, RACK_HALF_DEPTH, RACK_HALF_WIDTH } from "./layout";
 import type { Layout, PlacedCluster } from "./layout";
 import { createPlatforms } from "./platform";
+import { componentHeight, createComponent } from "./components";
 
 const NS = "http://www.w3.org/2000/svg";
 
@@ -58,7 +53,8 @@ function contentExtent(layout: Layout): {
     const { x, y, z } = instance.position;
     for (const dx of [-RACK_HALF_WIDTH, RACK_HALF_WIDTH])
       for (const dy of [-RACK_HALF_DEPTH, RACK_HALF_DEPTH])
-        for (const dz of [0, DATABASE_HEIGHT]) add(x + dx, y + dy, z + dz);
+        for (const dz of [0, componentHeight(instance.type)])
+          add(x + dx, y + dy, z + dz);
   }
   for (const cluster of layout.clusters) {
     const { x, y, width, height } = cluster.bounds;
@@ -379,7 +375,7 @@ export class SystemScene {
     >();
     for (const instance of layout.instances) {
       const { x, y, z } = instance.position,
-        top = project(x, y, z + DATABASE_HEIGHT),
+        top = project(x, y, z + componentHeight(instance.type)),
         key = `instance:${instance.id}`,
         bounds = {
           minX: Infinity,
@@ -390,7 +386,7 @@ export class SystemScene {
       this.topPoints.set(key, top);
       for (const dx of [-RACK_HALF_WIDTH, RACK_HALF_WIDTH])
         for (const dy of [-RACK_HALF_DEPTH, RACK_HALF_DEPTH])
-          for (const dz of [0, DATABASE_HEIGHT]) {
+          for (const dz of [0, componentHeight(instance.type)]) {
             const [screenX, screenY] = project(x + dx, y + dy, z + dz);
             bounds.minX = Math.min(bounds.minX, screenX);
             bounds.maxX = Math.max(bounds.maxX, screenX);
@@ -437,17 +433,36 @@ export class SystemScene {
           `Connection ${connectionId} references an unknown instance.`,
         );
 
-      // Links attach just above the base. The quadratic control point at the
-      // source Y / target X approximates an orthogonal cable while staying
-      // smooth at iso angles; elevated instances keep their own z endpoints.
+      // Cables follow world X/Y axes with sharp projected corners. Same-row
+      // links that skip a component use a parallel lane beyond its footprint,
+      // so a bypass never reads as a connection through that component.
       const a = project(from.position.x, from.position.y, from.position.z + 4);
       const b = project(to.position.x, to.position.y, to.position.z + 4);
-      const middle = project(
-        to.position.x,
-        from.position.y,
-        Math.min(from.position.z, to.position.z) + 4,
-      );
-      const d = `M${a.join(" ")}Q${middle.join(" ")} ${b.join(" ")}`;
+      const crossesInstance =
+        from.position.y === to.position.y &&
+        layout.instances.some(
+          (instance) =>
+            instance.position.y === from.position.y &&
+            instance.position.x > Math.min(from.position.x, to.position.x) &&
+            instance.position.x < Math.max(from.position.x, to.position.x),
+        );
+      const route = crossesInstance
+        ? [
+            project(
+              from.position.x,
+              from.position.y + RACK_HALF_DEPTH * 2,
+              from.position.z + 4,
+            ),
+            project(
+              to.position.x,
+              from.position.y + RACK_HALF_DEPTH * 2,
+              to.position.z + 4,
+            ),
+          ]
+        : [project(to.position.x, from.position.y, from.position.z + 4)];
+      const d = `M${a.join(" ")}${route
+        .map((point) => `L${point.join(" ")}`)
+        .join("")}L${b.join(" ")}`;
 
       const group = document.createElementNS(NS, "g");
       group.classList.add("connection");
@@ -470,21 +485,12 @@ export class SystemScene {
           a.position.x + a.position.y - (b.position.x + b.position.y) ||
           a.position.z - b.position.z,
       )) {
-      const object = new DatabaseRack(instance),
-        p = project(
-          instance.position.x,
-          instance.position.y,
-          instance.position.z,
-        );
-      object.element.setAttribute(
-        "transform",
-        `translate(${p[0] - DATABASE_ANCHOR[0]} ${p[1] - DATABASE_ANCHOR[1]})`,
-      );
+      const element = createComponent(instance);
       const clusterId = instanceCluster.get(instance.id);
       if (clusterId) {
-        object.element.dataset.clusterId = clusterId;
+        element.dataset.clusterId = clusterId;
       }
-      layer.append(object.element);
+      layer.append(element);
     }
 
     this.content.replaceChildren(layer);
@@ -531,9 +537,9 @@ export class SystemScene {
   /**
    * Smoothly frame a rendered target inside a client-space area.
    *
-   * Selection uses this to fill the free area beside the detail panel: the
-   * zoom is solved so the target's projected bounds fit with a small margin,
-   * then center and zoom are interpolated together. Reduced-motion users jump
+   * Selection frames the target in 40% of the free area beside the detail
+   * panel, leaving room for context and the pinned callout instead of filling
+   * the viewport tightly. Center and zoom interpolate together. Reduced-motion users jump
    * straight to the final frame; any pan, zoom, or fit cancels the move.
    *
    * @param key - `instance:<id>` or `cluster:<id>` key from the last render.
@@ -554,7 +560,7 @@ export class SystemScene {
 
     // Client pixels per user unit is `box.width * zoom / base.width`, so the
     // fit zoom is the smaller of the width and height solutions.
-    const padding = 0.86,
+    const padding = 0.4,
       zoom = Math.max(
         MIN_ZOOM,
         Math.min(

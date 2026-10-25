@@ -244,6 +244,21 @@ a {
   font: 9px var(--mono);
   letter-spacing: 0.06em;
 }
+/* Optional plain-text panel; wrapping does not change the compact summary. */
+.callout-description {
+  box-sizing: border-box;
+  width: min(280px, calc(100vw - 52px));
+  margin-top: 7px;
+  padding-top: 9px;
+  border-top: 1px solid var(--border);
+  color: var(--fg);
+  font: 12px/1.6 var(--sans);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.callout-description[hidden] {
+  display: none;
+}
 @keyframes tip-card {
   from {
     opacity: 0;
@@ -840,6 +855,13 @@ textarea[aria-invalid="true"] {
   vector-effect: non-scaling-stroke;
   stroke-linecap: round;
   stroke-linejoin: round;
+}
+/* Architecture links turn sharply; internal rack cables keep their curves. */
+.connection .wire,
+.connection .wire-glow,
+.connection .pulse {
+  stroke-linecap: butt;
+  stroke-linejoin: miter;
 }
 .wire-under {
   stroke: var(--body);

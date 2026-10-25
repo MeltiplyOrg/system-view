@@ -3,11 +3,11 @@
  * into expectable markup: one group per elevation, even-odd holes, and walls.
  */
 import { describe, expect, test } from "vite-plus/test";
-import type { DatabaseInstance } from "../src/design";
+import type { PlacedInstance } from "../src/design";
 import { createPlatforms } from "../src/platform";
 
 /** Minimal validated instance used to compose platform fixtures. */
-function rack(id: string, x: number, y: number, z = 0): DatabaseInstance {
+function rack(id: string, x: number, y: number, z = 0): PlacedInstance {
   return {
     id,
     type: "database-rack",

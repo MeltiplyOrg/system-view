@@ -16,15 +16,15 @@ export interface Position {
 }
 
 /**
- * One renderable Database Rack.
+ * One renderable system component.
  *
  * This is the placed form consumed by the renderer, not the imported JSON
  * shape. `id` stays the stable key connections target; `label` is the
  * user-facing name (an omitted imported label falls back to `id`).
  */
-export interface DatabaseInstance {
+export interface PlacedInstance {
   id: string;
-  type: "database-rack";
+  type: "database-rack" | "compute-server" | "webpage" | "cache";
   label: string;
   position: Position;
   color: string;
@@ -39,6 +39,8 @@ export interface DatabaseInstance {
 export interface DesignInstance {
   id: string;
   label?: string;
+  /** Optional tooltip body; plain text, up to 2,000 characters. */
+  description?: string;
 }
 
 /**
@@ -56,7 +58,7 @@ export interface Connection {
 }
 
 /**
- * A named group of instances sharing a platform and laid out together.
+ * A logical group of replica instances laid out on separate platforms.
  *
  * `id` and `label` are optional. The layout pass derives a stable fallback from
  * the declaration order and uses the label for the on-canvas group caption.
@@ -64,6 +66,8 @@ export interface Connection {
 export interface Cluster {
   id?: string;
   label?: string;
+  /** Description of the logical group shown when its tooltip is active. */
+  description?: string;
   instances: string[];
 }
 
@@ -88,7 +92,7 @@ export interface Design {
  *
  * IDs intentionally use the `db-` prefix; the layout pass turns that prefix
  * into the database-rack renderer, lays the three racks out in one column, and
- * assigns three distinct colors. The cluster makes their feet share a plinth.
+ * assigns three distinct colors. A dashed floor frame groups the replicas.
  */
 export const example: Design = {
   version: 1,
@@ -111,6 +115,48 @@ export const example: Design = {
 };
 
 /**
+ * Editable three-tier application: a browser frontend calls an API server,
+ * which reads and writes the database. Prefixes select visuals; connections
+ * describe requests, not replica membership.
+ */
+export const webAppExample: Design = {
+  version: 1,
+  name: "Simple web app",
+  instances: [
+    {
+      id: "web-frontend",
+      label: "Web frontend",
+      description:
+        "Renders the application interface and sends HTTPS / JSON requests to the backend API.",
+    },
+    {
+      id: "compute-api",
+      label: "Backend API",
+      description:
+        "Handles application requests and business logic, then reads and writes data using SQL.",
+    },
+    {
+      id: "cache-app",
+      label: "Application cache",
+      description:
+        "Keeps frequently requested data in memory. The backend reads the database on cache misses.",
+    },
+    {
+      id: "db-app",
+      label: "Application database",
+      description:
+        "Persists application data. Accessed by the backend, not directly by the browser.",
+    },
+  ],
+  connections: [
+    { from: "web-frontend", to: "compute-api", relation: "HTTPS / JSON" },
+    { from: "compute-api", to: "db-app", relation: "SQL" },
+    { from: "compute-api", to: "cache-app", relation: "GET / SET" },
+  ],
+  clusters: [],
+};
+
+/**
  * Assert that an untrusted JSON value is a non-array object.
  *
  * @param value - Parsed JSON value to inspect.
@@ -125,14 +171,14 @@ function record(value: unknown, path: string): Record<string, unknown> {
 }
 
 /**
- * Assert a non-empty string of at most 100 characters.
+ * Assert a non-empty string within the supplied character limit.
  *
- * Labels, IDs, and relations share this limit so imported text cannot grow SVG
- * output without bound or render as blank.
+ * IDs, labels, and relations default to 100 characters to bound SVG text.
+ * Plain-text tooltip descriptions explicitly use the larger 2,000 limit.
  */
-function text(value: unknown, path: string): string {
-  if (typeof value !== "string" || !value.trim() || value.length > 100)
-    throw new Error(`${path} must contain 1–100 characters.`);
+function text(value: unknown, path: string, maxLength = 100): string {
+  if (typeof value !== "string" || !value.trim() || value.length > maxLength)
+    throw new Error(`${path} must contain 1–${maxLength} characters.`);
   return value;
 }
 
@@ -149,7 +195,8 @@ function text(value: unknown, path: string): string {
  * (`"db-01"`) or objects (`{ "id": "db-01", "label": "Primary" }`). Generated
  * fields from the previous schema are ignored and never returned.
  *
- * Limits: 64 instances, 256 links, 64 clusters, 100-character strings.
+ * Limits: 64 instances, 256 links, 64 clusters, 100-character strings except
+ * optional descriptions (up to 2,000 characters, preserved as plain text).
  */
 export function parseDesign(source: string): Design {
   const root = record(JSON.parse(source) as unknown, "Design");
@@ -171,9 +218,21 @@ export function parseDesign(source: string): Design {
     ids.add(id);
     // `type`, `position`, and `color` are intentionally not read. They are
     // derived from the ID and graph by the layout pass.
-    return instance.label === undefined
-      ? { id }
-      : { id, label: text(instance.label, `${path}.label`) };
+    return {
+      id,
+      ...(instance.label === undefined
+        ? {}
+        : { label: text(instance.label, `${path}.label`) }),
+      ...(instance.description === undefined
+        ? {}
+        : {
+            description: text(
+              instance.description,
+              `${path}.description`,
+              2000,
+            ),
+          }),
+    };
   });
 
   const connectionInput =
@@ -254,6 +313,11 @@ export function parseDesign(source: string): Design {
       ...(cluster.label === undefined
         ? {}
         : { label: text(cluster.label, `${path}.label`) }),
+      ...(cluster.description === undefined
+        ? {}
+        : {
+            description: text(cluster.description, `${path}.description`, 2000),
+          }),
       instances: members,
     };
   });

@@ -1,5 +1,5 @@
 import { project } from "./database";
-import type { DatabaseInstance } from "./design";
+import type { PlacedInstance } from "./design";
 
 /** A world-space X/Y vertex; platform contours never carry elevation. */
 type Point = readonly [number, number];
@@ -68,11 +68,11 @@ function coordinateIndex(
  * @throws Error only if an internal lookup or contour closure invariant fails.
  */
 export function mergePlatformFootprints(
-  instances: readonly DatabaseInstance[],
+  instances: readonly PlacedInstance[],
 ): PlatformFootprint[] {
   // Elevation is exact: racks on different floors must not share a base, and
   // inputs are validated numbers, so no epsilon merge is appropriate.
-  const levels = new Map<number, DatabaseInstance[]>();
+  const levels = new Map<number, PlacedInstance[]>();
   for (const instance of instances) {
     const level = levels.get(instance.position.z);
     if (level) level.push(instance);
@@ -205,7 +205,7 @@ export function mergePlatformFootprints(
  * with no listeners, created fresh for each design render.
  */
 export function createPlatforms(
-  instances: readonly DatabaseInstance[],
+  instances: readonly PlacedInstance[],
 ): SVGGElement {
   const group = document.createElementNS("http://www.w3.org/2000/svg", "g");
   group.classList.add("platforms");
