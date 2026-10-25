@@ -10,6 +10,154 @@ import type { RoutePoint, RouteRect } from "./routing";
 
 const NS = "http://www.w3.org/2000/svg";
 
+/** One screen-space point from `project`, mutated as [x, y] pairs. */
+type ScreenPoint = [number, number];
+
+/**
+ * Cross product of OA × OB; its sign gives the turn direction at O.
+ *
+ * Shared by the convex hull and the segment-intersection orient test below.
+ */
+function orient(o: ScreenPoint, a: ScreenPoint, b: ScreenPoint): number {
+  return (a[0] - o[0]) * (b[1] - o[1]) - (a[1] - o[1]) * (b[0] - o[0]);
+}
+
+/**
+ * Convex hull of projected box corners — the silhouette a node paints.
+ *
+ * Andrew's monotone chain. All eight corners of a box project onto a hexagonal
+ * silhouette; the hull drops the two interior ones, so wires passing through
+ * the empty bounding-box corners (e.g. a detour lane above the platform) are
+ * not treated as covered. Input may contain duplicates.
+ *
+ * @param points - Screen-space corner points, in any order.
+ * @returns Hull vertices in clockwise order; fewer than three when degenerate.
+ */
+function convexHull(points: ScreenPoint[]): ScreenPoint[] {
+  const sorted = [...points].sort((a, b) => a[0] - b[0] || a[1] - b[1]);
+  const half = (input: ScreenPoint[]): ScreenPoint[] => {
+    const chain: ScreenPoint[] = [];
+    for (const point of input) {
+      while (
+        chain.length >= 2 &&
+        orient(chain[chain.length - 2], chain[chain.length - 1], point) <= 0
+      )
+        chain.pop();
+      chain.push(point);
+    }
+    return chain;
+  };
+  const lower = half(sorted),
+    upper = half(sorted.reverse());
+  // The last point of each chain is the first of the other; drop both.
+  return lower.slice(0, -1).concat(upper.slice(0, -1));
+}
+
+/**
+ * Whether a point lies inside or on a convex polygon given clockwise.
+ *
+ * Every edge must keep the point on the same side (zero cross product counts
+ * as inside so hull-edge touches still count as coverage).
+ */
+function pointInConvexPolygon(
+  point: ScreenPoint,
+  polygon: ScreenPoint[],
+): boolean {
+  let sign = 0;
+  for (let index = 0; index < polygon.length; index++) {
+    const a = polygon[index],
+      b = polygon[(index + 1) % polygon.length],
+      side = orient(a, b, point);
+    if (side === 0) continue;
+    const current = side > 0 ? 1 : -1;
+    if (sign === 0) sign = current;
+    else if (sign !== current) return false;
+  }
+  return true;
+}
+
+/**
+ * Whether segment AB crosses segment CD, endpoints included.
+ *
+ * Standard orient-based test: straddling on both axes, or a collinear touch
+ * within the overlapping span.
+ */
+function segmentsIntersect(
+  a: ScreenPoint,
+  b: ScreenPoint,
+  c: ScreenPoint,
+  d: ScreenPoint,
+): boolean {
+  const crossA = orient(c, d, a),
+    crossB = orient(c, d, b),
+    crossC = orient(a, b, c),
+    crossD = orient(a, b, d);
+  if (((crossA > 0 && crossB < 0) || (crossA < 0 && crossB > 0)) &&
+      ((crossC > 0 && crossD < 0) || (crossC < 0 && crossD > 0)))
+    return true;
+  return (
+    (crossA === 0 && Math.min(c[0], d[0]) <= a[0] && a[0] <= Math.max(c[0], d[0]) &&
+      Math.min(c[1], d[1]) <= a[1] && a[1] <= Math.max(c[1], d[1])) ||
+    (crossB === 0 && Math.min(c[0], d[0]) <= b[0] && b[0] <= Math.max(c[0], d[0]) &&
+      Math.min(c[1], d[1]) <= b[1] && b[1] <= Math.max(c[1], d[1])) ||
+    (crossC === 0 && Math.min(a[0], b[0]) <= c[0] && c[0] <= Math.max(a[0], b[0]) &&
+      Math.min(a[1], b[1]) <= c[1] && c[1] <= Math.max(a[1], b[1])) ||
+    (crossD === 0 && Math.min(a[0], b[0]) <= d[0] && d[0] <= Math.max(a[0], b[0]) &&
+      Math.min(a[1], b[1]) <= d[1] && d[1] <= Math.max(a[1], b[1]))
+  );
+}
+
+/**
+ * Whether a projected cable polyline touches a node silhouette.
+ *
+ * A wire endpoint inside the hull or any wire/hull edge crossing means the
+ * node paints over that part of the cable (racks always paint after the link
+ * layer), so the node hides it on screen regardless of world depth.
+ */
+function polylineIntersectsPolygon(
+  points: ScreenPoint[],
+  polygon: ScreenPoint[],
+): boolean {
+  if (points.length < 2 || polygon.length < 3) return false;
+  if (points.some((point) => pointInConvexPolygon(point, polygon)))
+    return true;
+  for (let index = 0; index < points.length - 1; index++)
+    for (let edge = 0; edge < polygon.length; edge++)
+      if (
+        segmentsIntersect(
+          points[index],
+          points[index + 1],
+          polygon[edge],
+          polygon[(edge + 1) % polygon.length],
+        )
+      )
+        return true;
+  return false;
+}
+
+/**
+ * Trim the lead-in or lead-out a cable spends beneath its own endpoint.
+ *
+ * A cable starts and ends inside the endpoint rack's silhouette, so testing
+ * the raw polyline would mark the endpoint itself as covering its own wire.
+ * Leading points (`from`) or trailing points (`to`) inside that endpoint's
+ * silhouette are dropped before the coverage test; the exposed stretch is
+ * still tested normally, so a cable that re-enters the same rack later in its
+ * route still counts as covered.
+ */
+function withoutEndpointUnder(
+  points: ScreenPoint[],
+  endpoint: "from" | "to",
+  hull: ScreenPoint[],
+): ScreenPoint[] {
+  let start = 0,
+    end = points.length;
+  if (endpoint === "from")
+    while (start < end && pointInConvexPolygon(points[start], hull)) start++;
+  else while (end > start && pointInConvexPolygon(points[end - 1], hull)) end--;
+  return points.slice(start, end);
+}
+
 /** Zoom bounds chosen to keep the grid usable at both extreme scales. */
 const MIN_ZOOM = 0.25;
 const MAX_ZOOM = 8;
@@ -475,6 +623,21 @@ export class SystemScene {
     { minX: number; minY: number; maxX: number; maxY: number }
   >();
 
+  /**
+   * Screen-space silhouette per instance id, for focus dimming coverage.
+   *
+   * Convex hull of the projected box corners, rebuilt on every render. Racks
+   * always paint after the link layer, so any wire touching this hull is
+   * hidden by that node on screen.
+   */
+  private readonly silhouettes = new Map<string, ScreenPoint[]>();
+
+  /** Projected cable polyline per connection, for the same coverage test. */
+  private readonly wirePaths = new Map<
+    string,
+    { from: string; to: string; points: ScreenPoint[] }
+  >();
+
   /** Pending requestAnimationFrame id for the camera move, if any. */
   private cameraFrame: number | null = null;
 
@@ -642,6 +805,8 @@ export class SystemScene {
     // target bounds drive the zoom-to-fit on selection.
     this.topPoints.clear();
     this.targetBounds.clear();
+    this.silhouettes.clear();
+    this.wirePaths.clear();
     const clusterTops = new Map<string, readonly [number, number]>();
     const clusterBounds = new Map<
       string,
@@ -658,16 +823,19 @@ export class SystemScene {
           maxY: -Infinity,
         };
       this.topPoints.set(key, top);
+      const corners: ScreenPoint[] = [];
       for (const dx of [-RACK_HALF_WIDTH, RACK_HALF_WIDTH])
         for (const dy of [-RACK_HALF_DEPTH, RACK_HALF_DEPTH])
           for (const dz of [0, componentHeight(instance.type)]) {
             const [screenX, screenY] = project(x + dx, y + dy, z + dz);
+            corners.push([screenX, screenY]);
             bounds.minX = Math.min(bounds.minX, screenX);
             bounds.maxX = Math.max(bounds.maxX, screenX);
             bounds.minY = Math.min(bounds.minY, screenY);
             bounds.maxY = Math.max(bounds.maxY, screenY);
           }
       this.targetBounds.set(key, bounds);
+      this.silhouettes.set(instance.id, convexHull(corners));
 
       const clusterId = instanceCluster.get(instance.id);
       if (!clusterId) continue;
@@ -792,6 +960,11 @@ export class SystemScene {
       const projected = worldPath.map((point) =>
         project(point.x, point.y, from.position.z + 4),
       );
+      this.wirePaths.set(connectionId, {
+        from: link.from,
+        to: link.to,
+        points: projected.map((point) => [point[0], point[1]]),
+      });
       const d = `M${projected[0].join(" ")}${projected
         .slice(1)
         .map((point) => `L${point.join(" ")}`)
@@ -960,6 +1133,90 @@ export class SystemScene {
     for (const frame of frames) {
       frame.classList.toggle("hovered", frame.dataset.clusterId === clusterId);
     }
+  }
+
+  /**
+   * Dim only the nodes whose artwork covers the focused target's wires.
+   *
+   * Racks always paint after the link layer, so any node whose projected
+   * silhouette overlaps a cable hides that stretch of wire. When a target is
+   * focused, exactly those covering nodes fade to a translucent silhouette
+   * (`.focus-dimmed`) — including members of the focused cluster, so a
+   * replica burying its own group's cable dims with the rest. Only the
+   * directly selected single instance is exempt: its own cables emerge from
+   * beneath it, and dimming the selection itself would read as a bug.
+   *
+   * Instance roots and this coverage data are rebuilt by `render`; call this
+   * again after a re-render if the selection survived it.
+   *
+   * @param key - `instance:<id>` or `cluster:<id>` key from `focus()`, or
+   *   null to restore the undimmed scene.
+   */
+  setFocus(key: string | null): void {
+    const dimmed = this.focusCoveredIds(key);
+    this.svg.classList.toggle("focus-dim", dimmed.size > 0);
+    for (const element of this.content.querySelectorAll<SVGGElement>(
+      ".scene-instance",
+    )) {
+      const id = element.dataset.instanceId;
+      if (id) element.classList.toggle("focus-dimmed", dimmed.has(id));
+    }
+  }
+
+  /**
+   * Instance ids to dim while `key` is focused.
+   *
+   * Collects the focused members (one instance, or every member of a
+   * cluster), keeps the wires attached to any of them, and returns every
+   * instance whose silhouette one of those wires touches. Cluster members
+   * compete on equal terms — only the focused single instance is skipped.
+   * Wires are matched by endpoint instance id, which also covers
+   * cluster-ported links: their `from`/`to` stay the member even though the
+   * cable leaves the frame. A wire's own endpoint stretch is trimmed so the
+   * endpoint is never dimmed merely for the cable emerging from it.
+   *
+   * @param key - Focus key from `focus()`, or null for an empty set.
+   * @returns Instance ids that cover a focused wire and should dim.
+   */
+  private focusCoveredIds(key: string | null): Set<string> {
+    const covered = new Set<string>();
+    if (!key) return covered;
+    const instanceId = key.startsWith("instance:") ? key.slice(9) : null,
+      clusterId = key.startsWith("cluster:") ? key.slice(8) : null;
+    const members = new Set<string>();
+    for (const element of this.content.querySelectorAll<SVGGElement>(
+      ".scene-instance",
+    )) {
+      const id = element.dataset.instanceId;
+      if (!id) continue;
+      if (
+        (instanceId !== null && id === instanceId) ||
+        (clusterId !== null && element.dataset.clusterId === clusterId)
+      )
+        members.add(id);
+    }
+    if (members.size === 0) return covered;
+    const relevant = [...this.wirePaths.values()].filter(
+      (wire) => members.has(wire.from) || members.has(wire.to),
+    );
+    for (const [id, hull] of this.silhouettes) {
+      if (id === instanceId) continue;
+      for (const wire of relevant) {
+        // The endpoint's own lead-in/lead-out is trimmed so a rack is not
+        // dimmed just because its cable starts underneath it.
+        const points =
+          wire.from === id
+            ? withoutEndpointUnder(wire.points, "from", hull)
+            : wire.to === id
+              ? withoutEndpointUnder(wire.points, "to", hull)
+              : wire.points;
+        if (polylineIntersectsPolygon(points, hull)) {
+          covered.add(id);
+          break;
+        }
+      }
+    }
+    return covered;
   }
 
   /**

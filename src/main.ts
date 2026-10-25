@@ -401,6 +401,7 @@ function selectTarget(anchor: Element | null, preserveCallout = false): void {
   }
   selectedKey = ids.key;
   selectedAnchor = anchor;
+  scene.setFocus(ids.key);
   if (preserveCallout) {
     tipKey = ids.key;
     fillCallout(ids, targetMembers(ids, anchor), false);
@@ -419,11 +420,12 @@ function selectTarget(anchor: Element | null, preserveCallout = false): void {
   });
 }
 
-/** Drop the selection, hide the callout, and close the detail panel. */
+/** Drop the selection, hide the callout, close the detail panel, and undim. */
 function clearSelection(): void {
   if (!selectedKey) return;
   selectedKey = null;
   selectedAnchor = null;
+  scene.setFocus(null);
   hideCallout();
   detail.classList.remove("open");
   detail.setAttribute("aria-hidden", "true");
