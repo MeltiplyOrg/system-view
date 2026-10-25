@@ -938,6 +938,104 @@ test.describe("instance selection", () => {
   });
 });
 
+test.describe("provider skin transition", () => {
+  // The morph is the behavior under test, so opt out of the global reduce.
+  test.use({ reducedMotion: "no-preference" });
+
+  test("builds the incoming skin and retires the outgoing one", async ({
+    page,
+  }) => {
+    await page.goto("/");
+    const cache = page.locator(
+      '.scene-instance[data-instance-id="cache-server"]',
+    );
+    const box = await cache.boundingBox();
+    if (!box) throw new Error("Cache instance not laid out.");
+    // Hit the lower front face; the centre hosts the drag handle.
+    await page.mouse.click(box.x + box.width * 0.35, box.y + box.height * 0.78);
+    await expect(page.locator("#detail-title")).toHaveText("Cache server");
+    await expect(page.locator("#detail-provider")).toHaveValue("redis");
+    // The object carries exactly one mark, and it is the upstream artwork.
+    await expect(cache.locator('svg[viewBox="0 0 256 220"]')).toHaveCount(1);
+
+    // Change the provider inside the page so the ghost and its running build
+    // can be observed before the first frame settles.
+    const started = await page.evaluate(() => {
+      const select =
+        document.querySelector<HTMLSelectElement>("#detail-provider")!;
+      select.value = "";
+      select.dispatchEvent(new Event("change", { bubbles: true }));
+      const instance = document.querySelector(
+        '.scene-instance[data-instance-id="cache-server"]',
+      )!;
+      const parts = [...instance.querySelectorAll(".skin-part")];
+      return {
+        ghosts: document.querySelectorAll(".skin-ghost").length,
+        instances: document.querySelectorAll(
+          '.scene-instance[data-instance-id="cache-server"]',
+        ).length,
+        // Artwork groups animate independently, not as one whole-skin clip.
+        parts: parts.length,
+        running: parts.filter((part) => part.getAnimations().length > 0).length,
+        // Borders animate their projected hit target with transforms.
+        frames: [...document.querySelectorAll(".scene-frame")].filter((frame) =>
+          frame.getAnimations().some((animation) => {
+            const effect = animation.effect;
+            return (
+              effect instanceof KeyframeEffect &&
+              effect
+                .getKeyframes()
+                .some((keyframe) => keyframe.transform !== undefined)
+            );
+          }),
+        ).length,
+        // The merged platform cross-fades instead of snapping.
+        platforms: document.querySelectorAll(".platform-ghost").length,
+        morphing: instance
+          .querySelector("[data-renderer-type]")
+          ?.hasAttribute("data-skin-morph"),
+      };
+    });
+    expect(started.ghosts).toBe(1);
+    expect(started.instances).toBe(1);
+    expect(started.parts).toBeGreaterThan(2);
+    expect(started.running).toBeGreaterThan(1);
+    expect(started.frames).toBeGreaterThan(0);
+    expect(started.platforms).toBe(1);
+    expect(started.morphing).toBe(true);
+    await expect(page.locator(".skin-ghost")).toHaveCount(0);
+    await expect(page.locator(".skin-part")).toHaveCount(0);
+    await expect(page.locator(".platform-ghost")).toHaveCount(0);
+    await expect(cache.locator(".cache")).not.toHaveAttribute(
+      "data-renderer-provider",
+      "redis",
+    );
+    await expect(cache.locator('svg[viewBox="0 0 256 220"]')).toHaveCount(0);
+
+    const reverse = await page.evaluate(() => {
+      const select =
+        document.querySelector<HTMLSelectElement>("#detail-provider")!;
+      select.value = "redis";
+      select.dispatchEvent(new Event("change", { bubbles: true }));
+      return {
+        ghosts: document.querySelectorAll(".skin-ghost").length,
+        parts: document.querySelectorAll(".skin-part").length,
+        platforms: document.querySelectorAll(".platform-ghost").length,
+      };
+    });
+    expect(reverse.ghosts).toBe(1);
+    expect(reverse.parts).toBeGreaterThan(2);
+    expect(reverse.platforms).toBe(1);
+    await expect(page.locator(".skin-ghost")).toHaveCount(0);
+    await expect(page.locator(".skin-part")).toHaveCount(0);
+    await expect(cache.locator(".cache")).toHaveAttribute(
+      "data-renderer-provider",
+      "redis",
+    );
+    await expect(cache.locator('svg[viewBox="0 0 256 220"]')).toHaveCount(1);
+  });
+});
+
 test.describe("mobile overlay", () => {
   test.use({ viewport: { width: 390, height: 844 }, hasTouch: true });
 

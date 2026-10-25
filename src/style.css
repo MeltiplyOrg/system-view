@@ -126,7 +126,8 @@ a {
   cursor: default;
   user-select: none;
 }
-.platforms {
+.platforms,
+.platform-ghost {
   pointer-events: none;
 }
 
@@ -1260,6 +1261,15 @@ aside.detail.open {
  */
 .skin-ghost {
   pointer-events: none;
+}
+/*
+ * The outgoing skin is a transient clone; its LEDs and packets would double
+ * the live compositor work for the length of the rebuild. The incoming skin
+ * carries the motion instead, so the scene paints exactly one live detail
+ * layer per node while parts move.
+ */
+.skin-ghost .component-motion {
+  display: none;
 }
 @keyframes instance-drop {
   0% {

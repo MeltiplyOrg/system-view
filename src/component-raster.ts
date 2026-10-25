@@ -613,6 +613,10 @@ export class ComponentRasterCache {
     )) {
       const type = element.dataset.rendererType;
       if (!isRendererType(type)) continue;
+      // A skin mid-morph keeps its live vectors so individual parts can
+      // animate. The scene calls sync() again when the transition settles, so
+      // raster work never competes with the animation frames.
+      if (element.hasAttribute("data-skin-morph")) continue;
       const provider = element.dataset.rendererProvider ?? "";
       const known = this.records.get(element);
       const queryBase = element.querySelector<SVGGElement>(
@@ -719,6 +723,23 @@ export class ComponentRasterCache {
     }
     this.trimDrawings();
     if (needsRefresh) this.scheduleRefresh();
+  }
+
+  /**
+   * Restore live static vectors before a transient clone.
+   *
+   * A provider morph animates the outgoing skin part by part, which a single
+   * cached bitmap cannot express. Only that component's image is dropped;
+   * the shared drawing stays cached for the next reuse, and the outgoing DOM
+   * is replaced in the same render, so no stale frame is painted.
+   *
+   * @param element - Scene-instance wrapper about to be cloned.
+   */
+  materializeVectors(element: SVGGElement): void {
+    const geometry = element.querySelector<SVGGElement>("[data-renderer-type]");
+    if (!geometry) return;
+    const record = this.records.get(geometry);
+    if (record?.vectorsDetached) this.dropImages(record);
   }
 
   /**

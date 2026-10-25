@@ -14,18 +14,20 @@ import { gzipSync } from "node:zlib";
  * Maximum gzipped bytes per emitted asset type.
  *
  * The JS budget carries the self-contained provider artwork (the official
- * Redis mark alone is ~0.75 KiB gzipped) so a provider skin ships without a
- * network request. Tighten the headroom when provider assets move to a
- * lazy-loaded chunk.
+ * Redis mark alone is ~0.75 KiB gzipped) and the part-level skin morph, so a
+ * provider skin ships without a network request. The morph adds budgeted
+ * transform scheduling, affine frame interpolation, and raster fallbacks.
+ * Tighten the headroom when provider assets move to a lazy-loaded chunk or
+ * when the transition system stops growing.
  */
 const budgets = {
-  ".js": 32 * 1024,
+  ".js": 36 * 1024,
   ".css": 10 * 1024,
   ".html": 2 * 1024,
 } as const;
 
 /** Maximum gzipped bytes for the whole build. */
-const totalBudget = 40 * 1024;
+const totalBudget = 42 * 1024;
 
 // Dist is flat today, but recursive discovery keeps the gate valid if assets
 // move into nested chunks. Unknown file types are intentionally ignored.
