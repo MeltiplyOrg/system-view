@@ -1,10 +1,9 @@
 import type { PlacedInstance } from "./design";
-import { findProvider } from "./providers";
 
 const NS = "http://www.w3.org/2000/svg";
 
 /** Rack-local world coordinate: [x, y, z] in model units. */
-type Point = readonly [number, number, number];
+export type Point = readonly [number, number, number];
 
 /**
  * Project rack-local world coordinates into SVG user units.
@@ -32,7 +31,7 @@ export const DATABASE_ANCHOR = project(144, 75, 0);
  * and `v` its vertical unit axis. Rounded rectangles and text can then be
  * drawn in ordinary local coordinates while SVG applies the isometric skew.
  */
-const plane = (origin: Point, u: Point, v: Point): string => {
+export const plane = (origin: Point, u: Point, v: Point): string => {
   const o = project(...origin),
     a = project(...u),
     b = project(...v);
@@ -40,15 +39,15 @@ const plane = (origin: Point, u: Point, v: Point): string => {
 };
 
 /** Top face at z=max, facing upward. */
-const top = (x: number, y: number, z: number) =>
+export const top = (x: number, y: number, z: number) =>
   plane([x, y, z], [1, 0, 0], [0, 1, 0]);
 
 /** Broad visible face at y=max, used for the glass side. */
-const front = (x: number, y: number, z: number) =>
+export const front = (x: number, y: number, z: number) =>
   plane([x, y, z], [1, 0, 0], [0, 0, -1]);
 
 /** Narrow end at x=max, used for drawer fascias and the switch. */
-const side = (x: number, y: number, z: number) =>
+export const side = (x: number, y: number, z: number) =>
   plane([x, y, z], [0, -1, 0], [0, 0, -1]);
 
 /**
@@ -58,7 +57,7 @@ const side = (x: number, y: number, z: number) =>
  * strings compact; the resulting error is far below one screen pixel at the
  * scene's fit scale.
  */
-const path = (points: readonly Point[]) =>
+export const path = (points: readonly Point[]) =>
   "M" +
   points
     .map((p) =>
@@ -81,7 +80,7 @@ const path = (points: readonly Point[]) =>
  * opaque fill. Faces must stay opaque: SVG has no depth buffer, so painter
  * order is the only depth sorting. Coordinates are rack-local world units.
  */
-function box(
+export function box(
   x: number,
   y: number,
   z: number,
@@ -134,7 +133,7 @@ function box(
  * Used for vents and slot texture. Batching avoids hundreds of SVG elements
  * and keeps the shared definitions small; values are face-local units.
  */
-function slits(
+export function slits(
   start: number,
   end: number,
   step: number,
@@ -153,7 +152,7 @@ function slits(
  * Circles are merged into one path when used as screws or LEDs, reducing the
  * element count. Coordinates are face-local units; the caller owns placement.
  */
-function circle(x: number, y: number, r: number): string {
+export function circle(x: number, y: number, r: number): string {
   return `M${x - r} ${y}a${r} ${r} 0 1 0 ${2 * r} 0a${r} ${r} 0 1 0 ${-2 * r} 0`;
 }
 
@@ -416,31 +415,6 @@ export function createDatabaseDefinitions(): SVGDefsElement {
 }
 
 /**
- * Print one provider mark on the roof fascia's enamel plate.
- *
- * The provider theme carries the exact upstream SVG once, for both the tooltip
- * and this object badge. Re-wrap its inner artwork with a fixed viewBox so the
- * mark scales onto the face-local plate without altering any path. The plate is
- * light in both themes; the mark variants are chosen for contrast on it, and
- * the whole badge is part of the rasterized roof overlay.
- *
- * @param logo - Self-contained provider SVG from `ProviderTheme.logo`.
- * @returns Face-local badge group, or an empty string if the mark is malformed.
- */
-function providerBadge(logo: string): string {
-  const viewBox = /viewBox="([^"]+)"/.exec(logo)?.[1],
-    art = logo
-      .replace(/^[\s\S]*?<svg[^>]*>/, "")
-      .replace(/<\/svg>[\s\S]*$/, "");
-  if (!viewBox || !art) return "";
-  return `<g class="rack-provider-badge" transform="${front(RX, RF, TOPZ)}">
-    <rect class="rack-accent-line" x="8" y="1.2" width="184" height="1.2" rx=".6"/>
-    <rect class="brand-plate" x="198" y="1.5" width="38" height="17" rx="2.2"/>
-    <svg x="203" y="3" width="28" height="14" viewBox="${viewBox}" preserveAspectRatio="xMidYMid meet">${art}</svg>
-  </g>`;
-}
-
-/**
  * SVG renderer for one Database Rack.
  *
  * The element is a `<g>` containing two static layers (shared rear markup plus
@@ -476,9 +450,7 @@ export class DatabaseRack {
     this.element.dataset.rendererType = "database-rack";
     this.element.dataset.instanceId = instance.id;
     this.element.style.setProperty("--cable-color", instance.color);
-    const theme = findProvider(instance.provider, "database-rack"),
-      badge = theme ? providerBadge(theme.logo) : "";
-    this.element.innerHTML = `<g class="rack-static rack-static-base component-static-base" aria-hidden="true"><use href="#rack-rear"/>${cables}</g><g class="rack-pulses component-motion" aria-hidden="true">${cablePulses}</g><g class="rack-static rack-static-roof component-static-overlay" aria-hidden="true"><use href="#rack-front"/>${badge}</g>`;
+    this.element.innerHTML = `<g class="rack-static rack-static-base component-static-base" aria-hidden="true"><use href="#rack-rear"/>${cables}</g><g class="rack-pulses component-motion" aria-hidden="true">${cablePulses}</g><g class="rack-static rack-static-roof component-static-overlay" aria-hidden="true"><use href="#rack-front"/></g>`;
 
     // Plain identity lettering on the top strip of the narrow drawer face.
     const nameplate = document.createElementNS(NS, "g");

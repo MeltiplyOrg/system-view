@@ -31,14 +31,14 @@ describe("database providers", () => {
     expect(findProvider("POSTGRESQL", "database-rack")?.id).toBe("postgresql");
   });
 
-  test("uses dark plates for white or bright marks", () => {
+  test("uses dark enamel plates instead of a white backing", () => {
     for (const [id, plate] of [
+      ["postgresql", "#14243a"],
       ["mysql", "#0b1a1e"],
+      ["sqlite", "#101c24"],
       ["mongodb", "#0b1a12"],
     ] as const)
       expect(findProvider(id, "database-rack")?.plate).toBe(plate);
-    expect(findProvider("postgresql", "database-rack")?.plate).toBeUndefined();
-    expect(findProvider("sqlite", "database-rack")?.plate).toBeUndefined();
   });
 
   test("ships unique hex accents and one self-contained mark each", () => {

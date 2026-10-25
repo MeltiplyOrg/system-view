@@ -66,42 +66,6 @@ describe("Database Rack geometry", () => {
     );
   });
 
-  test("prints exactly one provider mark on the roof fascia", () => {
-    for (const [provider, viewBox] of [
-      ["postgresql", "0 0 432.071 445.383"],
-      ["mysql", "0 0 256 252"],
-      ["sqlite", "0 0 512 228"],
-      ["mongodb", "0 0 120 257"],
-    ] as const) {
-      const rack = new DatabaseRack({
-        ...placed,
-        provider,
-        color: "#4169e1",
-      });
-      const overlay = rack.element.querySelector(".rack-static-roof");
-      const badge = overlay?.querySelector(".rack-provider-badge");
-      expect(badge).not.toBeNull();
-      expect(badge?.querySelectorAll("svg")).toHaveLength(1);
-      expect(badge?.querySelector("svg")?.getAttribute("viewBox")).toBe(
-        viewBox,
-      );
-      expect(
-        rack.element.querySelectorAll(".rack-provider-badge"),
-      ).toHaveLength(1);
-    }
-  });
-
-  test("leaves the base rack and unsupported providers mark-free", () => {
-    expect(
-      new DatabaseRack(placed).element.querySelector(".rack-provider-badge"),
-    ).toBeNull();
-    expect(
-      new DatabaseRack({ ...placed, provider: "redis" }).element.querySelector(
-        ".rack-provider-badge",
-      ),
-    ).toBeNull();
-  });
-
   test("fits long labels inside the nameplate", () => {
     const rack = new DatabaseRack({
       ...placed,

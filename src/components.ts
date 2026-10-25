@@ -6,6 +6,10 @@ import {
 } from "./database";
 import type { PlacedInstance } from "./design";
 import { REDIS_LOGO_ART, findProvider } from "./providers";
+import {
+  createProviderDatabaseRack,
+  databaseProviderHeight,
+} from "./database-skins";
 
 const NS = "http://www.w3.org/2000/svg";
 
@@ -750,6 +754,8 @@ export function componentHeight(
 ): number {
   const variant = variantOf(type, provider);
   if (variant) return variant.height;
+  const databaseHeight = databaseProviderHeight(provider);
+  if (databaseHeight !== null) return databaseHeight;
   switch (type) {
     case "database-rack":
       return DATABASE_HEIGHT;
@@ -819,7 +825,9 @@ export function createComponent(
       "transform",
       `translate(${x - DATABASE_ANCHOR[0]} ${y - DATABASE_ANCHOR[1]})`,
     );
-    const rack = new DatabaseRack(instance).element;
+    const rack =
+      (theme ? createProviderDatabaseRack(instance, theme) : null) ??
+      new DatabaseRack(instance).element;
     // The wrapper owns scene identity and receives the cluster id later. The
     // rack's own copy would be the nearer data-instance-id ancestor for
     // closest() lookups, hiding the wrapper's cluster id from hover/select.

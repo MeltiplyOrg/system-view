@@ -1,4 +1,5 @@
 import { createDatabaseDefinitions, project } from "./database";
+import { createProviderDatabaseDefinitions } from "./database-skins";
 import type { Connection, Design, PlacedInstance } from "./design";
 import { instanceFootprint, layoutDesign } from "./layout";
 import type { Layout, PlacedCluster } from "./layout";
@@ -905,7 +906,13 @@ export class SystemScene {
   constructor(private readonly svg: SVGSVGElement) {
     this.grid.classList.add("space-grid");
     // Defs first, grid behind content; painter order is the only depth system.
-    svg.append(createDatabaseDefinitions(), this.grid, this.content);
+    // Provider cabinets merge into the same <defs> because the raster cache
+    // resolves `<use>` references from the scene's single definitions node.
+    const databaseDefs = createDatabaseDefinitions();
+    databaseDefs.append(
+      ...Array.from(createProviderDatabaseDefinitions().childNodes),
+    );
+    svg.append(databaseDefs, this.grid, this.content);
     this.componentRaster = new ComponentRasterCache(svg);
     new ResizeObserver(() => this.resize()).observe(svg);
 

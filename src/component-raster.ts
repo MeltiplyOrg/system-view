@@ -85,10 +85,10 @@ const PALETTE_PROPERTIES = [
  * keeps its vectors instead of guessing a coordinate system.
  */
 const RACK_FALLBACK_BOUNDS: Bounds = {
-  x: -84,
-  y: -200,
-  width: 320,
-  height: 386,
+  x: -140,
+  y: -260,
+  width: 560,
+  height: 520,
 };
 
 const RENDERER_TYPES = [

@@ -1,7 +1,7 @@
 import { expect, test } from "@playwright/test";
 
 /** Database provider skins must be pickable and carry exactly one object mark. */
-test("database providers print one exact mark and their accent", async ({
+test("database providers render distinct cabinets with one exact mark", async ({
   page,
 }) => {
   await page.goto("/");
@@ -48,6 +48,12 @@ test("database providers print one exact mark and their accent", async ({
       return {
         selected: select.value,
         provider: rack?.dataset.rendererProvider,
+        rear: rack
+          ?.querySelector(".component-static-base use")
+          ?.getAttribute("href"),
+        front: rack
+          ?.querySelector(".component-static-overlay use")
+          ?.getAttribute("href"),
         accent: rack
           ? getComputedStyle(rack).getPropertyValue("--cable-color").trim()
           : null,
@@ -60,6 +66,8 @@ test("database providers print one exact mark and their accent", async ({
     expect(state).toEqual({
       selected: id,
       provider: id,
+      rear: `#db-${id}-rear`,
+      front: `#db-${id}-front`,
       accent: color,
       badges: 1,
       plates: 1,

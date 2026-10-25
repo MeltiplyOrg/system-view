@@ -23,7 +23,8 @@
   --pulse: #fff4df;
   --accent: #ffac6b;
   --cluster-hover: #facc15;
-  --brand-plate: #eef2f4;
+  --brand-plate: #0f171c;
+  --brand-mark: #f2f6f7;
 }
 /*
  * Default follows the operating system. An explicit data-theme attribute set
@@ -257,6 +258,7 @@ a {
   display: block;
   width: 100%;
   height: 100%;
+  fill: var(--brand-mark);
 }
 .callout-kind {
   color: var(--muted);
@@ -852,6 +854,9 @@ aside.detail.open {
   stroke-width: 0.7;
   vector-effect: non-scaling-stroke;
 }
+.rack-provider-badge svg {
+  fill: var(--brand-mark);
+}
 .rack-accent-line {
   fill: var(--cable-color);
   opacity: 0.8;
@@ -1338,7 +1343,12 @@ aside.detail.open {
   .redis-blink,
   .redis-packet,
   .redis-orbit,
-  .redis-core {
+  .redis-core,
+  .db-blink,
+  .db-scan,
+  .db-wave-pulse path,
+  .db-sqlite-pulse rect,
+  .db-mongo-pulse {
     animation: none;
   }
   .redis-packet {
@@ -1391,5 +1401,190 @@ aside.detail.open {
   }
   textarea {
     height: 230px;
+  }
+}
+
+/* --- provider database cabinets --- */
+/*
+ * The four database provider skins share the isometric helpers but not the
+ * chassis: PostgreSQL is an arched archive tower, MySQL a wave cabinet with a
+ * dorsal fin, SQLite a low file tray, and MongoDB a shard-blade enclosure.
+ * These classes carry the signature materials those shapes need on top of the
+ * shared `.face` palette.
+ */
+.db-pg-rail,
+.db-pg-spine,
+.db-mongo-rail,
+.db-mongo-bus {
+  fill: none;
+  stroke: var(--cable-color);
+  stroke-width: 1.2;
+  vector-effect: non-scaling-stroke;
+}
+.db-pg-rail {
+  fill: var(--cable-color);
+  stroke: none;
+  opacity: 0.72;
+}
+.db-pg-spine {
+  fill: color-mix(in srgb, var(--cable-color) 78%, var(--body));
+  stroke: color-mix(in srgb, var(--cable-color) 42%, var(--line));
+  stroke-width: 0.6;
+}
+.db-pg-fascia {
+  fill: color-mix(in srgb, var(--deck) 82%, var(--cable-color));
+  stroke: color-mix(in srgb, var(--cable-color) 48%, var(--line));
+}
+.db-pg-glass {
+  fill: color-mix(in srgb, var(--cable-color) 8%, transparent);
+  stroke: var(--line);
+}
+.db-pg-pane {
+  fill: color-mix(in srgb, var(--cable-color) 6%, transparent);
+  stroke: color-mix(in srgb, var(--cable-color) 30%, var(--line));
+}
+.db-scan-line {
+  fill: var(--cable-color);
+  opacity: 0.9;
+}
+.db-scan {
+  animation: db-scan 3.6s cubic-bezier(0.4, 0, 0.2, 1) infinite;
+}
+@keyframes db-scan {
+  0%,
+  8% {
+    transform: translateY(0);
+    opacity: 0;
+  }
+  18% {
+    opacity: 0.8;
+  }
+  82% {
+    opacity: 0.8;
+  }
+  100% {
+    transform: translateY(110px);
+    opacity: 0;
+  }
+}
+
+.db-mysql-fin {
+  fill: color-mix(in srgb, var(--cable-color) 74%, var(--body));
+  stroke: color-mix(in srgb, var(--cable-color) 45%, var(--line));
+}
+.db-mysql-stripe {
+  fill: #f29111;
+  stroke: none;
+}
+.db-mysql-wave {
+  fill: none;
+  stroke: color-mix(in srgb, var(--cable-color) 52%, var(--detail));
+  stroke-width: 0.9;
+  vector-effect: non-scaling-stroke;
+}
+.db-wave-pulse path {
+  fill: none;
+  stroke: #f29111;
+  stroke-width: 1.4;
+  stroke-dasharray: 14 86;
+  vector-effect: non-scaling-stroke;
+  animation: db-dash 2.8s linear infinite;
+}
+@keyframes db-dash {
+  to {
+    stroke-dashoffset: -100;
+  }
+}
+
+.db-sqlite-slot {
+  fill: var(--recess);
+  stroke: var(--detail);
+  stroke-width: 0.7;
+  vector-effect: non-scaling-stroke;
+}
+.db-sqlite-screen {
+  fill: color-mix(in srgb, var(--recess) 90%, var(--cable-color));
+  stroke: var(--line);
+  stroke-width: 0.6;
+  vector-effect: non-scaling-stroke;
+}
+.db-sqlite-card {
+  fill: color-mix(in srgb, var(--deck) 88%, var(--cable-color));
+  stroke: color-mix(in srgb, var(--cable-color) 28%, var(--line));
+  stroke-width: 0.6;
+  vector-effect: non-scaling-stroke;
+}
+.db-sqlite-bezel {
+  fill: var(--cable-color);
+  opacity: 0.65;
+}
+.db-sqlite-pulse rect {
+  fill: var(--cable-color);
+  animation: db-sqlite-scan 2.6s ease-in-out infinite;
+}
+@keyframes db-sqlite-scan {
+  0%,
+  10% {
+    transform: translateX(0);
+    opacity: 0;
+  }
+  25% {
+    opacity: 0.95;
+  }
+  80% {
+    opacity: 0.95;
+  }
+  100% {
+    transform: translateX(112px);
+    opacity: 0;
+  }
+}
+
+.db-mongo-blade {
+  fill: color-mix(in srgb, var(--deck) 86%, var(--cable-color));
+  stroke: color-mix(in srgb, var(--cable-color) 28%, var(--line));
+  stroke-width: 0.65;
+  vector-effect: non-scaling-stroke;
+}
+.db-mongo-bus {
+  stroke-width: 1.6;
+  opacity: 0.8;
+}
+.db-mongo-doc {
+  fill: color-mix(in srgb, var(--deck) 80%, var(--cable-color));
+  stroke: color-mix(in srgb, var(--cable-color) 35%, var(--line));
+  stroke-width: 0.6;
+  vector-effect: non-scaling-stroke;
+}
+.db-mongo-bezel {
+  fill: var(--cable-color);
+  opacity: 0.7;
+}
+.db-mongo-pulse {
+  animation: db-blink 2.4s ease-in-out infinite;
+}
+.db-blink {
+  animation: db-blink 2.8s ease-in-out infinite;
+  animation-delay: var(--delay, 0s);
+}
+@keyframes db-blink {
+  0%,
+  100% {
+    opacity: 0.2;
+  }
+  12% {
+    opacity: 1;
+  }
+  24% {
+    opacity: 0.28;
+  }
+  38% {
+    opacity: 0.9;
+  }
+  58% {
+    opacity: 0.22;
+  }
+  78% {
+    opacity: 0.65;
   }
 }
