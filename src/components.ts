@@ -5,7 +5,7 @@ import {
   project,
 } from "./database";
 import type { PlacedInstance } from "./design";
-import { findProvider } from "./providers";
+import { REDIS_LOGO_ART, findProvider } from "./providers";
 
 const NS = "http://www.w3.org/2000/svg";
 
@@ -459,51 +459,186 @@ function cacheGeometry(): string {
 /**
  * Provider variant of the cache artwork.
  *
- * Redis is a square cabinet with three stacked drawer rows, so it reads as a
- * compact appliance rather than the default cache's wide three-bank stack.
- * The narrower footprint sits on its own plinth, and the instance label moves
- * to that strip. Height is provider-specific so camera fitting follows the
- * taller silhouette.
+ * Redis is a square, upright memory appliance: a cartridge sled stack behind
+ * a red anodized spine, a cooling deck, and a plinth that carries the instance
+ * label. It keeps the cache renderer's three-bank memory language while
+ * reading as a product cabinet rather than the default wide rack. Height is
+ * provider-specific so camera fitting follows the taller silhouette.
  */
-const REDIS_CACHE_HEIGHT = 149;
+const REDIS_CACHE_HEIGHT = 171;
+
+/** Front face top edge; sleds and I/O are laid out downward from here. */
+const REDIS_FRONT_TOP = 166;
+
+/** Drawer tops in face-local units: three 35-unit sleds with 3-unit gaps. */
+const REDIS_SLED_TOPS = [24, 62, 100] as const;
+
+/** Aspect ratio of the official 256 × 220 mark, used to size printed badges. */
+const REDIS_LOGO_RATIO = 256 / 220;
+
+/**
+ * The exact upstream Redis mark, nested so `viewBox` scales it onto a face.
+ *
+ * Never substitute a redrawn approximation here: only the official artwork
+ * carries the product identity, and its brand fills stay untouched by theme
+ * variables. The raster cache snapshots it with the rest of the static face.
+ *
+ * @param x - Face-local left edge.
+ * @param y - Face-local top edge.
+ * @param width - Printed width in face-local units.
+ */
+function redisBadge(x: number, y: number, width: number): string {
+  return `<svg x="${x}" y="${y}" width="${width}" height="${(width / REDIS_LOGO_RATIO).toFixed(2)}" viewBox="0 0 256 220" preserveAspectRatio="xMidYMid meet" aria-hidden="true">${REDIS_LOGO_ART}</svg>`;
+}
 
 /** Redis cache artwork in face-local units. */
 function redisCacheGeometry(): string {
-  let svg = box(-80, -75, 7, 160, 150, 12, 3);
-  svg += `<g transform="${frontFace(-80, 75, 19)}">
-    <rect class="face recess" x="7" y="3" width="146" height="9" rx="1"/>
-    <path class="led" d="${circle(142, 7.5, 1.5)}"/>
+  let svg = box(-80, -80, 7, 160, 160, 9, 4);
+  // Plinth fascia: the instance label shares this strip with the power LED.
+  svg += `<g transform="${frontFace(-80, 80, 16)}">
+    <rect class="redis-edge" x="8" y="1" width="144" height="0.8" rx="0.4"/>
+    <path class="detail" d="M8 2.6H152"/>
+    <path class="detail" d="${circle(8, 5, 0.9)}${circle(152, 5, 0.9)}"/>
+    <rect class="led" x="147.5" y="3.4" width="5" height="1.3" rx="0.65"/>
   </g>`;
-  // One cabinet carries the whole stack so the three drawer seams read as
-  // rows of the same appliance. A 140 × 130 front is deliberately square.
-  svg += box(-70, -65, 19, 140, 130, 130, 3);
-  svg += `<g transform="${frontFace(-70, 65, REDIS_CACHE_HEIGHT)}">
-    ${[0, 1, 2]
-      .map((row) => {
-        const top = 2 + row * 43,
-          middle = top + 19;
-        return `<rect class="face recess" x="6" y="${top}" width="128" height="40" rx="1.5"/>
-      <path class="detail" d="M12 ${top + 8}H52"/>
-      <path class="led" d="${circle(61, middle, 1.3)}"/>
-      <path class="drawer-pull" d="M104 ${middle}h34"/>`;
-      })
-      .join("")}
+  svg += box(-76, -74, 16, 152, 148, 150, 4);
+
+  // Front: brand bar, three cartridge sleds, and the service I/O strip. The
+  // recessed surround keeps the pale provider tint from washing out detail.
+  let front = `<rect class="face recess" x="4" y="5" width="144" height="142" rx="3"/>
+    <rect class="face" x="8" y="7" width="136" height="14" rx="2"/>
+    ${redisBadge(11, 7.8, 15)}
+    <text class="label redis-wordmark" x="31" y="17" font-size="7">REDIS</text>
+    <text class="label" x="69" y="16.2" font-size="3.1">IN-MEMORY CACHE</text>
+    <path class="led" d="${circle(130, 14, 1.2)}${circle(135.5, 14, 1.2)}${circle(141, 14, 1.2)}"/>`;
+
+  for (const [row, top] of REDIS_SLED_TOPS.entries()) {
+    // Ten gauge bars read as live keyspace activity; the middle sled carries
+    // the provider accent so the stack does not look mechanically repeated.
+    let gauge = "";
+    for (const [index, height] of [4, 7, 10, 6, 9, 5, 8, 10, 7, 3].entries())
+      gauge += `M${fixed(14 + index * 3.4)} ${top + 29}v-${height}`;
+    front += `<g>
+      <rect class="face recess" x="8" y="${top}" width="136" height="35" rx="2"/>
+      <rect class="redis-sled" x="10" y="${top + 2}" width="132" height="31" rx="1.5"/>
+      <rect class="redis-edge" x="10" y="${top + 2}" width="132" height="1" rx="0.5"/>
+      <text class="label" x="14" y="${top + 10}" font-size="3.6">SHARD 0${row + 1}</text>
+      <text class="label" x="14" y="${top + 14.6}" font-size="2.6">IN-MEMORY</text>
+      <path class="redis-gauge${row === 1 ? " redis-gauge-hot" : ""}" d="${gauge}"/>
+      <path class="led" d="${circle(62, top + 9.5, 1.1)}${circle(67, top + 9.5, 1.1)}"/>
+      <path class="detail" d="${slits(76, 96, 5, top + 7, top + 28)}"/>
+      <text class="label" x="75" y="${top + 32.4}" font-size="2.5">KEYS</text>
+      <rect class="redis-handle" x="108" y="${top + 11}" width="26" height="7" rx="3.5"/>
+      <path class="redis-handle-line" d="M113 ${top + 14.5}H129"/>
+      <path class="detail" d="${circle(140, top + 9, 1.1)}"/>
+      <path class="led" d="${circle(140, top + 17, 1.1)}"/>
+    </g>`;
+  }
+
+  front += `<rect class="face recess" x="8" y="138" width="136" height="10" rx="1.5"/>
+    <rect class="port" x="13" y="140" width="10" height="6" rx="0.7"/>
+    <rect class="port" x="26" y="140" width="10" height="6" rx="0.7"/>
+    <rect class="port" x="41" y="140.5" width="7" height="5" rx="0.6"/>
+    <path class="detail" d="M54 142.4h9"/>
+    <text class="label" x="67" y="146" font-size="3">SYNC / CONSOLE</text>
+    <path class="detail" d="${circle(131, 143, 1.2)}"/>
+    <text class="label" x="126" y="146" font-size="2.7">RST</text>
+    <path class="led" d="${circle(142, 143, 1.4)}"/>`;
+  svg += `<g transform="${frontFace(-76, 74, REDIS_FRONT_TOP)}">${front}</g>`;
+
+  // Narrow end: exhaust grille, service ports, and a full-height accent spine.
+  svg += `<g transform="${endFace(76, 74, REDIS_FRONT_TOP)}">
+    <rect class="face recess" x="8" y="7" width="92" height="84" rx="2"/>
+    <path class="detail" d="${rows(14, 82, 4.5, 14, 94)}"/>
+    <text class="label" x="14" y="129" font-size="3">EXHAUST</text>
+    <rect class="redis-spine" x="106" y="7" width="7" height="133" rx="3.5"/>
+    <path class="detail" d="${circle(109.5, 12, 1)}${circle(109.5, 135, 1)}"/>
+    <rect class="face recess" x="8" y="96" width="92" height="40" rx="2"/>
+    <rect class="port" x="14" y="102" width="13" height="8" rx="0.8"/>
+    <rect class="port" x="31" y="102" width="13" height="8" rx="0.8"/>
+    <text class="label" x="14" y="120" font-size="3">SERVICE</text>
+    <path class="led" d="${circle(88, 106, 1.5)}"/>
+    <text class="label" x="83" y="120" font-size="3">LINK</text>
+    <text class="label" x="118" y="70" font-size="3">CACHE</text>
   </g>`;
-  svg += `<g transform="${endFace(70, 65, REDIS_CACHE_HEIGHT)}">
-    <path class="detail" d="${slits(10, 118, 8, 8, 50)}"/>
-    <path class="led" d="${circle(112, 12, 1.4)}"/>
+
+  // Lid deck: dual cooling fans, four DIMM banks, and a status halo.
+  let dimms = "";
+  for (let index = 0; index < 4; index++) {
+    const x = 70 + index * 13;
+    dimms += `<rect class="redis-dimm" x="${x}" y="20" width="8" height="90" rx="1"/>
+      <path class="detail" d="M${x + 2} 26h4M${x + 2} 96h4"/>
+      <path class="led" d="${circle(x + 4, 24, 0.8)}"/>`;
+  }
+  svg += box(
+    -72,
+    -70,
+    REDIS_FRONT_TOP,
+    144,
+    140,
+    REDIS_CACHE_HEIGHT - REDIS_FRONT_TOP,
+    3,
+  );
+  svg += `<g transform="${frontFace(-72, 70, REDIS_CACHE_HEIGHT)}">
+    <rect class="redis-edge" x="6" y="0.8" width="132" height="1" rx="0.5"/>
   </g>`;
-  svg += `<g transform="${topFace(-70, -65, REDIS_CACHE_HEIGHT)}">
-    <rect class="face recess" x="8" y="8" width="124" height="114" rx="2"/>
-    <path class="detail" d="${rows(18, 108, 10, 18, 122)}"/>
-    <path class="led" d="${circle(16, 16, 1.4)}"/>
+  svg += `<g transform="${topFace(-72, -70, REDIS_CACHE_HEIGHT)}">
+    <rect class="face recess" x="4" y="4" width="136" height="132" rx="2"/>
+    <rect class="redis-bay" x="8" y="8" width="52" height="124" rx="1.5"/>
+    ${fan(34, 40, 15)}${fan(34, 98, 15)}
+    <text class="label" x="12" y="127" font-size="3">AIRFLOW</text>
+    <path class="detail" d="M65 10V130"/>
+    <text class="label" x="70" y="15" font-size="3.4">DIMM</text>
+    ${dimms}
+    <text class="label" x="70" y="131" font-size="2.8">IN-MEMORY</text>
+    <path class="detail" d="${circle(131, 34, 8)}${circle(131, 34, 5)}"/>
+    <path class="led" d="${circle(131, 34, 2)}"/>
+    <text class="label" x="123" y="50" font-size="2.6">SYNC</text>
+    <rect class="redis-spine" x="134" y="64" width="3" height="62" rx="1.5"/>
   </g>`;
   return svg;
 }
 
+/**
+ * Live Redis details, painted above the rasterized static artwork.
+ *
+ * Only small, compositor-friendly effects live here: staggered activity LEDs,
+ * key packets crossing each sled, and a status dash orbiting the top halo.
+ * The raster cache never snapshots this layer, so the animation stays live
+ * while static geometry is shared between replicas. Delays are negative so
+ * replicas do not blink in lockstep on first paint.
+ */
+function redisCacheMotion(): string {
+  let front = "";
+  for (const [row, top] of REDIS_SLED_TOPS.entries()) {
+    front += `<path class="led redis-blink" style="--delay:${(-row * 0.7).toFixed(1)}s" d="${circle(62, top + 9.5, 1.1)}${circle(67, top + 9.5, 1.1)}"/>
+      <g class="redis-packet" style="--delay:${(-row * 0.9).toFixed(1)}s"><rect x="14" y="${top + 23}" width="4" height="1.6" rx="0.8"/></g>`;
+  }
+  front += `<path class="led redis-blink" style="--delay:-1.3s" d="${circle(142, 143, 1.4)}"/>`;
+
+  return `<g transform="${frontFace(-76, 74, REDIS_FRONT_TOP)}">${front}</g>
+    <g transform="${endFace(76, 74, REDIS_FRONT_TOP)}">
+      <path class="led redis-blink" style="--delay:-0.4s" d="${circle(88, 106, 1.5)}"/>
+    </g>
+    <g transform="${topFace(-72, -70, REDIS_CACHE_HEIGHT)}">
+      <path class="redis-orbit" pathLength="100" d="${circle(131, 34, 8)}"/>
+      <path class="led redis-core" d="${circle(131, 34, 2)}"/>
+      <g class="redis-packet" style="--delay:-1.1s"><rect x="70" y="112" width="10" height="1.2" rx="0.6"/></g>
+    </g>`;
+}
+
 /** Height, artwork, and label placement registered for a provider/renderer pair. */
 interface ComponentVariant {
+  /** Static artwork; the raster cache may replace it with a shared image. */
   markup: string;
+  /**
+   * Optional live layer painted above the static artwork.
+   *
+   * CSS animations here survive rasterization because the raster cache only
+   * snapshots `.component-static-base`. Keep it limited to small compositor
+   * effects; the scene hides motion layers during camera navigation.
+   */
+  motion?: string;
   height: number;
   /** Overrides the default instance-label face for this skin. */
   labelTransform?: string;
@@ -528,13 +663,14 @@ const PROVIDER_VARIANTS: Readonly<
   redis: {
     cache: {
       markup: redisCacheGeometry(),
+      motion: redisCacheMotion(),
       height: REDIS_CACHE_HEIGHT,
-      labelTransform: frontFace(-80, 75, 19),
-      labelX: 12,
-      labelY: 7.8,
+      labelTransform: frontFace(-80, 80, 16),
+      labelX: 10,
+      labelY: 7.6,
       labelMaxChars: 34,
       labelTextLength: 140,
-      labelFontSize: 6.4,
+      labelFontSize: 6.2,
     },
   },
 };
@@ -674,7 +810,11 @@ export function createComponent(instance: PlacedInstance): SVGGElement {
   geometry.setAttribute("aria-hidden", "true");
   geometry.innerHTML = `<g class="component-static-base">${
     variant?.markup ?? COMPONENT_GEOMETRY[instance.type]
-  }</g>`;
+  }</g>${
+    variant?.motion
+      ? `<g class="component-motion" aria-hidden="true">${variant.motion}</g>`
+      : ""
+  }`;
   element.append(geometry);
 
   // Identity sits on the server's top rail, cache controller strip, or browser
