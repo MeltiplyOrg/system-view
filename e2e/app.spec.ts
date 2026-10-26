@@ -172,7 +172,6 @@ test.describe("minimal isometric canvas", () => {
     );
     await page.locator("#replica-increase").click();
     await page.locator("#replica-increase").click();
-    await expect(page.locator("#detail-kind")).toHaveText("Cluster");
     await expect(page.locator("#detail-count")).toHaveText("3");
     await expect(page.locator(".scene-instance")).toHaveCount(6);
     await expect(
@@ -222,19 +221,12 @@ test.describe("minimal isometric canvas", () => {
     await expect(tip.locator(".callout-name")).toHaveText("Database cluster");
     await expect(tip.locator(".callout-meta")).toHaveText("3 replicas");
 
-    // The leader starts at the pointer; the card is clear of it, above-right.
-    // Exact cosmetic offsets are not part of this interaction contract.
+    // The leader anchors to the pointer; placement may move around overlay controls.
     const anchorBox = await tip.evaluate((element) =>
       element.getBoundingClientRect().toJSON(),
     );
     expect(Math.abs(anchorBox.left - pointer.x)).toBeLessThan(1.5);
     expect(Math.abs(anchorBox.top - pointer.y)).toBeLessThan(1.5);
-
-    const cardBox = await card.evaluate((element) =>
-      element.getBoundingClientRect().toJSON(),
-    );
-    expect(cardBox.left).toBeGreaterThan(pointer.x);
-    expect(cardBox.bottom).toBeLessThan(pointer.y);
 
     // The anchor follows the pointer; the card may travel less at a viewport clamp.
     const movedPointer = { x: pointer.x + 20, y: pointer.y + 10 };
@@ -307,7 +299,6 @@ test.describe("minimal isometric canvas", () => {
     await page.mouse.move(point.x, point.y);
     const tip = page.locator("#callout");
     await expect(tip).toHaveClass(/visible/);
-    await expect(tip.locator(".callout-kind")).toHaveText("Instance");
     await expect(tip.locator(".callout-name")).toHaveText("Only Rack");
     await expect(tip.locator(".callout-meta")).toHaveText("db-only");
   });
@@ -516,7 +507,6 @@ test.describe("instance selection", () => {
     await page.mouse.click(point.x, point.y);
 
     await expect(page.locator("#detail")).toBeVisible();
-    await expect(page.locator("#detail-kind")).toHaveText("Instance");
     await expect(page.locator("#detail-title")).toHaveText(
       "Application database",
     );
@@ -607,7 +597,6 @@ test.describe("instance selection", () => {
         countsMatch,
         maximum,
         minimum: document.querySelector("#detail-count")!.textContent,
-        kind: document.querySelector("#detail-kind")!.textContent,
         removed: !replica.isConnected,
       };
     });
@@ -616,7 +605,6 @@ test.describe("instance selection", () => {
       countsMatch: true,
       maximum: "10",
       minimum: "1",
-      kind: "Instance",
       removed: true,
     });
   });

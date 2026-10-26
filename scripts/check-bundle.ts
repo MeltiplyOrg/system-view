@@ -13,21 +13,21 @@ import { gzipSync } from "node:zlib";
 /**
  * Maximum gzipped bytes per emitted asset type.
  *
- * The JS budget carries the self-contained provider artwork (the official
- * Redis mark plus the PostgreSQL, MySQL, SQLite, and MongoDB marks), the four
- * distinct database cabinet generators, and the part-level skin morph, so a
- * provider skin ships without a network request. Tighten the headroom when
- * provider assets move to a lazy-loaded chunk or when the design system stops
- * growing.
+ * The JS budget includes provider artwork, bounded assembly, factory building
+ * and the local request-flow interpreter/inspector. The complete visual
+ * simulator measures about 72 KiB JS gzip; 76 KiB leaves modest transfer
+ * headroom. Simulation never loads SDKs, codecs or per-request model copies.
+ * Pixel limits, encoder concurrency and animation limits are separate runtime
+ * invariants and do not increase with the transfer budget.
  */
 const budgets = {
-  ".js": 46 * 1024,
+  ".js": 76 * 1024,
   ".css": 10 * 1024,
   ".html": 2 * 1024,
 } as const;
 
 /** Maximum gzipped bytes for the whole build. */
-const totalBudget = 52 * 1024;
+const totalBudget = 86 * 1024;
 
 // Dist is flat today, but recursive discovery keeps the gate valid if assets
 // move into nested chunks. Unknown file types are intentionally ignored.

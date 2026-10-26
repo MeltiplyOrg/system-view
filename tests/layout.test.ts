@@ -284,7 +284,6 @@ describe("automatic layout", () => {
   test("infers types from ID prefixes and keeps unknown IDs renderable", () => {
     for (const id of ["db-01", "database.primary", "rack_main"])
       expect(inferInstanceType(id)).toBe("database-rack");
-    expect(inferInstanceType("worker-01")).toBe("database-rack");
     for (const id of ["cache-app", "CACHE.session", "cache_primary"])
       expect(inferInstanceType(id)).toBe("cache");
     for (const id of ["cdn-edge", "CDN.assets", "cdn_media"])

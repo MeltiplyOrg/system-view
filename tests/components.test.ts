@@ -5,6 +5,7 @@ import {
   createComponent,
 } from "../src/components";
 import type { PlacedInstance } from "../src/design";
+import { providersFor } from "../src/providers";
 
 const types: PlacedInstance["type"][] = [
   "database-rack",
@@ -12,6 +13,11 @@ const types: PlacedInstance["type"][] = [
   "webpage",
   "cache",
   "cdn",
+  "message-queue",
+  "object-storage",
+  "media-worker",
+  "branch",
+  "merge",
 ];
 
 /** Placed artwork input independent of the layout algorithm under test elsewhere. */
@@ -55,7 +61,9 @@ describe("component provider boundaries", () => {
           ? "redis"
           : type === "database-rack"
             ? "postgresql"
-            : undefined;
+            : type === "cdn"
+              ? "cloudflare"
+              : undefined;
       for (const skin of provider ? [undefined, provider] : [undefined]) {
         for (const name of [
           "API",
@@ -81,6 +89,18 @@ describe("component provider boundaries", () => {
         [undefined, "postgresql", "mysql", "sqlite", "mongodb"],
       ],
       ["cache", [undefined, "redis"]],
+      ["cdn", [undefined, ...providersFor("cdn").map(({ id }) => id)]],
+      [
+        "message-queue",
+        [undefined, ...providersFor("message-queue").map(({ id }) => id)],
+      ],
+      [
+        "object-storage",
+        [undefined, ...providersFor("object-storage").map(({ id }) => id)],
+      ],
+      ["media-worker", [undefined, "ffmpeg"]],
+      ["branch", [undefined]],
+      ["merge", [undefined]],
     ] as const) {
       for (const provider of providers) {
         const envelope = componentEnvelope(type, provider)!;
@@ -92,17 +112,11 @@ describe("component provider boundaries", () => {
         const node = createComponent(instance(type, "Named cabinet", provider));
         expect(node.querySelectorAll(".instance-label")).toHaveLength(1);
         if (provider)
-          expect(node.getAttribute("aria-label")).toContain(
-            provider === "postgresql"
-              ? "PostgreSQL"
-              : provider === "redis"
-                ? "Redis"
-                : provider === "mysql"
-                  ? "MySQL"
-                  : provider === "sqlite"
-                    ? "SQLite"
-                    : "MongoDB",
-          );
+          expect(
+            node
+              .querySelector("[data-renderer-provider]")
+              ?.getAttribute("data-renderer-provider"),
+          ).toBe(provider);
       }
     }
     expect(componentHeight("cache", "redis")).toBeGreaterThan(
@@ -110,5 +124,29 @@ describe("component provider boundaries", () => {
     );
     expect(componentEnvelope("compute-server")).toBeNull();
     expect(componentEnvelope("webpage")).toBeNull();
+  });
+
+  test("normalizes CDN provider input without leaking its artwork into other renderers", () => {
+    for (const { id } of providersFor("cdn")) {
+      const cdn = createComponent(
+        instance("cdn", "Edge content", ` ${id.toUpperCase()} `),
+      );
+      expect(
+        cdn
+          .querySelector("[data-renderer-provider]")
+          ?.getAttribute("data-renderer-provider"),
+      ).toBe(id);
+      expect(cdn.querySelectorAll(".cdn-provider-badge svg")).toHaveLength(1);
+      expect(cdn.querySelectorAll(".brand-plate")).toHaveLength(1);
+      for (const type of types.filter((type) => type !== "cdn")) {
+        const unsupported = createComponent(
+          instance(type, "Unchanged service", id),
+        );
+        expect(unsupported.querySelector(".provider-skin")).toBeNull();
+        expect(unsupported.querySelector(".cdn-provider-badge")).toBeNull();
+        expect(componentHeight(type, id)).toBe(componentHeight(type));
+        expect(componentEnvelope(type, id)).toEqual(componentEnvelope(type));
+      }
+    }
   });
 });

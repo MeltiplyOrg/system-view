@@ -41,21 +41,21 @@ describe("replica resizing", () => {
       JSON.stringify({
         version: 1,
         name: "Resize",
-        instances: ["db-a", "db-b", "web-a", "cache-a", "cache-b"],
+        instances: ["db-a", "db-b", "compute-a", "cache-a", "cache-b"],
         clusters: [
           { instances: ["db-a", "db-b"] },
           { instances: ["cache-a", "cache-b"] },
         ],
         connections: [
-          { from: "web-a", to: "db-b", relation: "SQL" },
-          { from: "web-a", to: "db-a", relation: "SQL" },
+          { from: "compute-a", to: "db-b", relation: "SQL" },
+          { from: "compute-a", to: "db-a", relation: "SQL" },
           { from: "db-a", to: "db-b" },
         ],
       }),
     );
     const result = resizeReplicas(original, "db-b", 1);
     expect(result.connections).toEqual([
-      { from: "web-a", to: "db-a", relation: "SQL" },
+      { from: "compute-a", to: "db-a", relation: "SQL" },
     ]);
     expect(result.clusters[0].id).toBe("cluster-2");
     expect(parseDesign(JSON.stringify(result))).toEqual(result);
@@ -80,15 +80,15 @@ describe("replica resizing", () => {
       JSON.stringify({
         version: 1,
         name: "Shrink",
-        instances: ["db-a", "db-b", "db-c", "web-a"],
+        instances: ["db-a", "db-b", "db-c", "compute-a"],
         clusters: [{ id: "databases", instances: ["db-a", "db-b", "db-c"] }],
-        connections: [{ from: "db-c", to: "web-a", relation: "results" }],
+        connections: [{ from: "db-c", to: "compute-a", relation: "results" }],
       }),
     );
     const resized = resizeReplicas(original, "db-b", 2);
     expect(resized.clusters[0].instances).toEqual(["db-a", "db-b"]);
     expect(resized.connections).toEqual([
-      { from: "db-a", to: "web-a", relation: "results" },
+      { from: "db-a", to: "compute-a", relation: "results" },
     ]);
     expect(original.clusters[0].instances).toEqual(["db-a", "db-b", "db-c"]);
     expect(resizeReplicas(resized, "db-b", 2)).toEqual(resized);
@@ -123,5 +123,44 @@ describe("replica resizing", () => {
       "Unknown instance",
     );
     expect(original).toEqual(webAppExample);
+  });
+
+  test("anchors new replicas beside a manual site instead of copying its exact placement", () => {
+    const original = {
+      ...structuredClone(webAppExample),
+      connections: [],
+      clusters: [],
+      instances: [{ id: "compute-machine", placement: { x: -640, y: 360 } }],
+    };
+    const expanded = resizeReplicas(original, "compute-machine", 3);
+    const sites = layoutDesign(expanded).instances.map(
+      ({ position }) => position,
+    );
+    expect(sites[0]).toEqual({ x: -640, y: 360, z: 0 });
+    expect(new Set(sites.map(({ x, y }) => `${x},${y}`)).size).toBe(3);
+    expect(sites.every(({ x }) => x === -640)).toBe(true);
+    expect(sites[1].y).toBeGreaterThan(sites[0].y);
+    expect(sites[2].y).toBeGreaterThan(sites[1].y);
+    expect(parseDesign(JSON.stringify(expanded))).toEqual(expanded);
+    const collapsed = resizeReplicas(expanded, "compute-machine", 1);
+    expect(collapsed.instances.map(({ id }) => id)).toEqual([
+      "compute-machine",
+    ]);
+    expect(collapsed.instances[0].placement).toEqual(
+      original.instances[0].placement,
+    );
+  });
+
+  test("cannot bypass the shared component limit by adding replicas", () => {
+    const full = {
+      ...structuredClone(webAppExample),
+      connections: [],
+      clusters: [],
+      instances: Array.from({ length: 64 }, (_, index) => ({
+        id: `compute-${index}`,
+      })),
+    };
+    expect(() => resizeReplicas(full, "compute-0", 2)).toThrow("64");
+    expect(full.instances).toHaveLength(64);
   });
 });

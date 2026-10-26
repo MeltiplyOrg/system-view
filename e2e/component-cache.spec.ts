@@ -12,7 +12,7 @@ test("all node types share cached geometry across designs while keeping live ide
     const groups = prefixes.map((prefix) =>
       Array.from({ length: 3 }, (_, index) => ({
         id: `${prefix}-${generation}-${index}`,
-        label: `${prefix} generation ${generation} replica ${index}`,
+        label: `${prefix} generation ${generation} instance ${index}`,
         description: `Description for ${prefix} ${generation} ${index}`,
       })),
     );
@@ -20,13 +20,22 @@ test("all node types share cached geometry across designs while keeping live ide
       version: 1,
       name: `Mixed generation ${generation}`,
       instances: groups.flat(),
-      clusters: groups.map((instances, index) => ({
-        id: `group-${index}`,
-        instances: instances.map(({ id }) => id),
-      })),
-      connections: groups.slice(1).map((instances, index) => ({
-        from: groups[index][0].id,
-        to: instances[0].id,
+      clusters: groups
+        .filter(
+          (_, index) => prefixes[index] !== "web" && prefixes[index] !== "cdn",
+        )
+        .map((instances, index) => ({
+          id: `group-${index}`,
+          instances: instances.map(({ id }) => id),
+        })),
+      connections: [
+        ["web", "compute"],
+        ["compute", "cache"],
+        ["cache", "db"],
+        ["web", "cdn"],
+      ].map(([from, to]) => ({
+        from: `${from}-${generation}-0`,
+        to: `${to}-${generation}-0`,
         relation: "request",
       })),
     };
@@ -136,7 +145,6 @@ test("non-database nodes remain visible and selectable when raster decoding fail
     }, type);
     expect(point).not.toBeNull();
     await page.mouse.click(point!.x, point!.y);
-    await expect(page.locator("#detail-kind")).toHaveText("Instance");
     await expect(page.locator("#callout .callout-description")).toBeVisible();
     await page.keyboard.press("Escape");
     await page.getByRole("button", { name: "Design", exact: true }).click();

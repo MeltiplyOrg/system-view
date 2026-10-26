@@ -25,22 +25,30 @@ this guide adds the app's mechanics.
 
 ## Ownership map
 
-| Surface                                           | Owner                            | Collaborators                                                          |
-| ------------------------------------------------- | -------------------------------- | ---------------------------------------------------------------------- |
-| Document shape, validation, examples              | `src/design.ts`                  | `src/main.ts` editor; `src/layout.ts` inputs                           |
-| Placement, color, cluster bounds                  | `src/layout.ts`                  | `src/platform.ts`, `src/scene.ts`, `src/routing.ts`                    |
-| Provider catalog, accent, footprint, mark         | `src/providers.ts`               | `src/components.ts`, `src/database.ts`, `src/style.css`, `src/main.ts` |
-| Renderer artwork, height, label placement, motion | `src/components.ts`              | `src/style.css`, `src/component-raster.ts`                             |
-| Database rack geometry and shared `<defs>`        | `src/database.ts`                | `src/components.ts` wrapper                                            |
-| Provider database cabinets                        | `src/database-skins.ts`          | `src/database.ts`, `src/providers.ts`, `src/style.css`                 |
-| Platform union and rendering                      | `src/platform.ts`                | `src/layout.ts` footprints                                             |
-| Canvas render pass, camera, selection             | `src/scene.ts`                   | `src/components.ts`, `src/component-raster.ts`, `src/main.ts` overlays |
-| Raster cache and shared images                    | `src/component-raster.ts`        | `src/scene.ts`, `src/style.css` palettes                               |
-| Mechanical provider changes                       | `src/transformer-transitions.ts` | `src/transformer.ts` rig; renderer envelope metadata; raster leases    |
-| Layer partition and assembly timing               | `src/assembly.ts`                | `src/transformer.ts`; pure ordering/travel regression tests            |
-| Shell, editor, callout, detail, theme             | `src/main.ts`                    | `index.html`, `src/style.css`                                          |
-| Replica document mutation                         | `src/replicas.ts`                | `src/layout.ts`, `src/main.ts` stepper                                 |
-| Orthogonal cable routing                          | `src/routing.ts`                 | `src/scene.ts` obstacles and ports                                     |
+| Surface                                           | Owner                            | Collaborators                                                                |
+| ------------------------------------------------- | -------------------------------- | ---------------------------------------------------------------------------- |
+| Document shape, validation, examples              | `src/design.ts`                  | `src/main.ts` editor; `src/layout.ts` inputs                                 |
+| Placement, color, cluster bounds                  | `src/layout.ts`                  | `src/platform.ts`, `src/scene.ts`, `src/routing.ts`                          |
+| Provider catalog, accent, footprint, mark         | `src/providers.ts`               | `src/components.ts`, `src/database.ts`, `src/style.css`, `src/main.ts`       |
+| Renderer artwork, height, label placement, motion | `src/components.ts`              | `src/style.css`, `src/component-raster.ts`                                   |
+| Database rack geometry and shared `<defs>`        | `src/database.ts`                | `src/components.ts` wrapper                                                  |
+| Provider database cabinets                        | `src/database-skins.ts`          | `src/database.ts`, `src/providers.ts`, `src/style.css`                       |
+| CDN provider appliances                           | `src/cdn-skins.ts`               | `src/component-geometry.ts`, `src/providers.ts`, `src/cdn-provider-marks.ts` |
+| Platform union and rendering                      | `src/platform.ts`                | `src/layout.ts` footprints                                                   |
+| Canvas render pass, camera, selection             | `src/scene.ts`                   | `src/components.ts`, `src/component-raster.ts`, `src/main.ts` overlays       |
+| Raster cache and shared images                    | `src/component-raster.ts`        | `src/scene.ts`, `src/style.css` palettes                                     |
+| Mechanical provider changes                       | `src/transformer-transitions.ts` | `src/transformer.ts` rig; renderer envelope metadata; raster leases          |
+| Layer partition and assembly timing               | `src/assembly.ts`                | `src/transformer.ts`; pure ordering/travel regression tests                  |
+| Shell, editor, callout, detail, theme             | `src/main.ts`                    | `index.html`, `src/style.css`                                                |
+| Replica document mutation                         | `src/replicas.ts`                | `src/layout.ts`, `src/main.ts` stepper                                       |
+| Construction catalogue and graph mutations        | `src/construction.ts`            | `src/design.ts`, `src/layout.ts`, `src/providers.ts`                         |
+| Factory drawer and pointer/keyboard tool state    | `src/world-builder.ts`           | `src/main.ts` commits; `src/scene.ts` preview and ground projection          |
+| Typed connections and replication capabilities    | `src/component-rules.ts`         | `src/design.ts`, `src/construction.ts`, `src/replicas.ts`, builder/inspector |
+| Queue/storage/worker and workflow models          | `src/media-models.ts`            | `src/media-provider-marks.ts`, `src/components.ts`, `src/providers.ts`       |
+| Deterministic request execution                   | `src/flow-simulation.ts`         | validated `Design`; no DOM, timers, SDKs or external services                |
+| Request controls, trace and input/output viewer   | `src/flow-panel.ts`              | `src/main.ts`, existing cached scene nodes and cables                        |
+| Node conditions, merge mode and simulated latency | `src/flow-node-editor.ts`        | parser-backed document commits; `src/main.ts` inspector                      |
+| Orthogonal cable routing                          | `src/routing.ts`                 | `src/scene.ts` obstacles and ports                                           |
 
 ## Render pass
 
@@ -69,28 +77,131 @@ One pass explains where most edits belong:
 ### Document and layout
 
 - `Design` is the portable source of truth: `version: 1`, instances, links,
-  clusters. Presentation intent lives here; positions, colors, footprints, and
-  measured pixels are derived at render time.
+  clusters. Explicit `placement: {x, y}` is user-authored build intent.
+  Omitted positions, colors, footprints, and measured pixels are derived.
 - IDs select the renderer by leading word: `db`/`database`/`rack` → database,
   `compute`/`server`/`api` → compute, `web`/`webpage`/`frontend` → webpage,
-  `cache` → cache, `cdn` → content delivery edge, unknown → database fallback.
-- `layoutDesign` is deterministic from the document alone. Replica pitch is
-  the cluster's largest footprint plus a fixed air gap; group packing uses real
-  content edges. A provider footprint change moves platforms, borders, ports,
-  and camera fit together.
-- `resizeReplicas` is the mutation boundary for replica membership: 1–10
-  members, the first member stays the stable endpoint, and links on removed
-  replicas move to it. Layout reads the document and returns placed instances.
+  `cache` → cache, `cdn` → delivery edge, `queue`/`broker` → message queue,
+  `storage`/`bucket` → object storage, `worker`/`encoder` → media worker,
+  `branch`/`condition` → If/Else, `merge`/`join` → Merge; unknown → database.
+- `layoutDesign` is deterministic from the document alone. Explicit sites
+  override automatic slots; a pinned first replica anchors the default slots
+  of newly added members. Existing explicit sites never silently repack.
+  Automatic replica pitch follows the largest footprint plus a fixed air gap.
+- `resizeReplicas` owns replica membership: 1–10 members within the shared
+  64-component limit. New replicas inherit presentation, not the primary's
+  exact site. Removed members' external links move to the first member.
+  Only API/compute and worker machines scale as instances; databases and caches
+  support replicas, except SQLite. Clients, CDNs, logical queues/buckets, and
+  workflow controls are not machine replicas. Groups require the same type
+  and provider; imports and mutations enforce this, not only the inspector.
 - `parseDesign` owns limits and reference checks. Add a field there before
   teaching the renderer or editor about it.
 
+### Factory construction
+
+- `WorldBuilder` owns the collapsible bottom drawer, side category list and
+  Select/Place/Wire/Remove tools. Its catalogue derives provider skins from the
+  existing registry. Small catalogue glyphs are not copies of detailed models.
+- Drag a card to clear ground, or tap/click a card then tap/click the world.
+  Keyboard activation seeds a preview; arrows move it and Enter places it.
+  Escape, capture cancellation, blur, and backgrounding remove the preview.
+  Dropping onto another UI surface adds nothing. New world confirms before
+  clearing a populated document.
+- Placement snaps to a 40-unit grid, using actual provider footprints with
+  clearance. `placeComponent` rejects occupied sites, not just its UI caller.
+  `parseDesign` validates finite ground coordinates within ±100,000 world
+  units. The existing 64-component and 256-wire limits also apply to building.
+- Before graph edits, `pinWorld` captures actual sites, including pending
+  legacy anchor offsets. `main.ts` commits the immutable document, clears
+  transient offsets, and renders in place. Adding, wiring, and removing never
+  refit the camera or repack neighbours. JSON import/export retain placements.
+- Completed anchor moves persist the whole group's sites. A cancelled anchor
+  gesture restores its prior offset; applying another document cancels capture.
+  A no-movement handle click does not rewrite the document.
+- Wiring is directed source → destination, by drag, two clicks, or the native
+  endpoint form. `component-rules.ts` owns compatible types and output ports;
+  imports and construction use those same rules. Invalid destinations are
+  disabled in the form and their world footprints are dimmed. Queue outputs
+  deliver to workers; a browser cannot wire directly to a database.
+- Branches require an explicit `true`/`false` outlet. Other nodes use `out`
+  (omitted by default). Construction rejects duplicate source/destination/port
+  triples. Distinct ports may reach the same target; parallel imported links
+  to the same target need explicit IDs. `relation` is annotation, not code.
+  The rubber band is lightweight and orthogonal; committed wires use the
+  existing obstacle-aware router and frame ports.
+- Remove deletes only the selected component and incident connections, updates
+  its affected group, and dissolves that group if fewer than two members
+  remain. Unrelated groups, including valid singleton groups, are unchanged.
+- The scene owns one construction overlay. Its real-model ghost reuses the
+  ordinary raster cache, removes decorative activity, and moves only a parent
+  transform. Wire preview uses one path. Pointer updates coalesce into one
+  animation frame; there is no idle loop, separate encoder or raised cache
+  budget. Empty worlds start at a useful multi-machine construction scale.
+- Opening construction freezes any inspector camera spring. Opening Design
+  cancels construction and collapses its drawer; controls remain keyboard
+  reachable, and collapsed content leaves the tab order.
+
+### Visual request workflows
+
+- This is a local system-design sandbox, not an integration platform. Provider
+  skins never connect to external apps. No real uploads, transcoding, queues,
+  databases or cloud APIs run. Timings and service output fields are illustrative,
+  not vendor benchmarks or SLAs. RabbitMQ, Amazon SQS and NATS JetStream share
+  the simulated FIFO/competing-consumer behavior; S3/R2 and FFmpeg are visual models.
+- Open **Simulate** to inject JSON at an entry node. **Run request**, **Burst ×10**,
+  **Pause/Resume**, **Step 0.5s** and speed controls operate the same interpreter.
+  The media-app example is editable topology: video/image routing, parallel
+  original/processing branches, a queue/worker bottleneck, synchronized publication,
+  and playback with explicit hit/miss branching. It is not a scripted animation.
+- Ordinary outputs fan out across every connected wire. Each branch gets an
+  immutable input snapshot; node results are inspectable in the selected request's
+  trace. **Locate node** moves the camera to the chosen step without executing it.
+  A run completes only after every reachable branch finishes.
+- `condition: {field, operator, value}` applies only to If/Else nodes. Dot paths
+  read own JSON properties; supported operators are `equals`, `not-equals`,
+  `greater-than` and `contains`. Values are JSON scalars. No expressions/scripts
+  are evaluated. The inspector edits conditions through the validated document.
+- Merge nodes persist `mergeMode: "all" | "any"` (default `all`). All waits for
+  each connected incoming wire and emits one result with a `branches` array.
+  Any passes arrivals independently and is appropriate for mutually exclusive
+  If/Else routes. An unconnected selected branch port remains visibly blocked.
+- Optional `latencyMs` is finite, 100–30,000 ms. Execution uses deterministic
+  100 ms quanta. Compute/database/cache/worker pools consume one physical machine
+  per operation. Queues hold FIFO work until a connected consumer is available
+  and hand each job to one worker, never broadcast it to every consumer.
+- Replica groups are logical capacity pools. Their internal replication wires
+  are not request hops; equivalent external pool wires do not duplicate calls.
+  Scaling updates available capacity without resetting in-flight requests.
+  Removing an executing node explicitly fails its affected request.
+- Cache/CDN nodes expose `cache: "hit" | "miss"` and `servedBy`; a miss warms
+  only after its request completes. API, worker, storage and database nodes add
+  provenance (`handledBy`, `processedBy`, `storedBy`/`readFrom`, `persistedBy`).
+  These are simulated metadata, not processed files or external service responses.
+- Runtime state is bounded: 32 requests, 128 trace steps per request, 64 hops
+  per branch, and 8,192 serialized JSON characters per input/output. Cycles,
+  excessive fan-out and oversized results fail visibly. Reset clears runtime
+  state but leaves topology untouched; Apply/import/new examples start a new run.
+  Conditions, latency, merge mode and wire outlets round-trip through JSON;
+  transient requests, traces and cache state do not.
+- The UI uses one 5 Hz clock only while unpaused work can advance. Hidden tabs
+  stop without wall-clock catch-up. Incomplete merges/queues/ports need no idle
+  clock; graph edits wake them. Rendering changes status attributes and existing
+  wire styling, never recreates detailed models or spawns a packet actor per job.
+  Existing raster/assembly budgets remain unchanged.
+
 ### Geometry and artwork
 
-- Isometric projection is `project` in `src/database.ts`. Face-local planes,
-  boxes, and fans are shared helpers in `src/components.ts`; world units are
+- Isometric projection is `project` in `src/database.ts`. Generic component
+  face planes, boxes, fans, and detail paths live in `src/component-geometry.ts`
+  and serve both `src/components.ts` and `src/cdn-skins.ts`; world units are
   the drawing unit.
 - Faces are opaque and painter order is the only depth sort. A new part must
   paint back-to-front around the existing box and detail groups.
+- Object storage's controller spine sits on the near (+x) side of every drive
+  blade. Paint its body and face details after the blades; a late brand badge
+  cannot repair early body occlusion. `e2e/storage-models.spec.ts` checks the
+  controller's actual cached pixels in both light and dark themes.
 - `componentHeight` feeds camera fit and callout anchors. Height and footprint
   are provider-aware through the variant and theme. Unsupported providers must
   not change fitting height or assembly bounds for another renderer type.
@@ -105,14 +216,35 @@ One pass explains where most edits belong:
   PostgreSQL's arched archive tower, MySQL's wave cabinet with a dorsal fin,
   SQLite's low file tray, and MongoDB's shard enclosure. Each owns its height
   and `db-<id>-rear/front` definitions; the neutral rack remains provider-free.
-- CDN nodes use a raised routing core between two low edge-cache pods, with
-  attached patch leads and raised content cartridges. `cdn-` IDs select the
-  renderer; the CDN delivery example shows client → edge → origin. Its chassis
-  shares one static bitmap; three packet routes and a status cluster stay live,
-  pause with navigation, and stop animating for reduced motion.
-- The provider accent tints faces, glass, LEDs, and cables.
-  `ProviderTheme.plate` chooses a dark enamel tone for the single mark; the
-  badge never uses a white backing.
+- The default CDN is a raised routing core between two cache pods. Provider
+  appliances in `src/cdn-skins.ts` reuse the same footprint and live name rail,
+  but own their seated-module layouts, roof hardware, physical height, and
+  assembly envelope. The CDN delivery example shows client → edge → origin.
+  One shared static bitmap per skin holds the chassis and exact upstream mark;
+  at most three packet paths and one status cluster stay live, pause with
+  navigation, and stop for reduced motion. Default ↔ provider and provider ↔
+  provider changes reuse the bounded layered assembly.
+- CDN provider keys are:
+
+  | Key                 | Product           | Physical architecture                                 |
+  | ------------------- | ----------------- | ----------------------------------------------------- |
+  | `cloudflare`        | Cloudflare CDN    | Wide shielded gateway and paired cache shelves        |
+  | `cloudfront`        | Amazon CloudFront | Stepped distribution hub and low delivery decks       |
+  | `google-cloud-cdn`  | Google Cloud CDN  | Three modular relay towers and front controller       |
+  | `azure-front-door`  | Azure Front Door  | Twin gateway pylons joined by a raised lintel         |
+  | `fastly`            | Fastly            | Low streaming blades and side cooling manifold        |
+  | `akamai`            | Akamai            | Terraced route-exchange banks and service spine       |
+  | `bunny`             | bunny.net         | Paired upright cartridge banks and compact controller |
+  | `cdn77`             | CDN77             | Two tall cache stacks and low cross-controller        |
+  | `keycdn`            | KeyCDN            | Asymmetric shelves beside a tall routing spine        |
+  | `alibaba-cloud-cdn` | Alibaba Cloud CDN | Wide portal gateway and three content modules         |
+
+- CDN themes are rejected on every non-CDN renderer, just as Redis only applies
+  to cache nodes and database products only apply to database racks.
+- The provider accent tints faces, glass, LEDs, and cables. `ProviderTheme.plate`
+  chooses a contrasting enamel tone for the one exact mark, never a white
+  backing. CDN77 uses yellow enamel so its official dark wordmark stays legible;
+  other products use dark enamel. SVG source URLs live in the mark module.
 
 ### Wires
 
@@ -180,6 +312,10 @@ One pass explains where most edits belong:
   the pinned selection. Apply and Reset use a non-animated render and refit.
 - Callout and inspector are screen-space overlays. Use the scene's view and
   layout listeners instead of measuring projected SVG geometry.
+  Tooltip marks occupy a real grid column, never cover the summary. Card size
+  follows resize/font changes. `src/callout-layout.ts` places cards around cached
+  HTML overlay rectangles; pointer movement never measures panel DOM. Summary
+  labels identify the actual component type, and worker pools count instances.
 - Theme is `data-theme` on `<html>`; absence follows the OS. Keep accessible
   names, focus movement, `inert`, and the `aria-live` message intact.
 
@@ -187,7 +323,7 @@ One pass explains where most edits belong:
 
 | Goal                             | Edit in this order                                                                                                                                         | Close with                                           |
 | -------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------- |
-| Add a provider skin              | `providers.ts` theme → `components.ts` variant (generic) or `database.ts` badge (racks) → `style.css` skin → provider gating test                          | provider catalogue and footprint proof; provider e2e |
+| Add a provider skin              | `providers.ts` theme → `components.ts`, `cdn-skins.ts`, or `database-skins.ts` artwork → palette/motion → provider gating proof                            | provider catalogue and footprint proof; provider e2e |
 | Add a renderer type              | `design.ts` type → `layout.ts` prefix/color/footprint → `components.ts` geometry/height/label → `component-raster.ts` renderer list → scene/callout labels | unit tests per pure owner; boot scene e2e            |
 | Tune replica spacing or groups   | `layout.ts` constants and packing → `tests/layout.test.ts` → verify border ports, platform union, routing                                                  | layout, platform, routing, replica e2e               |
 | Reshape artwork                  | `components.ts` variant → `style.css` palette/animation → reduced-motion block                                                                             | app/cache e2e; visual smoke at overview and close-up |
@@ -198,34 +334,35 @@ One pass explains where most edits belong:
 
 1. Register the theme in `PROVIDERS`: canonical id, label, accent, supported
    types, optional footprints, exact self-contained logo.
-2. Add artwork: a `PROVIDER_VARIANTS` entry for generic renderers, or a
-   dedicated cabinet builder plus `db-<id>-rear/front` definitions in
-   `src/database-skins.ts`. Each database skin owns its height and one `logo`
-   badge; set a dark `plate` tone so the mark stays legible.
+2. Add artwork in its owner: `PROVIDER_VARIANTS` for generic renderers,
+   `ARCHITECTURES` in `src/cdn-skins.ts` for CDN appliances, or dedicated
+   `db-<id>-rear/front` builders in `src/database-skins.ts` for database cabinets.
+   Keep the model height, one exact badge, and contrasting enamel with the skin.
 3. Add skin classes to `style.css`. Put animated fills and strokes outside the
    static base. Add the reduced-motion rule.
 4. Supply the physical cabinet envelope alongside its artwork. The shared
    mechanism consumes these dimensions; never add provider-pair choreography.
 5. Prove color and footprint through `layoutDesign` and supported-type gating
    through `providersFor`; add that focused provider test. Then switch provider
-   on a cache or database node in the browser: exactly one artwork mark
+   on a cache, CDN, or database node in the browser: exactly one artwork mark
    (inspect before the raster cache replaces vectors), final border/platform,
    live selection, bounded connected motion, and no leftover rig after settling.
 6. Check `bun run size`; provider art ships in the JS bundle.
 
 ## Proof matrix
 
-| Surface                                  | Fast proof                                                | Browser proof                                                 |
-| ---------------------------------------- | --------------------------------------------------------- | ------------------------------------------------------------- |
-| Validation, limits, references           | `tests/design.test.ts`                                    | apply/import/export in `e2e/app.spec.ts`                      |
-| Placement, pitch, cluster bounds, colors | `tests/layout.test.ts`                                    | replica and provider paths in `e2e/app.spec.ts`               |
-| Provider catalogue, gates, object marks  | `tests/providers.test.ts`, `tests/database-skins.test.ts` | `e2e/database-providers.spec.ts`                              |
-| Platform topology and markup             | `tests/platform.test.ts`, `tests/platform-render.test.ts` | boot scene render in `e2e/app.spec.ts`                        |
-| Cable routing and cluster ports          | `tests/routing.test.ts`, `tests/scene-port.test.ts`       | `e2e/wires.spec.ts`; link and zoom tests in `e2e/app.spec.ts` |
-| Rack geometry and projection             | `tests/database.test.ts`                                  | boot scene and theme switch in `e2e/app.spec.ts`              |
-| Replica mutation                         | `tests/replicas.test.ts`                                  | replica stepper and ten-replica layout                        |
-| Shell, editor, theme, a11y               | —                                                         | `e2e/app.spec.ts`                                             |
-| Canvas, raster, selection, assembly      | `tests/transformer.test.ts` ordering and travel bounds    | `e2e/app.spec.ts`, `e2e/component-cache.spec.ts`              |
+| Surface                                         | Fast proof                                                                            | Browser proof                                                 |
+| ----------------------------------------------- | ------------------------------------------------------------------------------------- | ------------------------------------------------------------- |
+| Validation, limits, references                  | `tests/design.test.ts`                                                                | apply/import/export in `e2e/app.spec.ts`                      |
+| Placement, pitch, cluster bounds, colors        | `tests/layout.test.ts`                                                                | replica and provider paths in `e2e/app.spec.ts`               |
+| Provider catalogue, gates, object marks         | `tests/providers.test.ts`, `tests/components.test.ts`, `tests/database-skins.test.ts` | `e2e/database-providers.spec.ts`, `e2e/cdn-providers.spec.ts` |
+| Platform topology and markup                    | `tests/platform.test.ts`, `tests/platform-render.test.ts`                             | boot scene render in `e2e/app.spec.ts`                        |
+| Cable routing and cluster ports                 | `tests/routing.test.ts`, `tests/scene-port.test.ts`                                   | `e2e/wires.spec.ts`; link and zoom tests in `e2e/app.spec.ts` |
+| Rack geometry and projection                    | `tests/database.test.ts`                                                              | boot scene and theme switch in `e2e/app.spec.ts`              |
+| Replica mutation                                | `tests/replicas.test.ts`                                                              | replica stepper and ten-replica layout                        |
+| Factory placement, wiring, removal, persistence | `tests/construction.test.ts`, `tests/design.test.ts`, `tests/replicas.test.ts`        | `e2e/world-builder.spec.ts`                                   |
+| Shell, editor, theme, a11y                      | —                                                                                     | `e2e/app.spec.ts`                                             |
+| Canvas, raster, selection, assembly             | `tests/transformer.test.ts` ordering and travel bounds                                | `e2e/app.spec.ts`, `e2e/component-cache.spec.ts`              |
 
 Gates: `bun run check` (format, lint, types), `bun run build`, `bun run size`.
 
@@ -239,11 +376,11 @@ Notes:
   pointer tracking, viewport bounds, and leader endpoints. A clamped card need
   not travel by the pointer's exact delta. Do not pin cosmetic offsets, stroke
   widths, or bracket-border pixel defaults in interaction tests.
-- Unit coverage gates deterministic geometry, validation, replica edits and
-  `assembly.ts` timing. Browser-only scene, cache, assembly rendering and
-  scheduling modules run in Playwright rather than mocked DOM lifecycle tests;
-  `transformer-model.ts` contains only types. `vite.config.ts` lists those
-  exclusions explicitly. Per-file coverage thresholds remain unchanged.
+- Unit coverage gates deterministic geometry, validation, construction edits,
+  replica edits and `assembly.ts` timing. Browser-only scene, factory drawer,
+  cache, assembly rendering and scheduling run in Playwright rather than
+  mocked DOM lifecycle tests; `transformer-model.ts` contains only types.
+  `vite.config.ts` lists exclusions; coverage thresholds remain unchanged.
 - Gate timing is owned by `AGENTS.md`: targeted unit tests in the inner loop,
   fast unit gate before scope expands, browser and `verify` at milestones.
 

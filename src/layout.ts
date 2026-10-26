@@ -60,6 +60,16 @@ export function instanceColor(
       return "#7ee787";
     case "cdn":
       return "#7ab8ff";
+    case "message-queue":
+      return "#eab464";
+    case "object-storage":
+      return "#62c6ab";
+    case "media-worker":
+      return "#d79cf0";
+    case "branch":
+      return "#edbb67";
+    case "merge":
+      return "#89bde9";
   }
 }
 
@@ -76,6 +86,16 @@ const INSTANCE_TYPES: Readonly<Record<string, PlacedInstance["type"]>> = {
   frontend: "webpage",
   cache: "cache",
   cdn: "cdn",
+  queue: "message-queue",
+  broker: "message-queue",
+  storage: "object-storage",
+  bucket: "object-storage",
+  worker: "media-worker",
+  encoder: "media-worker",
+  branch: "branch",
+  condition: "branch",
+  merge: "merge",
+  join: "merge",
 };
 
 /**
@@ -227,8 +247,8 @@ function layoutGroups(design: Design): LayoutGroup[] {
  * the next group, so only that next group's back width is reserved. A
  * multi-replica cluster therefore never adds phantom space to its own sides.
  * A cluster is emitted at its first declared member's slot, so promoting an
- * instance never reorders the surrounding scene. Existing positions are never
- * read, which makes the imported document the single source of truth.
+ * instance never reorders the surrounding scene. Explicit ground placements
+ * override automatic slots; a pinned first member anchors new replicas.
  *
  * Colors are normalized per renderer type and provider skin so replicas share
  * rasterized geometry; changing declaration order or cluster membership never
@@ -310,9 +330,14 @@ export function layoutDesign(design: Design): Layout {
       memberIndex,
       { entry, type, footprint },
     ] of plan.members.entries()) {
+      const anchor = plan.members[0].entry.placement;
       const px =
-          x - Math.floor(memberIndex / REPLICAS_PER_ROW) * plan.columnStep,
-        py = (memberIndex % REPLICAS_PER_ROW) * plan.rowStep;
+          entry.placement?.x ??
+          (anchor?.x ?? x) -
+            Math.floor(memberIndex / REPLICAS_PER_ROW) * plan.columnStep,
+        py =
+          entry.placement?.y ??
+          (anchor?.y ?? 0) + (memberIndex % REPLICAS_PER_ROW) * plan.rowStep;
       placed.push({
         id: entry.id,
         type,

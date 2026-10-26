@@ -98,6 +98,11 @@ const RENDERER_TYPES = [
   "webpage",
   "cache",
   "cdn",
+  "message-queue",
+  "object-storage",
+  "media-worker",
+  "branch",
+  "merge",
 ] as const;
 
 const isRendererType = (value: string | undefined): value is RendererType =>

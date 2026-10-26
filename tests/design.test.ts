@@ -229,6 +229,33 @@ describe("design imports", () => {
       ),
     ).toThrow("relation must contain");
   });
+
+  test("preserves manual ground placement but rejects coordinates unsafe for world geometry", () => {
+    const manual = {
+      ...example,
+      instances: [{ id: "cdn-edge", placement: { x: -640, y: 0 } }],
+      connections: [],
+      clusters: [],
+    };
+    expect(parseDesign(JSON.stringify(manual))).toEqual(manual);
+    for (const placement of [
+      null,
+      [],
+      { x: 1 },
+      { x: "0", y: 0 },
+      { x: 0, y: Infinity },
+      { x: NaN, y: 0 },
+      { x: 100001, y: 0 },
+    ])
+      expect(() =>
+        parseDesign(
+          JSON.stringify({
+            ...manual,
+            instances: [{ id: "cdn-edge", placement }],
+          }),
+        ),
+      ).toThrow("placement");
+  });
 });
 
 describe("example catalogue", () => {

@@ -1,12 +1,15 @@
 /**
  * JSON design document model and validation.
  *
- * The persisted document is deliberately small: an instance is an ID and an
- * optional label, provider, and description; a connection names two IDs, and a
- * cluster groups IDs. Type, color, and position are render-time derivations
- * owned by `layout.ts`, so an exported document never accumulates generated
- * data.
+ * Instances retain identity, presentation and optional user-authored ground
+ * placement. Automatic positions, type and color are derived by `layout.ts`;
+ * explicit placement is build intent, never a generated position snapshot
+ * silently added by the parser.
  */
+import { connectionIssue, replicaGroupIssue } from "./component-rules";
+import { mediaExample } from "./media-example";
+import { inferInstanceType } from "./layout";
+
 export interface Position {
   /** Generated rack-center X in world units. */
   x: number;
@@ -15,6 +18,17 @@ export interface Position {
   /** Generated platform elevation in world units. */
   z: number;
 }
+
+/** User-authored ground center, in the same world units as the isometric grid. */
+export interface GroundPoint {
+  x: number;
+  y: number;
+}
+
+/** Shared document limits also bound interactive construction. */
+export const MAX_INSTANCES = 64;
+export const MAX_CONNECTIONS = 256;
+export const MAX_WORLD_COORDINATE = 100_000;
 
 /**
  * One renderable system component.
@@ -25,7 +39,17 @@ export interface Position {
  */
 export interface PlacedInstance {
   id: string;
-  type: "database-rack" | "compute-server" | "webpage" | "cache" | "cdn";
+  type:
+    | "database-rack"
+    | "compute-server"
+    | "webpage"
+    | "cache"
+    | "cdn"
+    | "message-queue"
+    | "object-storage"
+    | "media-worker"
+    | "branch"
+    | "merge";
   label: string;
   position: Position;
   color: string;
@@ -33,11 +57,18 @@ export interface PlacedInstance {
   provider?: string;
 }
 
+/** Explicit visual workflow condition. Field paths read own JSON properties; no scripts are evaluated. */
+export interface FlowCondition {
+  field: string;
+  operator: "equals" | "not-equals" | "greater-than" | "contains";
+  value: string | number | boolean | null;
+}
+export type OutputPort = "out" | "true" | "false";
+
 /**
- * One imported instance. Only identity and presentation are persisted.
- *
- * IDs are the source of truth for both the renderer type (via prefix) and link
- * endpoints. The renderer derives everything else.
+ * One imported instance. Identity, presentation and explicit ground placement
+ * are persisted. IDs select the renderer and link endpoints; without placement
+ * the layout derives the ground center automatically.
  */
 export interface DesignInstance {
   id: string;
@@ -55,6 +86,12 @@ export interface DesignInstance {
    * `providers.ts`.
    */
   provider?: string;
+  /** Optional manual ground center. Omission keeps the automatic layout. */
+  placement?: GroundPoint;
+  condition?: FlowCondition;
+  mergeMode?: "all" | "any";
+  /** Simulated service time, in milliseconds; never a real network timeout. */
+  latencyMs?: number;
 }
 
 /**
@@ -70,6 +107,7 @@ export interface Connection {
   from: string;
   to: string;
   relation?: string;
+  outlet?: OutputPort;
 }
 
 /**
@@ -442,6 +480,12 @@ export interface DesignExample {
  */
 export const examples: readonly DesignExample[] = [
   {
+    id: "media-processing",
+    summary:
+      "Upload original media, buffer encoding jobs, scale workers, publish renditions and play through the CDN. Open Simulate to run this topology.",
+    design: mediaExample,
+  },
+  {
     id: "web-app",
     summary:
       "Follow one request from the browser through the API to the cache and database.",
@@ -511,6 +555,83 @@ function text(value: unknown, path: string, maxLength = 100): string {
   return value;
 }
 
+/** Validate explicit build intent before it can affect SVG bounds or camera scale. */
+function groundPlacement(value: unknown, path: string): GroundPoint {
+  const point = record(value, path);
+  for (const axis of ["x", "y"] as const)
+    if (
+      typeof point[axis] !== "number" ||
+      !Number.isFinite(point[axis]) ||
+      Math.abs(point[axis]) > MAX_WORLD_COORDINATE
+    )
+      throw new Error(
+        `${path}.${axis} must be a finite coordinate within ±${MAX_WORLD_COORDINATE}.`,
+      );
+  return { x: point.x as number, y: point.y as number };
+}
+
+/** Validate authored workflow behavior independently of renderer/provider presentation. */
+function flowSettings(
+  instance: Record<string, unknown>,
+  path: string,
+): Pick<DesignInstance, "condition" | "mergeMode" | "latencyMs"> {
+  const settings: Pick<
+    DesignInstance,
+    "condition" | "mergeMode" | "latencyMs"
+  > = {};
+  const type = inferInstanceType(String(instance.id));
+  if (instance.condition !== undefined && type !== "branch")
+    throw new Error(`${path}.condition applies only to If / Else nodes.`);
+  if (instance.mergeMode !== undefined && type !== "merge")
+    throw new Error(`${path}.mergeMode applies only to Merge nodes.`);
+  if (instance.latencyMs !== undefined) {
+    if (
+      typeof instance.latencyMs !== "number" ||
+      !Number.isFinite(instance.latencyMs) ||
+      instance.latencyMs < 100 ||
+      instance.latencyMs > 30000
+    )
+      throw new Error(`${path}.latencyMs must be between 100 and 30000.`);
+    settings.latencyMs = instance.latencyMs;
+  }
+  if (instance.mergeMode !== undefined) {
+    if (instance.mergeMode !== "all" && instance.mergeMode !== "any")
+      throw new Error(`${path}.mergeMode must be all or any.`);
+    settings.mergeMode = instance.mergeMode;
+  }
+  if (instance.condition !== undefined) {
+    const condition = record(instance.condition, `${path}.condition`);
+    const field = text(condition.field, `${path}.condition.field`);
+    if (
+      !["equals", "not-equals", "greater-than", "contains"].includes(
+        String(condition.operator),
+      )
+    )
+      throw new Error(`${path}.condition.operator is not supported.`);
+    if (
+      condition.value !== null &&
+      typeof condition.value !== "string" &&
+      typeof condition.value !== "number" &&
+      typeof condition.value !== "boolean"
+    )
+      throw new Error(`${path}.condition.value must be a JSON scalar.`);
+    if (
+      (typeof condition.value === "number" &&
+        !Number.isFinite(condition.value)) ||
+      (typeof condition.value === "string" && condition.value.length > 100)
+    )
+      throw new Error(
+        `${path}.condition.value is outside the supported range.`,
+      );
+    settings.condition = {
+      field,
+      operator: condition.operator as FlowCondition["operator"],
+      value: condition.value as FlowCondition["value"],
+    };
+  }
+  return settings;
+}
+
 /**
  * Parse and validate a JSON design without touching the live scene.
  *
@@ -532,7 +653,7 @@ function text(value: unknown, path: string, maxLength = 100): string {
 export function parseDesign(source: string): Design {
   const root = record(JSON.parse(source) as unknown, "Design");
   if (root.version !== 1) throw new Error("version must be 1.");
-  if (!Array.isArray(root.instances) || root.instances.length > 64)
+  if (!Array.isArray(root.instances) || root.instances.length > MAX_INSTANCES)
     throw new Error(
       "instances must be an array of at most 64 instance objects.",
     );
@@ -568,12 +689,21 @@ export function parseDesign(source: string): Design {
       ...(instance.provider === undefined
         ? {}
         : { provider: text(instance.provider, `${path}.provider`, 40).trim() }),
+      ...(instance.placement === undefined
+        ? {}
+        : {
+            placement: groundPlacement(instance.placement, `${path}.placement`),
+          }),
+      ...flowSettings(instance, path),
     };
   });
 
   const connectionInput =
     root.connections === undefined ? [] : root.connections;
-  if (!Array.isArray(connectionInput) || connectionInput.length > 256)
+  if (
+    !Array.isArray(connectionInput) ||
+    connectionInput.length > MAX_CONNECTIONS
+  )
     throw new Error("connections must be an array of at most 256 links.");
 
   // Link validation reuses the instance ID set and rejects duplicate effective
@@ -589,6 +719,12 @@ export function parseDesign(source: string): Design {
     if (from === to)
       throw new Error(`${path} must connect two different instances.`);
 
+    const issue = connectionIssue(
+      instances.find((item) => item.id === from)!,
+      instances.find((item) => item.id === to)!,
+      link.outlet as OutputPort | undefined,
+    );
+    if (issue) throw new Error(`${path}: ${issue}`);
     const explicitId =
       link.id === undefined ? undefined : text(link.id, `${path}.id`);
     const id = explicitId ?? `${from}->${to}`;
@@ -599,6 +735,9 @@ export function parseDesign(source: string): Design {
       ...(explicitId === undefined ? {} : { id: explicitId }),
       from,
       to,
+      ...(link.outlet === undefined
+        ? {}
+        : { outlet: link.outlet as OutputPort }),
       ...(link.relation === undefined
         ? {}
         : { relation: text(link.relation, `${path}.relation`) }),
@@ -643,6 +782,10 @@ export function parseDesign(source: string): Design {
         throw new Error(`${member} appears in more than one cluster.`);
       clustered.add(member);
     }
+    const issue = replicaGroupIssue(
+      members.map((id) => instances.find((item) => item.id === id)!),
+    );
+    if (issue) throw new Error(`${path}: ${issue}`);
 
     return {
       ...(explicitId === undefined ? {} : { id: explicitId }),

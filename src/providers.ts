@@ -1,4 +1,6 @@
 import type { PlacedInstance } from "./design";
+import { CDN_MARKS } from "./cdn-provider-marks";
+import { MEDIA_MARKS } from "./media-provider-marks";
 
 /** Half extents of a provider's ground footprint in world units. */
 export interface ProviderFootprint {
@@ -104,6 +106,48 @@ export const MONGO_LOGO = `<svg xmlns="http://www.w3.org/2000/svg" fill="none" v
 /** Providers with a registered presentation theme. */
 export const PROVIDERS: readonly ProviderTheme[] = [
   {
+    id: "rabbitmq",
+    label: "RabbitMQ",
+    color: "#ff6600",
+    types: ["message-queue"],
+    logo: MEDIA_MARKS.rabbitmq,
+  },
+  {
+    id: "amazon-sqs",
+    label: "Amazon SQS",
+    color: "#d9a1e8",
+    types: ["message-queue"],
+    logo: MEDIA_MARKS["amazon-sqs"],
+  },
+  {
+    id: "nats-jetstream",
+    label: "NATS JetStream",
+    color: "#27aae1",
+    types: ["message-queue"],
+    logo: MEDIA_MARKS["nats-jetstream"],
+  },
+  {
+    id: "amazon-s3",
+    label: "Amazon S3",
+    color: "#76b85a",
+    types: ["object-storage"],
+    logo: MEDIA_MARKS["amazon-s3"],
+  },
+  {
+    id: "cloudflare-r2",
+    label: "Cloudflare R2",
+    color: "#f38020",
+    types: ["object-storage"],
+    logo: MEDIA_MARKS["cloudflare-r2"],
+  },
+  {
+    id: "ffmpeg",
+    label: "FFmpeg",
+    color: "#66bf67",
+    types: ["media-worker"],
+    logo: MEDIA_MARKS.ffmpeg,
+  },
+  {
     id: "redis",
     label: "Redis",
     color: "#dc382d",
@@ -144,6 +188,87 @@ export const PROVIDERS: readonly ProviderTheme[] = [
     types: ["database-rack"],
     logo: MONGO_LOGO,
     plate: "#0b1a12",
+  },
+  {
+    id: "cloudflare",
+    label: "Cloudflare CDN",
+    color: "#f38020",
+    types: ["cdn"],
+    logo: CDN_MARKS.cloudflare,
+    plate: "#241910",
+  },
+  {
+    id: "cloudfront",
+    label: "Amazon CloudFront",
+    color: "#a879e0",
+    types: ["cdn"],
+    logo: CDN_MARKS.cloudfront,
+    plate: "#21162e",
+  },
+  {
+    id: "google-cloud-cdn",
+    label: "Google Cloud CDN",
+    color: "#4285f4",
+    types: ["cdn"],
+    logo: CDN_MARKS["google-cloud-cdn"],
+    plate: "#142033",
+  },
+  {
+    id: "azure-front-door",
+    label: "Azure Front Door",
+    color: "#0078d4",
+    types: ["cdn"],
+    logo: CDN_MARKS["azure-front-door"],
+    plate: "#101e2c",
+  },
+  {
+    id: "fastly",
+    label: "Fastly",
+    color: "#ff282d",
+    types: ["cdn"],
+    logo: CDN_MARKS.fastly,
+    plate: "#291519",
+  },
+  {
+    id: "akamai",
+    label: "Akamai",
+    color: "#0096d6",
+    types: ["cdn"],
+    logo: CDN_MARKS.akamai,
+    plate: "#10232e",
+  },
+  {
+    id: "bunny",
+    label: "bunny.net",
+    color: "#ffaa49",
+    types: ["cdn"],
+    logo: CDN_MARKS.bunny,
+    plate: "#281f14",
+  },
+  {
+    id: "cdn77",
+    label: "CDN77",
+    color: "#ffe115",
+    types: ["cdn"],
+    logo: CDN_MARKS.cdn77,
+    // The official dark wordmark needs its yellow enamel, not a dark plate.
+    plate: "#ffe115",
+  },
+  {
+    id: "keycdn",
+    label: "KeyCDN",
+    color: "#047aed",
+    types: ["cdn"],
+    logo: CDN_MARKS.keycdn,
+    plate: "#131e31",
+  },
+  {
+    id: "alibaba-cloud-cdn",
+    label: "Alibaba Cloud CDN",
+    color: "#ff6a00",
+    types: ["cdn"],
+    logo: CDN_MARKS["alibaba-cloud-cdn"],
+    plate: "#281a12",
   },
 ];
 

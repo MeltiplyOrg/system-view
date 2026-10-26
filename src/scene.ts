@@ -1,6 +1,9 @@
 import { createDatabaseDefinitions, project } from "./database";
 import { createProviderDatabaseDefinitions } from "./database-skins";
-import type { Connection, Design, PlacedInstance } from "./design";
+import type { Connection, Design, GroundPoint, PlacedInstance } from "./design";
+import { MAX_WORLD_COORDINATE } from "./design";
+import type { BuildItem } from "./construction";
+import { instanceColor } from "./layout";
 import { instanceFootprint, layoutDesign } from "./layout";
 import type { Layout, PlacedCluster } from "./layout";
 import { createPlatforms } from "./platform";
@@ -635,6 +638,17 @@ export class SystemScene {
   /** Static geometry followed by keyed component roots in painter order. */
   private readonly content = document.createElementNS(NS, "g");
 
+  /** One bounded construction overlay; placement art uses the ordinary raster cache. */
+  private readonly buildLayer = document.createElementNS(NS, "g");
+  private buildGhost: {
+    key: string;
+    element: SVGGElement;
+    foot: SVGPathElement;
+  } | null = null;
+  private buildWire: SVGPathElement | null = null;
+  private worldInstances: readonly PlacedInstance[] = [];
+  private readonly placementListeners = new Set<() => void>();
+
   /** Shared static artwork for every renderer type, keyed by geometry/palette. */
   private readonly componentRaster: ComponentRasterCache;
   private readonly transformers: TransformerTransitions;
@@ -740,9 +754,8 @@ export class SystemScene {
   /**
    * Manual placement offset per standalone instance, in world units.
    *
-   * View-only state: the document never stores it, so the exported JSON keeps
-   * the derived layout as its single source of truth. Applied after the layout
-   * pass on every render; ids absent from the current layout are inert.
+   * Pending gesture state, applied after persisted/automatic layout. On release
+   * the shell commits actual world positions and clears these transient offsets.
    */
   private readonly dragOffsets = new Map<string, { x: number; y: number }>();
 
@@ -858,7 +871,10 @@ export class SystemScene {
     databaseDefs.append(
       ...Array.from(createProviderDatabaseDefinitions().childNodes),
     );
-    svg.append(databaseDefs, this.grid, this.content);
+    this.buildLayer.classList.add("construction-layer");
+    this.buildLayer.setAttribute("pointer-events", "none");
+    this.buildLayer.setAttribute("aria-hidden", "true");
+    svg.append(databaseDefs, this.grid, this.content, this.buildLayer);
     this.componentRaster = new ComponentRasterCache(svg);
     this.transformers = new TransformerTransitions(
       this.content,
@@ -1007,6 +1023,7 @@ export class SystemScene {
     this.reconcileOffsets(previousCluster, design);
     const layout = layoutDesign(design);
     this.applyDragOffsets(layout);
+    this.worldInstances = layout.instances;
 
     // Every draggable node gets a border. A declared cluster is one group
     // border around all its members; each unclustered instance gets its own.
@@ -1297,7 +1314,8 @@ export class SystemScene {
       group.dataset.connectionId = connectionId;
       group.style.setProperty("--cable-color", from.color);
       group.innerHTML = `<path class="wire-glow" d="${d}"/><path class="wire" d="${d}"/><path class="pulse" pathLength="100" style="--duration:3s;--delay:${-index * 0.6}s" d="${d}"/>`;
-      if (link.relation) {
+      const relation = link.relation ?? link.outlet?.toUpperCase();
+      if (relation) {
         const lane = labelLanes.get(d) ?? 0;
         labelLanes.set(d, lane + 1);
         const point = cableLabelPoint(
@@ -1313,11 +1331,11 @@ export class SystemScene {
           label.setAttribute("text-anchor", "middle");
           // Match long instance labels: condense rather than clip so the
           // full relation stays available on the canvas.
-          if (link.relation.length > CABLE_LABEL_MAX_CHARS) {
+          if (relation.length > CABLE_LABEL_MAX_CHARS) {
             label.setAttribute("textLength", String(CABLE_LABEL_WIDTH));
             label.setAttribute("lengthAdjust", "spacingAndGlyphs");
           }
-          label.textContent = link.relation;
+          label.textContent = relation;
           group.append(label);
         }
       }
@@ -1463,14 +1481,20 @@ export class SystemScene {
       topPad = pad + 90,
       bottomPad = pad + 40;
 
-    // Padding leaves room for labels and cable bows without shrinking the
-    // racks to a postage stamp. The 200-unit floor keeps an empty scene valid.
-    this.contentBounds = {
-      x: extent.minX - pad,
-      y: extent.minY - topPad,
-      width: Math.max(200, extent.maxX - extent.minX + 2 * pad),
-      height: Math.max(200, extent.maxY - extent.minY + topPad + bottomPad),
-    };
+    // Empty worlds need room for several machines at construction scale, not
+    // a tight camera fit around absent geometry. Populated diagrams still fit.
+    this.contentBounds =
+      layout.instances.length === 0
+        ? { x: -1100, y: -750, width: 2200, height: 1500 }
+        : {
+            x: extent.minX - pad,
+            y: extent.minY - topPad,
+            width: Math.max(200, extent.maxX - extent.minX + 2 * pad),
+            height: Math.max(
+              200,
+              extent.maxY - extent.minY + topPad + bottomPad,
+            ),
+          };
     if (!animate) this.fit();
     else {
       // Static geometry changes without a viewport write, so refresh root
@@ -1661,11 +1685,16 @@ export class SystemScene {
    *
    * Called when a different design is applied: offsets belong to one scene's
    * instance and cluster ids and must not leak into another document, whose
-   * ids can repeat with different meaning. Replica edits keep the arrangement,
-   * so they do not call this. The next `render` draws the derived layout
-   * again.
+   * ids can repeat with different meaning. Completed construction commits also
+   * clear these offsets after persisting their ground sites. Any captured
+   * anchor gesture is cancelled before the next document can replace its frame.
    */
   clearOffsets(): void {
+    const drag = this.anchorDrag;
+    this.anchorDrag = null;
+    this.anchor?.classList.remove("dragging");
+    if (drag && this.anchor?.hasPointerCapture(drag.pointerId))
+      this.anchor.releasePointerCapture(drag.pointerId);
     this.dragOffsets.clear();
     this.clusterOffsets.clear();
   }
@@ -1926,6 +1955,31 @@ export class SystemScene {
           x: drag.base.x + across + down,
           y: drag.base.y + down - across,
         };
+      const frame = this.borderFrames.get(drag.key)!;
+      const previous = drag.key.startsWith(INSTANCE_KEY)
+        ? (this.dragOffsets.get(drag.key.slice(INSTANCE_KEY.length)) ??
+          drag.base)
+        : (this.clusterOffsets.get(drag.key) ?? drag.base);
+      offset.x = Math.max(
+        -MAX_WORLD_COORDINATE - frame.bounds.x + previous.x,
+        Math.min(
+          MAX_WORLD_COORDINATE -
+            frame.bounds.x -
+            frame.bounds.width +
+            previous.x,
+          offset.x,
+        ),
+      );
+      offset.y = Math.max(
+        -MAX_WORLD_COORDINATE - frame.bounds.y + previous.y,
+        Math.min(
+          MAX_WORLD_COORDINATE -
+            frame.bounds.y -
+            frame.bounds.height +
+            previous.y,
+          offset.y,
+        ),
+      );
       if (drag.key.startsWith(INSTANCE_KEY))
         this.dragOffsets.set(drag.key.slice(INSTANCE_KEY.length), offset);
       else this.clusterOffsets.set(drag.key, offset);
@@ -1939,6 +1993,19 @@ export class SystemScene {
       anchor.classList.remove("dragging");
       if (anchor.hasPointerCapture(event.pointerId))
         anchor.releasePointerCapture(event.pointerId);
+      const offset = drag.key.startsWith(INSTANCE_KEY)
+        ? this.dragOffsets.get(drag.key.slice(INSTANCE_KEY.length))
+        : this.clusterOffsets.get(drag.key);
+      if (event.type !== "pointerup" && this.currentDesign) {
+        if (drag.key.startsWith(INSTANCE_KEY))
+          this.dragOffsets.set(drag.key.slice(INSTANCE_KEY.length), drag.base);
+        else this.clusterOffsets.set(drag.key, drag.base);
+        this.render(this.currentDesign, true);
+      } else if (
+        offset &&
+        (offset.x !== drag.base.x || offset.y !== drag.base.y)
+      )
+        for (const listener of this.placementListeners) listener();
     };
     anchor.addEventListener("pointerup", endDrag);
     anchor.addEventListener("pointercancel", endDrag);
@@ -1946,6 +2013,133 @@ export class SystemScene {
     // hover resolution and the next drag are not stuck behind `anchorDrag`.
     anchor.addEventListener("lostpointercapture", endDrag);
     return anchor;
+  }
+
+  /** Borrow the current placed world, including any in-flight manual offsets. Do not mutate it. */
+  getWorldInstances(): readonly PlacedInstance[] {
+    return this.worldInstances;
+  }
+
+  /** Convert a client pixel to the isometric ground plane using the current camera. */
+  screenToWorld(clientX: number, clientY: number): GroundPoint | null {
+    const point = this.clientToUser(clientX, clientY);
+    if (!point) return null;
+    const across = point.x / (2 * Math.cos(Math.PI / 6));
+    return { x: point.y + across, y: point.y - across };
+  }
+
+  /** Construction claims the current view without continuing an inspector's camera spring. */
+  freezeView(): void {
+    this.stopCamera();
+    this.endNavigation();
+  }
+
+  /** Commit completed anchor gestures through the shell's document owner. */
+  onPlacementChange(listener: () => void): void {
+    this.placementListeners.add(listener);
+  }
+
+  /** Dispose the sole construction actor and release its normal cache record. */
+  clearBuildPreview(): void {
+    this.buildLayer.replaceChildren();
+    this.buildGhost = null;
+    this.buildWire = null;
+    this.componentRaster.sync();
+  }
+
+  /** Reuse one actual component at the snapped site; moves only change its parent transform. */
+  previewPlacement(
+    item: BuildItem,
+    point: GroundPoint | null,
+    valid: boolean,
+  ): void {
+    if (!point) {
+      this.buildLayer.style.display = "none";
+      return;
+    }
+    this.buildLayer.style.display = "";
+    let fresh = false;
+    if (this.buildGhost?.key !== item.id) {
+      this.clearBuildPreview();
+      const element = document.createElementNS(NS, "g");
+      element.classList.add("build-placement");
+      const foot = document.createElementNS(NS, "path");
+      foot.classList.add("build-footprint");
+      const model = createComponent({
+        id: "build-preview",
+        label: item.label,
+        type: item.type,
+        position: { x: 0, y: 0, z: 0 },
+        color: instanceColor(item.type, item.provider),
+        ...(item.provider ? { provider: item.provider } : {}),
+      });
+      model.classList.remove("scene-instance");
+      model.classList.add("build-preview-model");
+      model.removeAttribute("data-instance-id");
+      model.removeAttribute("role");
+      model.removeAttribute("aria-label");
+      for (const motion of model.querySelectorAll(".component-motion"))
+        motion.remove();
+      const { halfWidth: w, halfDepth: d } = instanceFootprint(
+        item.type,
+        item.provider,
+      );
+      foot.setAttribute(
+        "d",
+        `M${[
+          [-w, -d],
+          [w, -d],
+          [w, d],
+          [-w, d],
+        ]
+          .map(([x, y]) => project(x, y, 0).join(" "))
+          .join("L")}Z`,
+      );
+      element.append(foot, model);
+      this.buildLayer.append(element);
+      this.buildGhost = { key: item.id, element, foot };
+      fresh = true;
+    }
+    const ghost = this.buildGhost!;
+    ghost.element.classList.toggle("placement-invalid", !valid);
+    ghost.element.setAttribute(
+      "transform",
+      `translate(${project(point.x, point.y, 0).join(" ")})`,
+    );
+    if (fresh) this.componentRaster.sync();
+  }
+
+  /** A lightweight orthogonal rubber band; committed wires use the normal obstacle router. */
+  previewWire(from: string, point: GroundPoint, targetId?: string): void {
+    this.buildLayer.style.display = "";
+    if (!this.buildWire) {
+      this.clearBuildPreview();
+      this.buildWire = document.createElementNS(NS, "path");
+      this.buildWire.classList.add("build-wire-preview");
+      this.buildLayer.append(this.buildWire);
+    }
+    const source = this.worldInstances.find((item) => item.id === from);
+    if (!source) return;
+    const target = this.worldInstances.find((item) => item.id === targetId);
+    const destination = target?.position ?? point;
+    const frame = this.borderFrames.get(
+      this.instanceCluster.get(from) ?? `${INSTANCE_KEY}${from}`,
+    )!;
+    const start = clusterPort(frame, source.position, destination);
+    const stub = clusterPortStub(start);
+    const targetFrame = target
+      ? this.borderFrames.get(
+          this.instanceCluster.get(target.id) ?? `${INSTANCE_KEY}${target.id}`,
+        )!
+      : null;
+    const end = targetFrame
+      ? clusterPort(targetFrame, target!.position, source.position)
+      : point;
+    this.buildWire.setAttribute(
+      "d",
+      `M${[start, stub, { x: end.x, y: stub.y }, end].map((p) => project(p.x, p.y, 4).join(" ")).join("L")}`,
+    );
+    this.buildWire.classList.toggle("wire-invalid", from === targetId);
   }
 
   /**

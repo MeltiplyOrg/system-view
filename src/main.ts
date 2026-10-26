@@ -1,10 +1,17 @@
 import "./style.css";
 import type { Design } from "./design";
-import { examples, parseDesign, webAppExample } from "./design";
+import { examples, parseDesign, webAppExample, MAX_INSTANCES } from "./design";
 import { inferInstanceType, instanceColor } from "./layout";
 import { resizeReplicas } from "./replicas";
 import { findProvider, providersFor } from "./providers";
 import { SystemScene } from "./scene";
+import { WorldBuilder } from "./world-builder";
+import { pinWorld, BUILD_TYPES } from "./construction";
+import { replicaIssue } from "./component-rules";
+import { FlowPanel } from "./flow-panel";
+import { FlowNodeEditor } from "./flow-node-editor";
+import { mediaExample } from "./media-example";
+import { placeCallout, type CalloutRect } from "./callout-layout";
 
 /**
  * Resolve a required descendant or fail immediately.
@@ -57,9 +64,10 @@ app.innerHTML = `
           <label class="detail-label" for="detail-provider"><span>Provider</span></label>
           <select id="detail-provider" class="detail-provider-select"></select>
         </section>
-        <section class="detail-section">
-          <div class="detail-label"><span>Replicas</span><span class="replica-stepper"><button id="replica-decrease" type="button" aria-label="Decrease replicas"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="m10 4-4 4 4 4"/></svg></button><span id="detail-count" aria-live="polite"></span><button id="replica-increase" type="button" aria-label="Increase replicas"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="m6 4 4 4-4 4"/></svg></button></span></div>
+        <section id="detail-scaling" class="detail-section">
+          <div class="detail-label"><span id="detail-scaling-label">Scaling</span><span class="replica-stepper"><button id="replica-decrease" type="button" aria-label="Decrease replicas"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="m10 4-4 4 4 4"/></svg></button><span id="detail-count" aria-live="polite"></span><button id="replica-increase" type="button" aria-label="Increase replicas"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="m6 4 4 4-4 4"/></svg></button></span></div>
           <ul id="detail-replicas" class="detail-replicas"></ul>
+          <p id="detail-scaling-reason" class="detail-empty" hidden></p>
         </section>
         <section class="detail-section">
           <div class="detail-label"><span>Links</span><span id="detail-link-count"></span></div>
@@ -128,11 +136,20 @@ app.innerHTML = `
 
         <section class="section schema-note">
           <div class="section-label">Dynamic design</div>
-          <code>instances: [{ id, label?, description?, provider? }]<br>connections: [{ from, to, relation? }]<br>clusters: [{ label?, description?, instances }]</code>
-          <p>ID prefixes pick the visual: db- for databases, compute- or server- for backend servers, web- for frontend pages, cache- for in-memory caches, and cdn- for content delivery edges. The CDN delivery example connects a client through the edge to its content origin. Connect IDs with from/to and describe traffic with relation. Positions and colors are generated; cluster members keep separate platforms.</p>
+          <code>instances: [{ id, label?, provider?, placement?, condition?, mergeMode?, latencyMs? }]<br>connections: [{ id?, from, to, outlet?, relation? }]<br>clusters: [{ label?, instances }]</code>
+          <p>Open Build at the bottom to construct a system directly. Drag a component into the world, or select a card and click clear ground. Placements snap to the build grid and are saved in placement. Arrow keys move a keyboard-selected preview; Enter places it and Escape cancels. Use Wire to drag between components, click a source then a destination, or choose endpoints and a traffic label in the wire panel. Remove deletes a component and its incident wires. A machine's anchor handle moves an existing node or replica group; completed moves are saved with the design.</p>
+          <p>ID prefixes pick the visual: db- databases, compute-/server- APIs, web- frontend clients, cache- caches, cdn- delivery edges, queue- message queues, storage- object storage, worker- media workers, branch- If/Else, and merge- synchronization. Without placement, positions are automatic; manual sites remain fixed through export and import. Colors follow the renderer and provider.</p>
           <p>An optional provider switches a component to a product skin. Redis applies only to cache nodes: it reworks the cache silhouette and platform, prints the official Redis mark on the cabinet, and replaces the accent with Redis red. Provider changes build the new cabinet layer by layer: base first, stacked body sections seating one at a time, then the top cap. Completed layers stay fixed; there are no swinging panels or wireframe chassis. The camera stays fixed. Up to three cabinets animate together; additional replicas queue. Reduced motion uses an immediate switch. Other renderers ignore providers they do not support, so documents stay portable.</p>
-          <p>Select a component and use the replica arrows to scale from 1 to 10. Each column holds at most five replicas; additional columns sit behind it, spaced by the actual platform footprint so compact provider cabinets stay compact instead of inheriting the wider rack pitch. New replicas drop onto their platforms (unless reduced motion is enabled), and rapid additions keep existing drops running. Multiple replicas become a cluster; returning to one restores an instance. Changes update the JSON. Links on removed replicas move to the surviving instance.</p>
+          <p>CDN nodes support ${providersFor("cdn")
+            .map(({ id, label }) => `${label} (<code>${id}</code>)`)
+            .join(
+              ", ",
+            )}. Select an independent edge and choose its provider in the inspector, or set provider in JSON. Repeated products share cached artwork, not replica controls.</p>
+          <p>Only supported machines scale: API/compute and worker instances, database/cache replicas, never SQLite server replicas. Clients, CDNs, queues, buckets, If/Else and Merge nodes are logical components, not replicable machines. Replica groups require the same component type and provider. Scale from 1 to 10 within the world limit; new members inherit behavior, not an occupied placement.</p>
           <p>Each renderer has a default palette: databases cyan, backend servers orange, frontend pages violet, caches green, and CDN edges blue. A provider may supply its own accent, artwork, and live detail layer; only static artwork is cached, so activity LEDs and packets keep moving. Every node shares cached artwork by type and provider, so replicas and repeated designs reuse the same images. Visible nodes are prewarmed while idle, and removing a replica keeps shared images available for re-addition. Zoom reuses the previous image until a sharper tier is ready; labels remain live. Internal cable pulses pause during navigation and resume at rest. Offscreen nodes are culled and return when panned into view. Links between components remain visible.</p>
+          <p>Open Simulate to run requests through your actual graph, or load the media-app example. Everything is visual and local: no external integrations, cloud calls, real uploads or transcoding. Provider models include RabbitMQ, Amazon SQS, NATS JetStream, Amazon S3, Cloudflare R2 and FFmpeg; names do not activate those services.</p>
+          <p>Ordinary outputs fan out. If/Else evaluates a request field and chooses its explicit TRUE/FALSE output; choose the output in Wire. Merge All waits for parallel inputs; Merge Any converges conditional branches without waiting. Select a node to edit its condition, merge mode or simulated latency. Invalid connection types are rejected in both the builder and JSON imports.</p>
+          <p>Run, pause, step 0.5 seconds, or inject a burst of requests. Click a trace step to inspect its input/output; Locate node reveals it in the world. Queues wait for available workers, and scaling increases capacity without restarting the flow. Runs and cache state are transient; node behavior and wire outlets are saved in the design. Limits of 32 requests, 128 steps per request and 8,192 JSON characters prevent runaway simulations.</p>
         </section>
       </div>
       <footer class="sidebar-footer">
@@ -147,6 +164,9 @@ const source = mustQuery<HTMLTextAreaElement>("#source");
 const message = mustQuery<HTMLParagraphElement>("#message");
 const sceneSvg = mustQuery<SVGSVGElement>("#scene");
 const scene = new SystemScene(sceneSvg);
+let builder: WorldBuilder | undefined;
+let flow: FlowPanel | undefined;
+let nodeEditor: FlowNodeEditor | undefined;
 const sceneTitle = mustQuery<HTMLElement>("#scene-title");
 const sceneCount = mustQuery<HTMLElement>("#scene-count");
 const applyButton = mustQuery<HTMLButtonElement>("#apply");
@@ -202,9 +222,10 @@ let tipSize = { width: 0, height: 0 };
 /** Replica identity changes descriptions without restarting cluster animation. */
 let tipInstanceId: string | null = null;
 
-/** Preferred card offset from the anchor: above and slightly right. */
-const CALLOUT_OFFSET_X = 41.6;
-const CALLOUT_OFFSET_Y = -64;
+/** Cached HTML overlay geometry; pointer movement never forces panel layout. */
+let calloutObstacles: CalloutRect[] = [];
+const calloutPoint = { clientX: 0, clientY: 0 };
+let hasCalloutPoint = false;
 
 /** Resolved hover or selection target. */
 interface TargetIds {
@@ -307,12 +328,15 @@ function providerState(instanceIds: readonly (string | undefined)[]): {
  * Providers every member of a target supports.
  *
  * A mixed-type cluster only offers a provider that can skin every one of its
- * members; a database target returns none, so the inspector hides the field.
+ * members; incompatible mixed-type targets hide the field.
  */
 function providerOptions(instanceIds: readonly string[]) {
   if (instanceIds.length === 0) return [];
-  return providersFor(inferInstanceType(instanceIds[0])).filter((theme) =>
-    instanceIds.every((id) => theme.types.includes(inferInstanceType(id))),
+  return providersFor(inferInstanceType(instanceIds[0])).filter(
+    (theme) =>
+      instanceIds.every((id) => theme.types.includes(inferInstanceType(id))) &&
+      (instanceIds.length < 2 ||
+        !replicaIssue({ id: instanceIds[0], provider: theme.id })),
   );
 }
 
@@ -398,13 +422,18 @@ function fillCallout(
   restart = true,
 ): void {
   tipInstanceId = ids.instanceId;
-  calloutKind.textContent = ids.clusterId ? "Cluster" : "Instance";
+  const componentType = inferInstanceType(
+    ids.instanceId ?? members[0]?.dataset.instanceId ?? "",
+  );
+  calloutKind.textContent = ids.clusterId
+    ? "Cluster"
+    : BUILD_TYPES.find((item) => item.type === componentType)!.label;
   calloutName.textContent = ids.clusterId
     ? (clusterLabel(ids.clusterId) ?? ids.clusterId)
     : (members[0].querySelector(".instance-label")?.textContent ??
       ids.instanceId);
   calloutMeta.textContent = ids.clusterId
-    ? `${members.length} replica${members.length === 1 ? "" : "s"}`
+    ? `${members.length} ${componentType === "compute-server" || componentType === "media-worker" ? "instance" : "replica"}${members.length === 1 ? "" : "s"}`
     : ids.instanceId;
   // Group descriptions take precedence; a replica can supply its own when the
   // group has none. Frame/caption hovers only have the group's description.
@@ -440,6 +469,7 @@ function revealCallout(): void {
 /** Hide the callout and forget its target. */
 function hideCallout(): void {
   tipKey = null;
+  hasCalloutPoint = false;
   callout.classList.remove("visible");
 }
 
@@ -463,18 +493,20 @@ function clusterLabel(clusterId: string | null): string | null {
  * corner nearest the anchor.
  */
 function positionCallout(point: { clientX: number; clientY: number }): void {
+  calloutPoint.clientX = point.clientX;
+  calloutPoint.clientY = point.clientY;
+  hasCalloutPoint = true;
   const stageBox = stageBounds,
     anchorX = point.clientX - stageBox.left,
     anchorY = point.clientY - stageBox.top,
-    margin = 12,
-    cardX = Math.min(
-      Math.max(CALLOUT_OFFSET_X, margin - anchorX),
-      stageBox.width - margin - tipSize.width - anchorX,
+    placement = placeCallout(
+      { x: anchorX, y: anchorY },
+      tipSize,
+      stageBox,
+      calloutObstacles,
     ),
-    cardY = Math.min(
-      Math.max(CALLOUT_OFFSET_Y - tipSize.height, margin - anchorY),
-      stageBox.height - margin - tipSize.height - anchorY,
-    ),
+    cardX = placement.x - anchorX,
+    cardY = placement.y - anchorY,
     corners = [
       [cardX, cardY],
       [cardX + tipSize.width, cardY],
@@ -633,9 +665,35 @@ function openDetail(ids: TargetIds): void {
       ids.instanceId ??
       "");
   detailCount.textContent = String(memberIds.length);
-  replicaDecrease.disabled = memberIds.length <= 1;
-  replicaIncrease.disabled = memberIds.length >= 10;
+  const scalingIssue = replicaIssue(
+    current.instances.find((item) => item.id === memberIds[0])!,
+  );
+  const scalingReason = mustQuery<HTMLElement>("#detail-scaling-reason");
+  mustQuery<HTMLElement>(".replica-stepper").hidden = !!scalingIssue;
+  detailReplicas.hidden = !!scalingIssue;
+  scalingReason.hidden = !scalingIssue;
+  scalingReason.textContent = scalingIssue ?? "";
+  const scalingType = inferInstanceType(memberIds[0]);
+  const scalingName =
+    scalingType === "database-rack" || scalingType === "cache"
+      ? "replicas"
+      : "instances";
+  mustQuery<HTMLElement>("#detail-scaling-label").textContent = scalingIssue
+    ? "Scaling"
+    : scalingName === "replicas"
+      ? "Replicas"
+      : "Instances";
+  replicaDecrease.setAttribute("aria-label", `Decrease ${scalingName}`);
+  replicaIncrease.setAttribute("aria-label", `Increase ${scalingName}`);
+  replicaDecrease.disabled = !!scalingIssue || memberIds.length <= 1;
+  replicaIncrease.disabled =
+    !!scalingIssue ||
+    memberIds.length >= 10 ||
+    current.instances.length >= MAX_INSTANCES;
   detailLinkCount.textContent = String(links.length);
+  nodeEditor?.show(memberIds);
+  if (memberIds[0]) flow?.inspectNode(memberIds[0]);
+  if (window.innerWidth < 900) flow?.collapse();
 
   const specRow = (term: string, value: string) => {
     const row = document.createElement("div"),
@@ -650,7 +708,10 @@ function openDetail(ids: TargetIds): void {
   detailSpec.replaceChildren(
     specRow("ID", ids.clusterId ?? ids.instanceId ?? ""),
     specRow("Kind", ids.clusterId ? "Cluster" : "Instance"),
-    specRow("Replicas", String(memberIds.length)),
+    specRow(
+      scalingName === "replicas" ? "Replicas" : "Instances",
+      String(memberIds.length),
+    ),
     specRow("Links", String(links.length)),
   );
 
@@ -717,6 +778,8 @@ function changeReplicas(delta: number): void {
     : undefined;
   const memberId = cluster?.instances[0] ?? ids.instanceId;
   if (!memberId) return;
+  if (replicaIssue(current.instances.find((item) => item.id === memberId)!))
+    return;
   const count = (cluster?.instances.length ?? 1) + delta;
   if (count < 1 || count > 10) return;
   const design = resizeReplicas(current, memberId, count);
@@ -767,7 +830,14 @@ function changeProvider(provider: string | undefined): void {
   });
   if (!changed) return;
 
-  const design: Design = { ...current, instances };
+  let design: Design;
+  try {
+    design = parseDesign(JSON.stringify({ ...current, instances }));
+  } catch (error) {
+    showError(error);
+    openDetail(ids);
+    return;
+  }
   scene.render(design, true);
   current = design;
   syncDesign();
@@ -856,12 +926,14 @@ let current: Design = webAppExample;
  * caller is responsible for validation. `current` is the export source.
  */
 function apply(design: Design): void {
+  builder?.reset();
   clearSelection();
   hideCallout();
   // Manual placement offsets belong to the outgoing scene's instance ids and
   // must not leak into a document whose ids may repeat with new meaning.
   scene.clearOffsets();
   scene.render(design);
+  flow?.reset(design);
   current = design;
   syncDesign();
 }
@@ -880,6 +952,8 @@ function syncDesign(): void {
   source.removeAttribute("aria-invalid");
   message.classList.remove("error");
   message.textContent = "Canvas is up to date.";
+  builder?.sync(design);
+  flow?.sync(design);
 }
 
 /**
@@ -1050,6 +1124,8 @@ function setPanelOpen(open: boolean): void {
       document.activeElement instanceof HTMLElement
         ? document.activeElement
         : toggle;
+    builder?.close();
+    flow?.collapse();
     sidebar.inert = false;
     sidebar.removeAttribute("aria-hidden");
     closeButton.focus({ preventScroll: true });
@@ -1093,3 +1169,129 @@ document.addEventListener("visibilitychange", () =>
 );
 
 apply(webAppExample);
+
+/**
+ * Construction commits pin real sites and preserve the camera. Transient anchor
+ * offsets are cleared only after they have been folded into explicit placements.
+ */
+function commitWorld(design: Design): void {
+  scene.clearOffsets();
+  scene.render(design, true);
+  current = design;
+  syncDesign();
+  exampleSelect.value = "";
+  showExampleSummary(null);
+}
+
+builder = new WorldBuilder(stage, sceneSvg, scene, {
+  read: () => current,
+  commit: commitWorld,
+  enter: () => {
+    scene.freezeView();
+    flow?.collapse();
+    clearSelection();
+    hideCallout();
+    if (sidebar.classList.contains("open")) setPanelOpen(false);
+  },
+});
+scene.onPlacementChange(() =>
+  commitWorld(pinWorld(current, scene.getWorldInstances())),
+);
+
+flow = new FlowPanel(stage, sceneSvg, scene, current, {
+  enter: () => {
+    scene.freezeView();
+    builder?.close();
+    if (window.innerWidth < 900) clearSelection();
+    if (sidebar.classList.contains("open")) setPanelOpen(false);
+  },
+  locate: (id: string) => {
+    clearSelection();
+    const anchor = [
+      ...sceneSvg.querySelectorAll<SVGGElement>(".scene-instance"),
+    ].find((node) => node.dataset.instanceId === id);
+    const ids = targetIds(anchor ?? null);
+    if (!ids) return;
+    const mobile = window.innerWidth < 900;
+    if (mobile) flow?.collapse();
+    const left = mobile
+      ? 16
+      : mustQuery<HTMLElement>(".flow-panel").getBoundingClientRect().right +
+        24;
+    scene.focus(ids.key, {
+      x: left,
+      y: 80,
+      width: Math.max(200, stageBounds.width - left - 24),
+      height: Math.max(200, stageBounds.height - 170),
+    });
+  },
+  loadExample: () => {
+    apply(mediaExample);
+    exampleSelect.value = "media-processing";
+    showExampleSummary("media-processing");
+  },
+});
+nodeEditor = new FlowNodeEditor(
+  mustQuery<HTMLElement>(".detail-body"),
+  () => current,
+  commitWorld,
+);
+
+/**
+ * HTML overlays, not SVG animation, invalidate the cached exclusion rectangles.
+ * Measure only on overlay resize/state changes. Aside offsets represent their
+ * final open position rather than a sliding animation's intermediate position.
+ */
+const calloutOverlays = [
+  mustQuery<HTMLElement>(".flow-panel"),
+  mustQuery<HTMLElement>(".build-dock"),
+  mustQuery<HTMLElement>("#build-status"),
+  toggle,
+  sidebar,
+  detail,
+];
+let calloutMeasureFrame: number | null = null;
+/** Coalesce overlay mutations without doing DOM measurements on pointer frames. */
+function scheduleCalloutMeasure(): void {
+  if (calloutMeasureFrame !== null) return;
+  calloutMeasureFrame = requestAnimationFrame(() => {
+    calloutMeasureFrame = null;
+    const rectangles: CalloutRect[] = [];
+    for (const element of calloutOverlays) {
+      const aside = element === sidebar || element === detail;
+      if (aside && !element.classList.contains("open")) continue;
+      const rect = element.getBoundingClientRect();
+      if (!rect.width || !rect.height) continue;
+      rectangles.push({
+        x: aside ? element.offsetLeft : rect.left - stageBounds.left,
+        y: aside ? element.offsetTop : rect.top - stageBounds.top,
+        width: rect.width,
+        height: rect.height,
+      });
+    }
+    calloutObstacles = rectangles;
+    if (hasCalloutPoint && callout.classList.contains("visible"))
+      positionCallout(calloutPoint);
+  });
+}
+const calloutOverlayResize = new ResizeObserver(scheduleCalloutMeasure);
+const calloutOverlayState = new MutationObserver(scheduleCalloutMeasure);
+for (const element of calloutOverlays) {
+  calloutOverlayResize.observe(element);
+  calloutOverlayState.observe(element, {
+    attributes: true,
+    subtree: element !== sidebar && element !== detail,
+    attributeFilter: ["class", "hidden", "aria-expanded", "aria-hidden"],
+  });
+}
+calloutOverlayResize.observe(stage);
+new ResizeObserver(([entry]) => {
+  const box = entry.borderBoxSize[0];
+  const width = box?.inlineSize ?? calloutCard.offsetWidth;
+  const height = box?.blockSize ?? calloutCard.offsetHeight;
+  if (width === tipSize.width && height === tipSize.height) return;
+  tipSize = { width, height };
+  if (hasCalloutPoint && callout.classList.contains("visible"))
+    positionCallout(calloutPoint);
+}).observe(calloutCard);
+scheduleCalloutMeasure();

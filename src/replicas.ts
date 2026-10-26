@@ -1,4 +1,6 @@
 import type { Design } from "./design";
+import { MAX_INSTANCES } from "./design";
+import { replicaIssue, replicaGroupIssue } from "./component-rules";
 
 /**
  * Resize the logical target containing instanceId to 1–10 members without
@@ -21,12 +23,18 @@ export function resizeReplicas(
     (instance) => instance.id === instanceId,
   );
   if (!original) throw new Error(`Unknown instance: ${instanceId}`);
+  const issue = replicaIssue(original);
+  if (issue) throw new Error(issue);
   const clusters = design.clusters.map((cluster, index) => ({
     ...cluster,
     id: cluster.id ?? `cluster-${index + 1}`,
   }));
   const cluster = clusters.find((item) => item.instances.includes(instanceId));
   const members = cluster?.instances ?? [instanceId];
+  const groupIssue = replicaGroupIssue(
+    members.map((id) => design.instances.find((item) => item.id === id)!),
+  );
+  if (groupIssue) throw new Error(groupIssue);
   if (members.length === count) return design;
   const primary = design.instances.find(
     (instance) => instance.id === members[0],
@@ -37,18 +45,22 @@ export function resizeReplicas(
     (instance) => !removed.has(instance.id),
   );
   const used = new Set(instances.map((instance) => instance.id));
+  if (instances.length + Math.max(0, count - kept.length) > MAX_INSTANCES)
+    throw new Error(`A world supports at most ${MAX_INSTANCES} components.`);
+  // A replica inherits presentation, not the primary's exact manual site.
+  const { placement: _placement, ...presentation } = primary;
   for (let suffix = 2; kept.length < count; suffix++) {
     const id = `${primary.id.slice(0, 80)}-replica-${suffix}`;
     if (used.has(id)) continue;
     used.add(id);
-    instances.push({ ...primary, id });
+    instances.push({ ...presentation, id });
     kept.push(id);
   }
   const seen = new Set<string>();
   const connections = design.connections.flatMap((link) => {
     const from = removed.has(link.from) ? primary.id : link.from;
     const to = removed.has(link.to) ? primary.id : link.to;
-    const key = JSON.stringify([from, to, link.relation]);
+    const key = JSON.stringify([from, to, link.outlet ?? "out", link.relation]);
     if (from === to || seen.has(key)) return [];
     seen.add(key);
     return [{ ...link, from, to }];
