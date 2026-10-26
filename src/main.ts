@@ -134,8 +134,9 @@ app.innerHTML = `
 
         <section class="section schema-note">
           <div class="section-label">Dynamic design</div>
-          <code>instances: [{ id, label?, provider?, placement?, condition?, mergeMode?, latencyMs? }]<br>connections: [{ id?, from, to, outlet?, relation? }]<br>clusters: [{ label?, instances }]</code>
+          <code>instances: [{ id, label?, provider?, placement?, condition?, mergeMode?, latencyMs? }]<br>connections: [{ id?, from, to, outlet?, relation? }]<br>clusters: [{ label?, instances }]<br>groups: [{ id, label, instances }]</code>
           <p>Open Build at the bottom to construct a system directly. Drag a component into the world, or select a card and click clear ground. Placements snap to the build grid and are saved in placement. Arrow keys move a keyboard-selected preview; Enter places it and Escape cancels. Use Wire to drag between components, click a source then a destination, or choose endpoints and a traffic label in the wire panel. Remove deletes a component and its incident wires. A machine's anchor handle moves an existing node or replica group; completed moves are saved with the design.</p>
+          <p>Groups organize any mix of nodes without changing their connections or replica pools. Open Groups, click nodes or drag a selection box, name the selection and create a group. Shift-click starts multi-selection; Ctrl/Cmd+G opens grouping. Click a group's title or choose it in Manage group to rename it or change membership. Drag its title bar to move every member together; focused titles also support arrow keys. Ungroup removes only the container, never its nodes or wires. Groups and their positions round-trip through JSON.</p>
           <p>ID prefixes pick the visual: db- databases, compute-/server- APIs, web- frontend clients, cache- caches, cdn- delivery edges, queue- message queues, storage- object storage, worker- media workers, branch- If/Else, and merge- synchronization. Without placement, positions are automatic; manual sites remain fixed through export and import. Colors follow the renderer and provider.</p>
           <p>An optional provider switches a component to a product skin. Redis applies only to cache nodes: it reworks the cache silhouette and platform, prints the official Redis mark on the cabinet, and replaces the accent with Redis red. Provider changes build the new cabinet layer by layer: base first, stacked body sections seating one at a time, then the top cap. Completed layers stay fixed; there are no swinging panels or wireframe chassis. The camera stays fixed. Up to three cabinets animate together; additional replicas queue. Reduced motion uses an immediate switch. Other renderers ignore providers they do not support, so documents stay portable.</p>
           <p>CDN nodes support ${providersFor("cdn")
@@ -1177,6 +1178,14 @@ function commitWorld(design: Design): void {
 builder = new WorldBuilder(stage, sceneSvg, scene, {
   read: () => current,
   commit: commitWorld,
+  selection: () => {
+    const ids = targetIds(selectedAnchor);
+    return ids && selectedAnchor
+      ? targetMembers(ids, selectedAnchor).map(
+          (node) => node.dataset.instanceId!,
+        )
+      : [];
+  },
   enter: () => {
     scene.freezeView();
     clearSelection();

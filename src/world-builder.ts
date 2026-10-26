@@ -15,6 +15,7 @@ import {
 import { findProvider } from "./providers";
 import { instanceColor } from "./layout";
 import { connectionIssue, outputPorts } from "./component-rules";
+import { GroupControls } from "./group-controls";
 
 type Tool = "select" | "place" | "wire" | "remove";
 
@@ -23,6 +24,7 @@ interface BuilderOptions {
   read(): Design;
   commit(design: Design): void;
   enter(): void;
+  selection(): readonly string[];
 }
 
 /** Small catalogue glyphs, not clones of the world's detailed vector models. */
@@ -83,6 +85,7 @@ export class WorldBuilder {
   private frame: number | null = null;
   private previewShown = false;
   private category = "all";
+  private readonly groups: GroupControls;
 
   /** Mount the drawer and arbitrate construction before the scene's ordinary pan/select handlers. */
   constructor(
@@ -99,6 +102,7 @@ export class WorldBuilder {
         <button id="build-select" type="button" aria-pressed="true" title="Inspect components and pan the world">Select</button>
         <button id="build-wire" type="button" aria-pressed="false" title="Drag a wire between components, or click its two endpoints">Wire</button>
         <button id="build-remove" type="button" aria-pressed="false" title="Remove a component and its connected wires">Remove</button>
+        <button id="build-groups" type="button" aria-pressed="false" title="Select, organize and move multiple nodes">Groups</button>
       </div>
       <span id="build-status" class="build-status" role="status" aria-live="polite">Build your system, one component at a time.</span>
       <span id="build-counts" class="build-counts"></span>
@@ -130,6 +134,23 @@ export class WorldBuilder {
     this.to = this.query("#build-to");
     this.relation = this.query("#build-relation");
     this.outlet = this.query("#build-outlet");
+    this.groups = new GroupControls(this.root, svg, scene, {
+      read: () => options.read(),
+      commit: (design) => options.commit(design),
+      selection: () => options.selection(),
+      prepare: () => {
+        this.reset();
+        this.options.enter();
+      },
+      reveal: () => {
+        this.setOpen(true);
+        this.query("#build-catalogue").hidden = true;
+        this.query("#build-wiring").hidden = true;
+        this.say(
+          "Groups: click nodes or drag a selection box · drag group titles to move together.",
+        );
+      },
+    });
     this.toggle.addEventListener("click", () =>
       this.setOpen(!!this.body.hidden),
     );
@@ -225,6 +246,7 @@ export class WorldBuilder {
     this.toggle.setAttribute("aria-expanded", String(open));
     this.root.classList.toggle("expanded", open);
     if (!open) {
+      if (this.groups.isOpen) this.reset();
       if (this.tool === "place") this.reset();
       this.toggle.focus({ preventScroll: true });
     }
@@ -339,6 +361,7 @@ export class WorldBuilder {
 
   /** Restore ordinary scene controls; safe during pointer cancellation, Apply, blur and removal. */
   reset(): void {
+    this.groups?.close();
     if (this.frame !== null) cancelAnimationFrame(this.frame);
     this.frame = null;
     const pointer = this.pointer;
@@ -372,6 +395,7 @@ export class WorldBuilder {
 
   /** Keep counts and keyboard-accessible wire endpoints synchronized with the same document. */
   sync(design: Design): void {
+    this.groups.sync(design);
     this.counts.textContent = `${design.instances.length} component${design.instances.length === 1 ? "" : "s"} · ${design.connections.length} wire${design.connections.length === 1 ? "" : "s"}`;
     for (const select of [this.from, this.to]) {
       const value = select.value;
@@ -489,6 +513,7 @@ export class WorldBuilder {
 
   /** Construction owns only its gestures; Select leaves all pan/pinch/anchor behavior intact. */
   private worldDown(event: PointerEvent): void {
+    if (this.groups.claimsPointer(event)) return;
     if (this.tool === "select" || event.button !== 0 || !event.isPrimary)
       return;
     event.preventDefault();
@@ -690,6 +715,7 @@ export class WorldBuilder {
 
   /** Escape cancels first; keyboard placement needs no pointer or drag-and-drop API. */
   private key(event: KeyboardEvent): void {
+    if (this.groups.handleKey(event)) return;
     if (
       event.key === "Escape" &&
       !(event.target instanceof HTMLSelectElement)

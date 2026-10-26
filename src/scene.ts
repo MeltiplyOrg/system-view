@@ -1,6 +1,12 @@
 import { createDatabaseDefinitions, project } from "./database";
 import { createProviderDatabaseDefinitions } from "./database-skins";
-import type { Connection, Design, GroundPoint, PlacedInstance } from "./design";
+import type {
+  Connection,
+  Design,
+  GroundPoint,
+  PlacedInstance,
+  NodeGroup,
+} from "./design";
 import { MAX_WORLD_COORDINATE } from "./design";
 import type { BuildItem } from "./construction";
 import { instanceColor } from "./layout";
@@ -625,6 +631,53 @@ function createNodeFrames(frames: Iterable<PlacedCluster>): SVGGElement {
   return group;
 }
 
+/** Organizational backdrops use projected artwork bounds, not replica routing frames. */
+function createNodeGroups(
+  groups: readonly NodeGroup[],
+  bounds: ReadonlyMap<
+    string,
+    { minX: number; minY: number; maxX: number; maxY: number }
+  >,
+): SVGGElement {
+  const layer = document.createElementNS(NS, "g");
+  layer.classList.add("node-groups");
+  for (const group of groups) {
+    let minX = Infinity,
+      minY = Infinity,
+      maxX = -Infinity,
+      maxY = -Infinity;
+    for (const id of group.instances) {
+      const box = bounds.get(`${INSTANCE_KEY}${id}`)!;
+      minX = Math.min(minX, box.minX);
+      minY = Math.min(minY, box.minY);
+      maxX = Math.max(maxX, box.maxX);
+      maxY = Math.max(maxY, box.maxY);
+    }
+    const root = document.createElementNS(NS, "g");
+    root.classList.add("node-group");
+    root.dataset.nodeGroupId = group.id;
+    const x = minX - 26,
+      y = minY - 52,
+      width = maxX - minX + 52;
+    root.innerHTML = `<rect class="node-group-area" x="${x}" y="${y}" width="${width}" height="${maxY - y + 26}" rx="10"/><g class="node-group-header" role="button" tabindex="0"><rect class="node-group-header-hit" x="${x}" y="${y}" width="${width}" height="34" rx="8"/><path class="node-group-grip" d="M${x + 13} ${y + 12}h10m-10 5h10m-10 5h10"/><text class="node-group-title" x="${x + 34}" y="${y + 23}"></text></g>`;
+    const maxChars = Math.max(2, Math.floor((width - 62) / 7));
+    const label =
+      group.label.length > maxChars
+        ? `${group.label.slice(0, maxChars - 1)}…`
+        : group.label;
+    root.querySelector(".node-group-title")!.textContent =
+      `${label} · ${group.instances.length}`;
+    root
+      .querySelector(".node-group-header")!
+      .setAttribute(
+        "aria-label",
+        `${group.label}: drag group, Enter to manage, arrow keys to move`,
+      );
+    layer.append(root);
+  }
+  return layer;
+}
+
 /**
  * Owns the full-viewport SVG scene.
  *
@@ -1011,6 +1064,9 @@ export class SystemScene {
    */
   render(design: Design, animate = false): void {
     this.currentDesign = design;
+    // An image role hides interactive descendants from assistive technology.
+    // Grouped worlds expose their keyboard-operable titles as real controls.
+    this.svg.setAttribute("role", design.groups?.length ? "group" : "img");
     this.hoveredFrameId = null;
     const previousCluster = new Map(this.instanceCluster);
     this.instanceCluster.clear();
@@ -1124,6 +1180,7 @@ export class SystemScene {
 
     const layer = document.createElementNS(NS, "g");
     layer.append(
+      createNodeGroups(design.groups ?? [], this.targetBounds),
       createNodeFrames(
         [...this.borderFrames.values()].filter(
           (frame) => !junctionKeys.has(frame.id),
@@ -1578,6 +1635,7 @@ export class SystemScene {
    * @returns The border id, or null when the pointer is over nothing framed.
    */
   private frameIdOf(target: Element | null): string | null {
+    if (target?.closest?.(".node-group")) return null;
     if (target?.closest?.(".drag-anchor")) return this.anchorKey;
     const framed = target?.closest?.("[data-cluster-id]");
     if (framed) return framed.getAttribute("data-cluster-id");
@@ -2085,6 +2143,47 @@ export class SystemScene {
     this.buildGhost = null;
     this.buildWire = null;
     this.componentRaster.sync();
+  }
+
+  /** Cheap live selection rectangles, separate from cached node artwork and replica frames. */
+  previewNodeSelection(ids: Iterable<string>): void {
+    this.buildLayer.style.display = "";
+    const marks: SVGRectElement[] = [];
+    for (const id of ids) {
+      const box = this.targetBounds.get(`${INSTANCE_KEY}${id}`);
+      if (!box) continue;
+      const rect = document.createElementNS(NS, "rect");
+      rect.classList.add("group-node-selected");
+      rect.setAttribute("x", String(box.minX - 6));
+      rect.setAttribute("y", String(box.minY - 6));
+      rect.setAttribute("width", String(box.maxX - box.minX + 12));
+      rect.setAttribute("height", String(box.maxY - box.minY + 12));
+      rect.setAttribute("rx", "5");
+      marks.push(rect);
+    }
+    this.buildLayer.replaceChildren(...marks);
+  }
+
+  /** Intersect a client-space marquee with cached projected node bounds; never measure model DOM on pointer frames. */
+  nodesInSelection(start: GroundPoint, end: GroundPoint): string[] {
+    const a = this.clientToUser(start.x, start.y),
+      b = this.clientToUser(end.x, end.y);
+    if (!a || !b) return [];
+    const left = Math.min(a.x, b.x),
+      right = Math.max(a.x, b.x);
+    const top = Math.min(a.y, b.y),
+      bottom = Math.max(a.y, b.y);
+    return this.worldInstances
+      .filter((node) => {
+        const box = this.targetBounds.get(`${INSTANCE_KEY}${node.id}`)!;
+        return (
+          box.maxX >= left &&
+          box.minX <= right &&
+          box.maxY >= top &&
+          box.minY <= bottom
+        );
+      })
+      .map((node) => node.id);
   }
 
   /** Reuse one actual component at the snapped site; moves only change its parent transform. */

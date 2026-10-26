@@ -127,6 +127,13 @@ export interface Cluster {
   instances: string[];
 }
 
+/** Organizational container only: mixed node types retain their own wiring and replica pools. */
+export interface NodeGroup {
+  id: string;
+  label: string;
+  instances: string[];
+}
+
 /**
  * A complete editable scene.
  *
@@ -141,6 +148,8 @@ export interface Design {
   instances: DesignInstance[];
   connections: Connection[];
   clusters: Cluster[];
+  /** Optional organizational containers; absence means an ungrouped world. */
+  groups?: NodeGroup[];
 }
 
 /**
@@ -802,11 +811,54 @@ export function parseDesign(source: string): Design {
     };
   });
 
+  const groupInput = root.groups === undefined ? [] : root.groups;
+  if (!Array.isArray(groupInput) || groupInput.length > 64)
+    throw new Error("groups must be an array of at most 64 node groups.");
+  const groupIds = new Set<string>(),
+    grouped = new Map<string, string>();
+  const groups = groupInput.map((value, index): NodeGroup => {
+    const path = `groups[${index}]`,
+      group = record(value, path);
+    const id = text(group.id, `${path}.id`);
+    if (groupIds.has(id)) throw new Error(`Duplicate node group id: ${id}`);
+    groupIds.add(id);
+    if (
+      !Array.isArray(group.instances) ||
+      !group.instances.length ||
+      group.instances.length > 64
+    )
+      throw new Error(`${path}.instances must contain 1–64 instance IDs.`);
+    const members = group.instances.map((value, memberIndex) => {
+      const member = text(value, `${path}.instances[${memberIndex}]`);
+      if (!ids.has(member))
+        throw new Error(`${path} references an unknown instance.`);
+      if (grouped.has(member))
+        throw new Error(`${member} appears more than once in node groups.`);
+      grouped.set(member, id);
+      return member;
+    });
+    return {
+      id,
+      label: text(group.label, `${path}.label`),
+      instances: members,
+    };
+  });
+  // Replica pools are atomic movement units. Splitting one across containers
+  // would make a pool handle move nodes outside its organizational group.
+  for (const cluster of clusters) {
+    const owners = new Set(cluster.instances.map((id) => grouped.get(id)));
+    if (owners.size > 1)
+      throw new Error(
+        "A replica pool must belong entirely to one node group or remain ungrouped.",
+      );
+  }
+
   return {
     version: 1,
     name: text(root.name, "name"),
     instances,
     connections,
     clusters,
+    ...(root.groups === undefined ? {} : { groups }),
   };
 }

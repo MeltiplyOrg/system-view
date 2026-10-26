@@ -90,5 +90,17 @@ export function resizeReplicas(
       instances: kept,
     });
   }
-  return { ...design, instances, connections, clusters };
+  const groups = design.groups?.map((group) => ({
+    ...group,
+    instances: group.instances.flatMap((id) =>
+      id === members[0] ? kept : members.includes(id) ? [] : [id],
+    ),
+  }));
+  return {
+    ...design,
+    instances,
+    connections,
+    clusters,
+    ...(groups ? { groups } : {}),
+  };
 }

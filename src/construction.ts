@@ -258,5 +258,13 @@ export function removeComponent(design: Design, id: string): Design {
       const instances = cluster.instances.filter((member) => member !== id);
       return instances.length > 1 ? [{ ...cluster, instances }] : [];
     }),
+    ...(design.groups
+      ? {
+          groups: design.groups.flatMap((group) => {
+            const instances = group.instances.filter((member) => member !== id);
+            return instances.length ? [{ ...group, instances }] : [];
+          }),
+        }
+      : {}),
   };
 }

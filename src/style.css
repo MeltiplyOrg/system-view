@@ -2172,3 +2172,161 @@ aside.detail.open {
 .scene-frame.wire-target-invalid {
   stroke-opacity: 0.3;
 }
+
+/* Organizational groups are editor backdrops, never replica or routing frames. */
+.node-group-area {
+  fill: var(--accent);
+  fill-opacity: 0.035;
+  stroke: var(--border);
+  stroke-width: 1.2;
+  stroke-dasharray: 6 4;
+  vector-effect: non-scaling-stroke;
+  pointer-events: none;
+}
+.node-group-header {
+  cursor: grab;
+}
+.node-group-header:active {
+  cursor: grabbing;
+}
+.node-group-header-hit {
+  fill: var(--raised);
+  stroke: var(--border);
+}
+.node-group-header:focus-visible .node-group-header-hit {
+  stroke: var(--accent);
+}
+.node-group-grip {
+  fill: none;
+  stroke: var(--muted);
+  stroke-width: 1;
+  pointer-events: none;
+}
+.node-group-title {
+  fill: var(--fg);
+  font: 12px var(--mono);
+  pointer-events: none;
+}
+.group-node-selected {
+  fill: none;
+  stroke: var(--accent);
+  stroke-width: 1.5;
+  stroke-dasharray: 5 3;
+  vector-effect: non-scaling-stroke;
+}
+.tool-group {
+  cursor: crosshair;
+}
+.tool-group .drag-anchor {
+  display: none;
+}
+.group-marquee {
+  position: fixed;
+  z-index: 11;
+  pointer-events: none;
+  border: 1px solid var(--accent);
+  background: color-mix(in srgb, var(--accent) 8%, transparent);
+}
+.group-marquee[hidden] {
+  display: none;
+}
+.group-controls {
+  display: grid;
+  grid-template-columns: minmax(0, 0.9fr) minmax(0, 1fr) minmax(0, 1.1fr);
+  gap: 22px;
+  padding: 20px;
+  max-height: min(340px, 44vh);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+.group-intro h2 {
+  margin: 7px 0;
+  font: 600 18px var(--sans);
+}
+.group-controls p {
+  color: var(--muted);
+  font: 11px/1.6 var(--sans);
+  margin: 8px 0;
+}
+.group-controls :is(label, legend) {
+  color: var(--muted);
+  font: 10px var(--mono);
+}
+.group-controls label {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin: 10px 0;
+  min-width: 0;
+}
+.group-controls :is(select, input:not([type="checkbox"])) {
+  width: 100%;
+  min-width: 0;
+  padding: 8px;
+  color: var(--fg);
+  background: var(--page);
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  font: 11px var(--mono);
+}
+.group-controls :is(input, select, button):focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+.group-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.group-actions .btn {
+  padding: 8px;
+  font-size: 10px;
+}
+.group-actions button:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+.group-member-field {
+  min-width: 0;
+  margin: 0;
+  padding: 8px 12px;
+  border: 1px solid var(--border);
+}
+.group-members {
+  max-height: 190px;
+  overflow-y: auto;
+  scrollbar-width: thin;
+}
+.group-members label {
+  flex-direction: row;
+  align-items: center;
+  gap: 9px;
+  line-height: 1.5;
+  cursor: pointer;
+}
+.group-members input {
+  flex-shrink: 0;
+  accent-color: var(--accent);
+}
+.group-members span {
+  overflow-wrap: anywhere;
+}
+@media (max-width: 600px) {
+  .build-toolbar {
+    gap: 6px;
+  }
+  .build-tools button {
+    padding-inline: 7px;
+  }
+  .group-controls {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 10px;
+    padding: 12px;
+  }
+  .group-intro p {
+    margin-top: 0;
+  }
+  .group-members {
+    max-height: 150px;
+  }
+}

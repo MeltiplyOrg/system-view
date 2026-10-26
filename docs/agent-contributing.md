@@ -25,28 +25,29 @@ this guide adds the app's mechanics.
 
 ## Ownership map
 
-| Surface                                           | Owner                            | Collaborators                                                                |
-| ------------------------------------------------- | -------------------------------- | ---------------------------------------------------------------------------- |
-| Document shape, validation, examples              | `src/design.ts`                  | `src/main.ts` editor; `src/layout.ts` inputs                                 |
-| Placement, color, cluster bounds                  | `src/layout.ts`                  | `src/platform.ts`, `src/scene.ts`, `src/routing.ts`                          |
-| Provider catalog, accent, footprint, mark         | `src/providers.ts`               | `src/components.ts`, `src/database.ts`, `src/style.css`, `src/main.ts`       |
-| Renderer artwork, height, label placement, motion | `src/components.ts`              | `src/style.css`, `src/component-raster.ts`                                   |
-| Database rack geometry and shared `<defs>`        | `src/database.ts`                | `src/components.ts` wrapper                                                  |
-| Provider database cabinets                        | `src/database-skins.ts`          | `src/database.ts`, `src/providers.ts`, `src/style.css`                       |
-| CDN provider appliances                           | `src/cdn-skins.ts`               | `src/component-geometry.ts`, `src/providers.ts`, `src/cdn-provider-marks.ts` |
-| Platform union and rendering                      | `src/platform.ts`                | `src/layout.ts` footprints                                                   |
-| Canvas render pass, camera, selection             | `src/scene.ts`                   | `src/components.ts`, `src/component-raster.ts`, `src/main.ts` overlays       |
-| Raster cache and shared images                    | `src/component-raster.ts`        | `src/scene.ts`, `src/style.css` palettes                                     |
-| Mechanical provider changes                       | `src/transformer-transitions.ts` | `src/transformer.ts` rig; renderer envelope metadata; raster leases          |
-| Layer partition and assembly timing               | `src/assembly.ts`                | `src/transformer.ts`; pure ordering/travel regression tests                  |
-| Shell, editor, callout, detail, theme             | `src/main.ts`                    | `index.html`, `src/style.css`                                                |
-| Replica document mutation                         | `src/replicas.ts`                | `src/layout.ts`, `src/main.ts` stepper                                       |
-| Construction catalogue and graph mutations        | `src/construction.ts`            | `src/design.ts`, `src/layout.ts`, `src/providers.ts`                         |
-| Factory drawer and pointer/keyboard tool state    | `src/world-builder.ts`           | `src/main.ts` commits; `src/scene.ts` preview and ground projection          |
-| Typed connections and replication capabilities    | `src/component-rules.ts`         | `src/design.ts`, `src/construction.ts`, `src/replicas.ts`, builder/inspector |
-| Queue/storage/worker and workflow models          | `src/media-models.ts`            | `src/media-provider-marks.ts`, `src/components.ts`, `src/providers.ts`       |
-| Junction conditions and merge mode                | `src/flow-node-editor.ts`        | parser-backed design annotations; `src/main.ts` inspector                    |
-| Orthogonal cable routing                          | `src/routing.ts`                 | `src/scene.ts` obstacles and ports                                           |
+| Surface                                           | Owner                                                      | Collaborators                                                                    |
+| ------------------------------------------------- | ---------------------------------------------------------- | -------------------------------------------------------------------------------- |
+| Document shape, validation, examples              | `src/design.ts`                                            | `src/main.ts` editor; `src/layout.ts` inputs                                     |
+| Placement, color, cluster bounds                  | `src/layout.ts`                                            | `src/platform.ts`, `src/scene.ts`, `src/routing.ts`                              |
+| Provider catalog, accent, footprint, mark         | `src/providers.ts`                                         | `src/components.ts`, `src/database.ts`, `src/style.css`, `src/main.ts`           |
+| Renderer artwork, height, label placement, motion | `src/components.ts`                                        | `src/style.css`, `src/component-raster.ts`                                       |
+| Database rack geometry and shared `<defs>`        | `src/database.ts`                                          | `src/components.ts` wrapper                                                      |
+| Provider database cabinets                        | `src/database-skins.ts`                                    | `src/database.ts`, `src/providers.ts`, `src/style.css`                           |
+| CDN provider appliances                           | `src/cdn-skins.ts`                                         | `src/component-geometry.ts`, `src/providers.ts`, `src/cdn-provider-marks.ts`     |
+| Platform union and rendering                      | `src/platform.ts`                                          | `src/layout.ts` footprints                                                       |
+| Canvas render pass, camera, selection             | `src/scene.ts`                                             | `src/components.ts`, `src/component-raster.ts`, `src/main.ts` overlays           |
+| Raster cache and shared images                    | `src/component-raster.ts`                                  | `src/scene.ts`, `src/style.css` palettes                                         |
+| Mechanical provider changes                       | `src/transformer-transitions.ts`                           | `src/transformer.ts` rig; renderer envelope metadata; raster leases              |
+| Layer partition and assembly timing               | `src/assembly.ts`                                          | `src/transformer.ts`; pure ordering/travel regression tests                      |
+| Shell, editor, callout, detail, theme             | `src/main.ts`                                              | `index.html`, `src/style.css`                                                    |
+| Replica document mutation                         | `src/replicas.ts`                                          | `src/layout.ts`, `src/main.ts` stepper                                           |
+| Construction catalogue and graph mutations        | `src/construction.ts`                                      | `src/design.ts`, `src/layout.ts`, `src/providers.ts`                             |
+| Factory drawer and pointer/keyboard tool state    | `src/world-builder.ts`                                     | `src/main.ts` commits; `src/scene.ts` preview and ground projection              |
+| Organizational grouping and multi-selection       | `src/node-groups.ts` mutations; `src/group-controls.ts` UI | `src/design.ts` validation; `src/scene.ts` backdrops and cached selection bounds |
+| Typed connections and replication capabilities    | `src/component-rules.ts`                                   | `src/design.ts`, `src/construction.ts`, `src/replicas.ts`, builder/inspector     |
+| Queue/storage/worker and workflow models          | `src/media-models.ts`                                      | `src/media-provider-marks.ts`, `src/components.ts`, `src/providers.ts`           |
+| Junction conditions and merge mode                | `src/flow-node-editor.ts`                                  | parser-backed design annotations; `src/main.ts` inspector                        |
+| Orthogonal cable routing                          | `src/routing.ts`                                           | `src/scene.ts` obstacles and ports                                               |
 
 ## Render pass
 
@@ -92,8 +93,8 @@ One pass explains where most edits belong:
   exact site. Removed members' external links move to the first member.
   Only API/compute and worker machines scale as instances; databases and caches
   support replicas, except SQLite. Clients, CDNs, load balancers, logical queues/buckets,
-  and workflow controls are not machine replicas. Groups require the same type
-  and provider; imports and mutations enforce this, not only the inspector.
+  and workflow controls are not machine replicas. Replica pools require the same
+  type and provider; organizational `groups` may contain any mix of types.
 - `parseDesign` owns limits and reference checks. Add a field there before
   teaching the renderer or editor about it.
 
@@ -144,6 +145,33 @@ One pass explains where most edits belong:
 - Opening construction freezes any inspector camera spring. Opening Design
   cancels construction and collapses its drawer; controls remain keyboard
   reachable, and collapsed content leaves the tab order.
+
+### Organizational node groups
+
+- `groups?: [{id, label, instances}]` is independent of replica `clusters`.
+  It organizes nodes without altering placement, ports, connections, provider
+  choices or scaling semantics. Each node belongs to at most one organization
+  group; replica pools stay wholly inside one group or remain ungrouped.
+- **Groups** shares the existing Build drawer. Click nodes, Shift-click from
+  Select, drag a marquee, or use the native member checkboxes. Ctrl/Cmd+G opens
+  grouping. Creation needs at least two selected nodes; existing groups may
+  retain one member. Empty containers disappear after their last node is removed.
+- The group picker manages names and membership. Saving transfers selected
+  nodes out of previous groups, never nests containers. Ungroup removes only
+  the container. Scaling a grouped pool updates organizational membership;
+  deleting nodes prunes it. All mutations preserve unrelated nodes and wires.
+- Backdrops wrap projected member artwork and do not become cable obstacles
+  or connection endpoints. The title bar drags the whole group; a click opens
+  management. A focused title supports arrow-key movement. Individual nodes
+  and replica handles remain independently editable inside the container.
+- Group drags pin the actual world once, preview one shared bounded delta
+  through the normal keyed scene/raster cache, and commit on release. Escape,
+  capture cancellation, blur, or applying another design restores the starting
+  geometry. No idle clock, model clones, new cache budget or packet actors.
+- Marquee and selection outlines use cached projected bounds, never model DOM
+  measurement on pointer frames. Native checkboxes support keyboard and touch;
+  labels are plain text. Group names, membership and positions survive export
+  and import; transient selection does not.
 
 ### Visual routing workflows
 
@@ -335,18 +363,19 @@ One pass explains where most edits belong:
 
 ## Proof matrix
 
-| Surface                                         | Fast proof                                                                            | Browser proof                                                 |
-| ----------------------------------------------- | ------------------------------------------------------------------------------------- | ------------------------------------------------------------- |
-| Validation, limits, references                  | `tests/design.test.ts`                                                                | apply/import/export in `e2e/app.spec.ts`                      |
-| Placement, pitch, cluster bounds, colors        | `tests/layout.test.ts`                                                                | replica and provider paths in `e2e/app.spec.ts`               |
-| Provider catalogue, gates, object marks         | `tests/providers.test.ts`, `tests/components.test.ts`, `tests/database-skins.test.ts` | `e2e/database-providers.spec.ts`, `e2e/cdn-providers.spec.ts` |
-| Platform topology and markup                    | `tests/platform.test.ts`, `tests/platform-render.test.ts`                             | boot scene render in `e2e/app.spec.ts`                        |
-| Cable routing and cluster ports                 | `tests/routing.test.ts`, `tests/scene-port.test.ts`                                   | `e2e/wires.spec.ts`; link and zoom tests in `e2e/app.spec.ts` |
-| Rack geometry and projection                    | `tests/database.test.ts`                                                              | boot scene and theme switch in `e2e/app.spec.ts`              |
-| Replica mutation                                | `tests/replicas.test.ts`                                                              | replica stepper and ten-replica layout                        |
-| Factory placement, wiring, removal, persistence | `tests/construction.test.ts`, `tests/design.test.ts`, `tests/replicas.test.ts`        | `e2e/world-builder.spec.ts`                                   |
-| Shell, editor, theme, a11y                      | —                                                                                     | `e2e/app.spec.ts`                                             |
-| Canvas, raster, selection, assembly             | `tests/transformer.test.ts` ordering and travel bounds                                | `e2e/app.spec.ts`, `e2e/component-cache.spec.ts`              |
+| Surface                                         | Fast proof                                                                            | Browser proof                                                                 |
+| ----------------------------------------------- | ------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------- |
+| Validation, limits, references                  | `tests/design.test.ts`                                                                | apply/import/export in `e2e/app.spec.ts`                                      |
+| Placement, pitch, cluster bounds, colors        | `tests/layout.test.ts`                                                                | replica and provider paths in `e2e/app.spec.ts`                               |
+| Provider catalogue, gates, object marks         | `tests/providers.test.ts`, `tests/components.test.ts`, `tests/database-skins.test.ts` | `e2e/database-providers.spec.ts`, `e2e/cdn-providers.spec.ts`                 |
+| Platform topology and markup                    | `tests/platform.test.ts`, `tests/platform-render.test.ts`                             | boot scene render in `e2e/app.spec.ts`                                        |
+| Cable routing and cluster ports                 | `tests/routing.test.ts`, `tests/scene-port.test.ts`                                   | `e2e/wires.spec.ts`; link and zoom tests in `e2e/app.spec.ts`                 |
+| Rack geometry and projection                    | `tests/database.test.ts`                                                              | boot scene and theme switch in `e2e/app.spec.ts`                              |
+| Replica mutation                                | `tests/replicas.test.ts`                                                              | replica stepper and ten-replica layout                                        |
+| Factory placement, wiring, removal, persistence | `tests/construction.test.ts`, `tests/design.test.ts`, `tests/replicas.test.ts`        | `e2e/world-builder.spec.ts`                                                   |
+| Organizational groups and shared movement       | `tests/node-groups.test.ts` validation, transfer, scaling and clamping                | actual Groups drawer, title dragging, marquee, import/export and mobile smoke |
+| Shell, editor, theme, a11y                      | —                                                                                     | `e2e/app.spec.ts`                                                             |
+| Canvas, raster, selection, assembly             | `tests/transformer.test.ts` ordering and travel bounds                                | `e2e/app.spec.ts`, `e2e/component-cache.spec.ts`                              |
 
 Gates: `bun run check` (format, lint, types), `bun run build`, `bun run size`.
 
