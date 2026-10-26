@@ -2330,3 +2330,60 @@ aside.detail.open {
     max-height: 150px;
   }
 }
+
+/* Quick actions are screen-space UI, not another world actor or frame loop. */
+.world-context-menu {
+  position: fixed;
+  z-index: 30;
+  width: min(252px, calc(100vw - 16px));
+  max-height: calc(100dvh - 16px);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: 5px;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  background: var(--panel);
+  color: var(--fg);
+  box-shadow: 0 8px 24px #00000024;
+}
+.world-context-menu[hidden] {
+  display: none;
+}
+.context-heading {
+  padding: 8px 10px;
+  margin-bottom: 4px;
+  border-bottom: 1px solid var(--border);
+  color: var(--muted);
+  font: 10px/1.5 var(--mono);
+  overflow-wrap: anywhere;
+}
+.world-context-menu button {
+  display: block;
+  width: 100%;
+  padding: 9px 10px;
+  border: 1px solid transparent;
+  border-radius: 3px;
+  background: transparent;
+  color: var(--fg);
+  text-align: left;
+  font: 11px/1.4 var(--sans);
+  cursor: pointer;
+}
+.world-context-menu button:is(:hover, :focus-visible):not(:disabled) {
+  background: var(--raised);
+  border-color: var(--border);
+  outline: none;
+}
+.world-context-menu button:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+.world-context-menu button.context-danger {
+  margin-top: 4px;
+  border-top-color: var(--border);
+  color: light-dark(#ad3333, #fa9090);
+}
+
+.stage:has(.world-context-menu:not([hidden])) :is(#callout, .drag-anchor) {
+  visibility: hidden;
+}

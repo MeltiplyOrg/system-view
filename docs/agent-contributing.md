@@ -173,6 +173,30 @@ One pass explains where most edits belong:
   labels are plain text. Group names, membership and positions survive export
   and import; transient selection does not.
 
+### Contextual quick actions
+
+- `WorldBuilder` owns one screen-space right-click menu. Node artwork and its
+  standalone/replica frame resolve to actual document identities; group titles
+  resolve to organizational containers. Empty ground opens world actions.
+- Node actions inspect, prime typed outgoing wiring, add/remove multi-selection,
+  group the selection, or delete nodes and incident wires. If/Else has distinct
+  TRUE/FALSE actions. The clicked node is the source even when another node was
+  inspected earlier. Existing `connectionIssue` validation remains authoritative.
+- Right-clicking a selected node acts on that selection; an unselected node
+  targets only itself. Opening/dismissing the menu never changes topology or
+  selection. Group title actions edit, select members, ungroup without deletion,
+  or explicitly delete the group's nodes. Creation opens the name field for
+  immediate renaming. All mutations use the existing pin/commit path.
+- The menu clamps to the viewport, scrolls internally on narrow screens, and
+  hides competing hover chrome. Shift+F10/ContextMenu opens it from the world;
+  Up/Down/Home/End navigate enabled items. Enter/Space activate native buttons.
+  Escape restores world/title focus without clearing selection; Tab, outside
+  presses, camera changes, Apply, tool changes and blur dismiss the menu.
+  Editable text/select fields retain their native context menu behavior.
+- `e2e/context-menu.spec.ts` exercises actual secondary clicks, source/port
+  precedence, selected-vs-unselected deletion, grouping, safe ungrouping,
+  viewport clamping and keyboard dismissal.
+
 ### Visual routing workflows
 
 - This is a visual system-design sandbox, not an integration platform. Provider

@@ -158,6 +158,28 @@ export class GroupControls {
     this.select(nodeGroupMembers(this.options.read(), initial));
   }
 
+  /** Context actions borrow the current multi-selection without mutating it. */
+  get selectedNodes(): readonly string[] {
+    return [...this.selected];
+  }
+
+  /** Open a named group or explicit selection through the ordinary grouping controls. */
+  manage(ids: readonly string[], groupId?: string): void {
+    this.open(ids);
+    if (groupId) {
+      this.choose(groupId);
+      this.picker.value = groupId;
+    }
+    this.name.focus({ preventScroll: true });
+    this.name.select();
+  }
+
+  /** Context selection toggles retain an existing marquee selection and expand whole pools. */
+  toggleNode(id: string): void {
+    if (!this.active) this.open();
+    this.toggle(id);
+  }
+
   /** Closing or switching tools cancels previews without committing their transient positions. */
   close(): void {
     this.cancelGesture();

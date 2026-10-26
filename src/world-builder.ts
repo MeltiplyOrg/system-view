@@ -16,6 +16,7 @@ import { findProvider } from "./providers";
 import { instanceColor } from "./layout";
 import { connectionIssue, outputPorts } from "./component-rules";
 import { GroupControls } from "./group-controls";
+import { saveNodeGroup, ungroupNodes } from "./node-groups";
 
 type Tool = "select" | "place" | "wire" | "remove";
 
@@ -25,6 +26,7 @@ interface BuilderOptions {
   commit(design: Design): void;
   enter(): void;
   selection(): readonly string[];
+  inspect(id: string): void;
 }
 
 /** Small catalogue glyphs, not clones of the world's detailed vector models. */
@@ -86,6 +88,8 @@ export class WorldBuilder {
   private previewShown = false;
   private category = "all";
   private readonly groups: GroupControls;
+  private readonly menu = document.createElement("section");
+  private menuReturn: Element | null = null;
 
   /** Mount the drawer and arbitrate construction before the scene's ordinary pan/select handlers. */
   constructor(
@@ -124,6 +128,22 @@ export class WorldBuilder {
       <footer class="build-footer"><span>Drag a card into the world · or select, then click to place · Esc cancels</span><span id="build-coordinates" aria-hidden="true"></span><button id="build-new" type="button">New world</button></footer>
     </div>`;
     stage.append(this.root);
+    this.menu.className = "world-context-menu";
+    this.menu.setAttribute("role", "menu");
+    this.menu.setAttribute("aria-label", "World quick actions");
+    this.menu.hidden = true;
+    stage.append(this.menu);
+    document.addEventListener(
+      "pointerdown",
+      (event) => {
+        if (!this.menu.hidden && !this.menu.contains(event.target as Node))
+          this.hideContext(false);
+      },
+      true,
+    );
+    this.menu.addEventListener("pointerdown", (event) =>
+      event.stopPropagation(),
+    );
     this.body = this.query("#build-body");
     this.toggle = this.query("#build-toggle");
     this.status = this.query("#build-status");
@@ -217,16 +237,17 @@ export class WorldBuilder {
     );
     document.addEventListener("keydown", (event) => this.key(event), true);
     svg.addEventListener("contextmenu", (event) => {
-      if (this.tool !== "select") {
-        event.preventDefault();
-        this.reset();
-      }
+      event.preventDefault();
+      this.showContext(event.target as Element, event.clientX, event.clientY);
     });
     window.addEventListener("blur", () => this.reset());
     document.addEventListener("visibilitychange", () => {
       if (document.hidden) this.reset();
     });
-    scene.onViewChange(() => this.schedule());
+    scene.onViewChange(() => {
+      this.hideContext(false);
+      this.schedule();
+    });
     scene.onLayoutChange(() => this.schedule());
     this.renderCatalogue();
     this.sync(options.read());
@@ -361,6 +382,7 @@ export class WorldBuilder {
 
   /** Restore ordinary scene controls; safe during pointer cancellation, Apply, blur and removal. */
   reset(): void {
+    this.hideContext(false);
     this.groups?.close();
     if (this.frame !== null) cancelAnimationFrame(this.frame);
     this.frame = null;
@@ -395,6 +417,7 @@ export class WorldBuilder {
 
   /** Keep counts and keyboard-accessible wire endpoints synchronized with the same document. */
   sync(design: Design): void {
+    this.hideContext(false);
     this.groups.sync(design);
     this.counts.textContent = `${design.instances.length} component${design.instances.length === 1 ? "" : "s"} · ${design.connections.length} wire${design.connections.length === 1 ? "" : "s"}`;
     for (const select of [this.from, this.to]) {
@@ -715,6 +738,7 @@ export class WorldBuilder {
 
   /** Escape cancels first; keyboard placement needs no pointer or drag-and-drop API. */
   private key(event: KeyboardEvent): void {
+    if (this.contextKey(event)) return;
     if (this.groups.handleKey(event)) return;
     if (
       event.key === "Escape" &&
@@ -761,5 +785,262 @@ export class WorldBuilder {
   private say(text: string, error = false): void {
     if (this.status.textContent !== text) this.status.textContent = text;
     this.status.classList.toggle("build-error", error);
+  }
+
+  /** Dismiss without losing a multi-selection; focus returns only on keyboard dismissal. */
+  private hideContext(restore: boolean): void {
+    if (this.menu.hidden) return;
+    this.menu.hidden = true;
+    if (restore && this.menuReturn?.isConnected) {
+      if (this.menuReturn === this.svg) this.svg.setAttribute("tabindex", "-1");
+      (this.menuReturn as HTMLElement | SVGElement).focus({
+        preventScroll: true,
+      });
+    }
+    this.menuReturn = null;
+  }
+
+  /** Build context-specific actions from the actual clicked node or group, never hover/inspector leftovers. */
+  private showContext(target: Element, x: number, y: number): void {
+    if (this.pointer || this.tool !== "select") this.reset();
+    this.scene.freezeView();
+    const design = this.options.read();
+    const frameId =
+      target.closest<SVGGElement>(".scene-frame")?.dataset.clusterId;
+    const pool = design.clusters.find(
+      (item, index) => (item.id ?? `cluster-${index + 1}`) === frameId,
+    );
+    const nodeId =
+      target.closest<SVGGElement>(".scene-instance")?.dataset.instanceId ??
+      (frameId?.startsWith("instance:")
+        ? frameId.slice(9)
+        : pool?.instances[0]);
+    const node = design.instances.find((item) => item.id === nodeId);
+    const groupId =
+      target.closest<SVGGElement>(".node-group")?.dataset.nodeGroupId;
+    const group = design.groups?.find((item) => item.id === groupId);
+    const selection = this.groups.isOpen
+      ? this.groups.selectedNodes
+      : this.options.selection();
+    const ids = group
+      ? group.instances
+      : pool
+        ? pool.instances
+        : node
+          ? selection.includes(node.id)
+            ? [...selection]
+            : [node.id]
+          : [...selection];
+    this.menuReturn = target.closest(".node-group-header") ?? this.svg;
+    this.menu.replaceChildren();
+    const heading = document.createElement("div");
+    heading.className = "context-heading";
+    heading.setAttribute("role", "presentation");
+    heading.textContent =
+      group?.label ??
+      (ids.length > 1
+        ? `${ids.length} selected nodes`
+        : (node?.label ?? node?.id ?? "World"));
+    this.menu.append(heading);
+    const action = (
+      label: string,
+      run: () => void,
+      options: { disabled?: boolean; danger?: boolean } = {},
+    ): void => {
+      const button = document.createElement("button");
+      button.type = "button";
+      button.setAttribute("role", "menuitem");
+      button.tabIndex = -1;
+      button.textContent = label;
+      button.disabled = !!options.disabled;
+      button.classList.toggle("context-danger", !!options.danger);
+      button.addEventListener("click", () => {
+        this.hideContext(false);
+        try {
+          run();
+        } catch (error) {
+          this.say(
+            error instanceof Error
+              ? error.message
+              : "Could not complete this action.",
+            true,
+          );
+        }
+      });
+      this.menu.append(button);
+    };
+    if (node) {
+      action("Inspect node", () => {
+        this.reset();
+        this.options.enter();
+        this.options.inspect(node.id);
+      });
+      for (const port of outputPorts(node))
+        action(
+          port === "out"
+            ? "Wire from this node…"
+            : `Wire ${port.toUpperCase()} output…`,
+          () => this.startContextWire(node.id, port),
+        );
+      action(
+        selection.includes(node.id)
+          ? "Remove from selection"
+          : "Add to selection",
+        () => this.groups.toggleNode(node.id),
+      );
+    }
+    if (group) {
+      action("Rename / edit group…", () =>
+        this.groups.manage(group.instances, group.id),
+      );
+      action("Select group nodes", () => this.groups.manage(group.instances));
+      action("Ungroup · keep nodes", () => {
+        const next = ungroupNodes(this.pinned(), group.id);
+        this.reset();
+        this.options.enter();
+        this.options.commit(next);
+        this.say("Ungrouped. Nodes and wires were kept.");
+      });
+    } else {
+      action(
+        `Group selected nodes${ids.length ? ` (${ids.length})` : ""}`,
+        () => {
+          const next = saveNodeGroup(this.pinned(), ids, "New group");
+          const created = next.groups!.find((item) =>
+            item.instances.includes(ids[0]),
+          )!;
+          this.options.commit(next);
+          this.groups.manage(created.instances, created.id);
+        },
+        { disabled: ids.length < 2 },
+      );
+      const owner =
+        node && design.groups?.find((item) => item.instances.includes(node.id));
+      if (owner)
+        action("Edit containing group…", () =>
+          this.groups.manage(owner.instances, owner.id),
+        );
+    }
+    if (ids.length)
+      action(
+        group
+          ? `Delete group nodes (${ids.length})`
+          : ids.length > 1
+            ? `Delete selected nodes (${ids.length})`
+            : "Delete node",
+        () => {
+          let next = this.pinned();
+          for (const id of ids) next = removeComponent(next, id);
+          this.reset();
+          this.options.enter();
+          this.options.commit(next);
+          this.say(
+            `Deleted ${ids.length} node${ids.length === 1 ? "" : "s"} and incident wires.`,
+          );
+        },
+        { danger: true },
+      );
+    if (!node && !group) {
+      action("Select nodes to group…", () => this.groups.manage([]));
+      action(
+        "Select all nodes",
+        () => this.groups.manage(design.instances.map((item) => item.id)),
+        { disabled: !design.instances.length },
+      );
+      action("Add components…", () => {
+        this.setTool("select");
+        this.setOpen(true);
+      });
+      action("Fit world", () => this.scene.fit());
+    }
+    this.menu.hidden = false;
+    // One opening-time measurement; clamp both axes and allow internal scrolling
+    // on narrow screens instead of placing commands outside the viewport.
+    this.menu.style.left = "0px";
+    this.menu.style.top = "0px";
+    const box = this.menu.getBoundingClientRect();
+    this.menu.style.left = `${Math.max(8, Math.min(x, window.innerWidth - box.width - 8))}px`;
+    this.menu.style.top = `${Math.max(8, Math.min(y, window.innerHeight - box.height - 8))}px`;
+    this.menu
+      .querySelector<HTMLButtonElement>("button:not(:disabled)")
+      ?.focus({ preventScroll: true });
+  }
+
+  /** Quick wiring primes the normal directed Wire tool and retains all shared relationship checks. */
+  private startContextWire(id: string, port: OutputPort): void {
+    this.setTool("wire");
+    this.wireFrom = id;
+    this.from.value = id;
+    this.updateConnect();
+    this.outlet.value = port;
+    this.relation.value = port === "out" ? "" : port.toUpperCase();
+    this.updateConnect();
+    this.say("Choose a destination in the world or use the endpoint controls.");
+  }
+
+  /** Standard menu keyboard navigation and native Shift+F10/ContextMenu entry. */
+  private contextKey(event: KeyboardEvent): boolean {
+    const target = event.target as Element;
+    if (!this.menu.hidden) {
+      const buttons = [
+        ...this.menu.querySelectorAll<HTMLButtonElement>(
+          "button:not(:disabled)",
+        ),
+      ];
+      const index = buttons.indexOf(
+        document.activeElement as HTMLButtonElement,
+      );
+      if (event.key === "Escape" || event.key === "Tab") {
+        if (event.key === "Escape") {
+          event.preventDefault();
+          event.stopImmediatePropagation();
+        }
+        this.hideContext(true);
+        return event.key === "Escape";
+      }
+      const next =
+        event.key === "Home"
+          ? 0
+          : event.key === "End"
+            ? buttons.length - 1
+            : event.key === "ArrowDown"
+              ? (index + 1) % buttons.length
+              : event.key === "ArrowUp"
+                ? (index - 1 + buttons.length) % buttons.length
+                : -1;
+      if (next >= 0) {
+        event.preventDefault();
+        event.stopImmediatePropagation();
+        buttons[next]?.focus();
+        return true;
+      }
+      return false;
+    }
+    if (event.key !== "ContextMenu" && !(event.shiftKey && event.key === "F10"))
+      return false;
+    if (
+      target.matches("input,textarea,select") ||
+      (target as HTMLElement).isContentEditable
+    )
+      return false;
+    if (!target.closest("#scene") && target !== document.body) return false;
+    const selected = this.options.selection()[0];
+    const anchor =
+      target.closest(".node-group-header,.scene-instance") ??
+      (selected
+        ? [...this.svg.querySelectorAll<SVGGElement>(".scene-instance")].find(
+            (node) => node.dataset.instanceId === selected,
+          )
+        : null) ??
+      this.svg;
+    const box = anchor.getBoundingClientRect();
+    event.preventDefault();
+    event.stopImmediatePropagation();
+    this.showContext(
+      anchor,
+      box.x + box.width / 2,
+      box.y + Math.min(box.height / 2, 120),
+    );
+    return true;
   }
 }
