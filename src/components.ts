@@ -634,6 +634,122 @@ function redisCacheMotion(): string {
     </g>`;
 }
 
+/** Raised routing core and two lower edge-cache pods share a distribution deck. */
+const CDN_HEIGHT = 110;
+
+/** Short patch routes join each PoP's cache port to the raised routing core. */
+const CDN_PATHS = [
+  [
+    [-90, 38, 46],
+    [-90, 53, 46],
+    [-25, 53, 46],
+    [-25, 38, 46],
+  ],
+  [
+    [90, 38, 46],
+    [90, 62, 46],
+    [23, 62, 46],
+    [23, 38, 46],
+  ],
+  [
+    [-1, 38, 46],
+    [-1, 58, 50],
+    [108, 58, 50],
+    [108, 67, 24],
+  ],
+].map(
+  (points) =>
+    `M${points.map(([x, y, z]) => project(x, y, z).map(fixed).join(" ")).join("L")}`,
+);
+
+/** One edge cache: three raised content cartridges, a hit gauge and service I/O. */
+function cdnPodGeometry(x: number, index: number): string {
+  let svg = box(x, -50, 34, 76, 88, 34, 2) + box(x - 2, -52, 68, 80, 92, 2, 2);
+  svg += `<g transform="${frontFace(x, 38, 68)}">
+    <rect class="face recess" x="5" y="5" width="66" height="24" rx="2"/>
+    <rect class="cdn-panel" x="7" y="7" width="62" height="20" rx="1"/>
+    <text class="label" x="11" y="14" font-size="4">POP 0${index}</text>
+    <path class="cdn-map" d="M12 24v-4M16 24v-7M20 24v-5M24 24v-9"/>
+    <rect class="port" x="32" y="19" width="12" height="7" rx=".7"/>
+    <path class="detail" d="M34 21v3M37 21v3M40 21v3"/>
+    <path class="led" d="${circle(56, 13, 1)}${circle(61, 13, 1)}"/>
+    <path class="detail" d="${circle(6, 31, 0.8)}${circle(70, 31, 0.8)}"/>
+  </g><g transform="${endFace(x + 76, 38, 68)}">
+    <rect class="face recess" x="7" y="5" width="74" height="24" rx="1.5"/>
+    <path class="detail" d="${rows(10, 25, 3, 12, 75)}"/>
+    <path class="cdn-map" d="M81 8V26"/>
+  </g>`;
+  for (let bank = 0; bank < 3; bank++) {
+    const bx = x + 8 + bank * 21;
+    svg += box(bx, -39, 70, 16, 61, 4, 0.8);
+    svg += `<g transform="${topFace(bx, -39, 74)}">
+      <rect class="cdn-panel" x="2" y="3" width="12" height="55" rx=".6"/>
+      <path class="detail" d="M5 10H11M5 50H11"/>
+      <path class="led" d="${circle(8, 7, 0.7)}"/>
+    </g>`;
+  }
+  return svg;
+}
+
+/**
+ * Distribution appliance: a raised routing core between low content-cache pods.
+ * Modules paint back-to-front; short attached patch leads stay on the open
+ * service deck. All artwork is immutable and shared by the static raster cache.
+ */
+function cdnGeometry(): string {
+  let svg =
+    box(-144, -75, 7, 288, 150, 9, 3) + box(-136, -67, 16, 272, 134, 16, 2);
+  svg += `<g transform="${frontFace(-136, 67, 32)}">
+    <path class="detail" d="M8 11H231"/>
+    <rect class="port" x="236" y="4" width="14" height="8" rx=".7"/>
+    <path class="detail" d="M239 6v4M242 6v4M245 6v4"/>
+    <text class="label" x="234" y="15" font-size="2.8">UPLINK</text>
+    <path class="led" d="${circle(257, 8, 1.1)}"/>
+  </g>`;
+  svg += CDN_PATHS.map((d) => `<path class="cdn-link" d="${d}"/>`).join("");
+  svg += cdnPodGeometry(-128, 1);
+  svg += box(-42, -58, 34, 84, 96, 70, 3);
+  svg += `<g transform="${frontFace(-42, 38, 104)}">
+    <rect class="face recess" x="5" y="5" width="74" height="60" rx="2"/>
+    <text class="cdn-wordmark" x="11" y="17">CDN</text>
+    <text class="label" x="49" y="15" font-size="3">DELIVER</text>
+    <rect class="cdn-display" x="10" y="22" width="64" height="26" rx="2"/>
+    <path class="cdn-map" d="M20 38L42 29L63 38M42 29V43"/>
+    <path class="cdn-node" d="${circle(20, 38, 2.1)}${circle(42, 29, 2.7)}${circle(63, 38, 2.1)}${circle(42, 43, 1.5)}"/>
+    ${[10, 34, 58].map((px) => `<rect class="port" x="${px}" y="54" width="14" height="8" rx=".7"/><path class="detail" d="M${px + 3} 56v4M${px + 7} 56v4M${px + 11} 56v4"/>`).join("")}
+    <text class="label" x="11" y="69" font-size="2.7">EDGE / ORIGIN / EDGE</text>
+  </g><g transform="${endFace(42, 38, 104)}">
+    <rect class="face recess" x="8" y="7" width="80" height="35" rx="2"/>
+    <path class="detail" d="${rows(12, 37, 4, 13, 82)}"/>
+    <rect class="cdn-panel" x="9" y="49" width="56" height="14" rx="1"/>
+    <text class="label" x="14" y="58" font-size="3.6">EDGE CONTROL</text>
+    <path class="cdn-map" d="M82 48V63"/>
+    <path class="detail" d="${circle(87, 65, 1)}"/>
+  </g>`;
+  svg += box(-44, -60, 104, 88, 100, 6, 2);
+  svg += `<g transform="${topFace(-44, -60, CDN_HEIGHT)}">
+    <path class="face recess" d="${circle(44, 43, 28)}"/>
+    <path class="detail" d="${circle(44, 43, 23)}"/>
+    <path class="cdn-map" d="M44 23V43L27 54M44 43L61 54"/>
+    <path class="cdn-node" d="${circle(44, 23, 3)}${circle(27, 54, 3)}${circle(61, 54, 3)}${circle(44, 43, 5)}"/>
+    <path class="detail" d="${circle(8, 8, 1)}${circle(80, 8, 1)}${circle(8, 92, 1)}${circle(80, 92, 1)}"/>
+    <text class="label" x="12" y="87" font-size="4">EDGE // ROUTER</text>
+  </g>`;
+  svg += cdnPodGeometry(52, 2);
+  return svg;
+}
+
+/** Three live packet dashes and one small status cluster; static routes stay cached. */
+function cdnMotion(): string {
+  return (
+    CDN_PATHS.map(
+      (d, index) =>
+        `<path class="cdn-packet" pathLength="100" style="--delay:${-index * 0.8}s" d="${d}"/>`,
+    ).join("") +
+    `<g transform="${frontFace(-42, 38, 104)}"><path class="led cdn-status" d="${circle(59, 18, 0.8)}${circle(64, 18, 0.8)}${circle(69, 18, 0.8)}"/></g>`
+  );
+}
+
 /** Height, artwork, and label placement registered for a provider/renderer pair. */
 interface ComponentVariant {
   /** Static artwork; the raster cache may replace it with a shared image. */
@@ -694,23 +810,25 @@ function variantOf(
 }
 
 /**
- * Build the live detail layer for one provider skin, if it has one.
+ * Build a renderer's live activity layer, optionally overridden by its provider.
  *
  * Kept outside the static base so rasterization never freezes activity LEDs
  * or packets. The group follows the base and precedes the live nameplate.
  *
  * @param instance - Placed instance; type and provider select the variant.
- * @returns The motion group, or null for skins without live detail.
+ * @returns The motion group, or null for renderers without live detail.
  */
 export function createComponentMotion(
   instance: PlacedInstance,
 ): SVGGElement | null {
-  const variant = variantOf(instance.type, instance.provider);
-  if (!variant?.motion) return null;
+  const markup =
+    variantOf(instance.type, instance.provider)?.motion ??
+    (instance.type === "cdn" ? CDN_MOTION : undefined);
+  if (!markup) return null;
   const motion = document.createElementNS(NS, "g");
   motion.classList.add("component-motion");
   motion.setAttribute("aria-hidden", "true");
-  motion.innerHTML = variant.motion;
+  motion.innerHTML = markup;
   return motion;
 }
 
@@ -719,10 +837,13 @@ export function createComponentMotion(
 const COMPUTE_GEOMETRY = computeGeometry();
 const WEBPAGE_GEOMETRY = webpageGeometry();
 const CACHE_GEOMETRY = cacheGeometry();
+const CDN_GEOMETRY = cdnGeometry();
+const CDN_MOTION = cdnMotion();
 const COMPONENT_GEOMETRY = {
   "compute-server": COMPUTE_GEOMETRY,
   webpage: WEBPAGE_GEOMETRY,
   cache: CACHE_GEOMETRY,
+  cdn: CDN_GEOMETRY,
 };
 
 // ---------------------------------------------------------------------------
@@ -735,6 +856,7 @@ const TYPE_LABELS: Readonly<Record<PlacedInstance["type"], string>> = {
   "compute-server": "Compute Server",
   webpage: "Webpage",
   cache: "Cache",
+  cdn: "CDN",
 };
 
 /**
@@ -766,6 +888,8 @@ export function componentHeight(
       return WEBPAGE_HEIGHT;
     case "cache":
       return CACHE_HEIGHT;
+    case "cdn":
+      return CDN_HEIGHT;
   }
 }
 
@@ -878,7 +1002,10 @@ export function createComponent(instance: PlacedInstance): SVGGElement {
   // assigned with textContent so imported names cannot inject markup; long
   // names are condensed rather than clipped.
   const labelGroup = document.createElementNS(NS, "g"),
-    wideLabel = instance.type === "compute-server" || instance.type === "cache",
+    wideLabel =
+      instance.type === "compute-server" ||
+      instance.type === "cache" ||
+      instance.type === "cdn",
     labelMaxChars = variant?.labelMaxChars ?? (wideLabel ? 48 : 14),
     labelTextLength = variant?.labelTextLength ?? (wideLabel ? 230 : 68);
   labelGroup.classList.add("component-label");
@@ -887,9 +1014,11 @@ export function createComponent(instance: PlacedInstance): SVGGElement {
     variant?.labelTransform ??
       (instance.type === "compute-server"
         ? frontFace(-130, 62, COMPUTE_TOP_Z)
-        : instance.type === "cache"
-          ? frontFace(-124, 58, 21)
-          : frontFace(-WEB_FRAME_W / 2, 13, WEBPAGE_HEIGHT)),
+        : instance.type === "cdn"
+          ? frontFace(-136, 67, 32)
+          : instance.type === "cache"
+            ? frontFace(-124, 58, 21)
+            : frontFace(-WEB_FRAME_W / 2, 13, WEBPAGE_HEIGHT)),
   );
   const label = document.createElementNS(NS, "text");
   label.classList.add("instance-label");

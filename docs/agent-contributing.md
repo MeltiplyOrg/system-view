@@ -73,7 +73,7 @@ One pass explains where most edits belong:
   measured pixels are derived at render time.
 - IDs select the renderer by leading word: `db`/`database`/`rack` → database,
   `compute`/`server`/`api` → compute, `web`/`webpage`/`frontend` → webpage,
-  `cache` → cache, unknown → database fallback.
+  `cache` → cache, `cdn` → content delivery edge, unknown → database fallback.
 - `layoutDesign` is deterministic from the document alone. Replica pitch is
   the cluster's largest footprint plus a fixed air gap; group packing uses real
   content edges. A provider footprint change moves platforms, borders, ports,
@@ -105,6 +105,11 @@ One pass explains where most edits belong:
   PostgreSQL's arched archive tower, MySQL's wave cabinet with a dorsal fin,
   SQLite's low file tray, and MongoDB's shard enclosure. Each owns its height
   and `db-<id>-rear/front` definitions; the neutral rack remains provider-free.
+- CDN nodes use a raised routing core between two low edge-cache pods, with
+  attached patch leads and raised content cartridges. `cdn-` IDs select the
+  renderer; the CDN delivery example shows client → edge → origin. Its chassis
+  shares one static bitmap; three packet routes and a status cluster stay live,
+  pause with navigation, and stop animating for reduced motion.
 - The provider accent tints faces, glass, LEDs, and cables.
   `ProviderTheme.plate` chooses a dark enamel tone for the single mark; the
   badge never uses a white backing.

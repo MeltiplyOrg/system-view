@@ -11,6 +11,7 @@ const types: PlacedInstance["type"][] = [
   "compute-server",
   "webpage",
   "cache",
+  "cdn",
 ];
 
 /** Placed artwork input independent of the layout algorithm under test elsewhere. */

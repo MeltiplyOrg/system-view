@@ -25,7 +25,7 @@ export interface Position {
  */
 export interface PlacedInstance {
   id: string;
-  type: "database-rack" | "compute-server" | "webpage" | "cache";
+  type: "database-rack" | "compute-server" | "webpage" | "cache" | "cdn";
   label: string;
   position: Position;
   color: string;
@@ -111,7 +111,7 @@ export interface Design {
  * IDs intentionally use the `db-` prefix; the layout pass turns that prefix
  * into the database-rack renderer, lays the three racks out in one column, and
  * assigns their shared database palette. A dashed floor frame groups replicas.
- * `webAppExample` is the boot scene because it exercises every renderer.
+ * `webAppExample` is the boot scene, mixing application and storage renderers.
  */
 export const example: Design = {
   version: 1,
@@ -139,7 +139,7 @@ export const example: Design = {
  * server loads from the database itself, so the backend never talks to the
  * database directly. Prefixes select visuals; connections describe requests,
  * not replica membership. The cache names the Redis provider, which also makes
- * this the boot scene: one of every renderer, all inside the initial fit.
+ * this the boot scene: a mixed application, all inside the initial fit.
  */
 export const webAppExample: Design = {
   version: 1,
@@ -387,6 +387,40 @@ const microservicesExample: Design = {
 };
 
 /**
+ * Edge delivery: clients receive cached assets from a CDN; only misses reach
+ * the origin. Kept separate from the boot example so existing designs stay put.
+ */
+const cdnDeliveryExample: Design = {
+  version: 1,
+  name: "CDN delivery",
+  instances: [
+    {
+      id: "web-viewer",
+      label: "Web client",
+      description:
+        "Requests images, scripts, and media from the delivery edge.",
+    },
+    {
+      id: "cdn-edge",
+      label: "CDN edge",
+      description:
+        "Serves cached content from edge points of presence and fetches from the origin only on a cache miss.",
+    },
+    {
+      id: "compute-origin",
+      label: "Content origin",
+      description:
+        "Publishes the original assets and fills the CDN when content is missing or expired.",
+    },
+  ],
+  connections: [
+    { from: "web-viewer", to: "cdn-edge", relation: "HTTPS / ASSETS" },
+    { from: "cdn-edge", to: "compute-origin", relation: "ORIGIN / MISS" },
+  ],
+  clusters: [],
+};
+
+/**
  * One reference design in the sidebar picker.
  *
  * `id` is the stable option value; `design.name` is the visible label. The
@@ -412,6 +446,12 @@ export const examples: readonly DesignExample[] = [
     summary:
       "Follow one request from the browser through the API to the cache and database.",
     design: webAppExample,
+  },
+  {
+    id: "cdn-delivery",
+    summary:
+      "Serve assets from a delivery edge; fetch from the origin only on a miss.",
+    design: cdnDeliveryExample,
   },
   {
     id: "horizontal-scaling",

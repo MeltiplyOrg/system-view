@@ -1310,6 +1310,67 @@ aside.detail.open {
     transform: translateY(0);
   }
 }
+/* CDN packet flow stays in the small live layer; the chassis shares cached pixels. */
+.cdn-panel {
+  fill: color-mix(in srgb, var(--deck) 92%, var(--cable-color));
+  stroke: var(--line);
+  stroke-width: 0.6;
+  vector-effect: non-scaling-stroke;
+}
+.cdn-display {
+  fill: color-mix(in srgb, var(--recess) 92%, var(--cable-color));
+  stroke: var(--line);
+  stroke-width: 0.65;
+  vector-effect: non-scaling-stroke;
+}
+.cdn-wordmark {
+  fill: var(--cable-color);
+  font: 7px var(--mono);
+  letter-spacing: 1.2px;
+}
+.cdn-map,
+.cdn-link,
+.cdn-packet {
+  fill: none;
+  vector-effect: non-scaling-stroke;
+  stroke-linejoin: round;
+  stroke-linecap: round;
+}
+.cdn-map {
+  stroke: var(--cable-color);
+  stroke-width: 0.8;
+}
+.cdn-node {
+  fill: var(--cable-color);
+  stroke: var(--line);
+  stroke-width: 0.6;
+  vector-effect: non-scaling-stroke;
+}
+.cdn-link {
+  stroke: var(--detail);
+  stroke-width: 2.4;
+}
+.cdn-packet {
+  stroke: var(--cable-color);
+  stroke-width: 1.2;
+  stroke-dasharray: 4 96;
+  animation: cdn-flow 2.6s linear infinite;
+  animation-delay: var(--delay, 0s);
+}
+.cdn-status {
+  animation: cdn-status 2.4s steps(2, end) infinite;
+}
+@keyframes cdn-flow {
+  to {
+    stroke-dashoffset: -100;
+  }
+}
+@keyframes cdn-status {
+  50% {
+    opacity: 0.3;
+  }
+}
+
 /* Motion is decorative; disable transitions and cable flow when requested. */
 @media (prefers-reduced-motion: reduce) {
   .panel-toggle,
@@ -1322,6 +1383,8 @@ aside.detail.open {
   .instance-enter {
     animation: none;
   }
+  .cdn-packet,
+  .cdn-status,
   .redis-blink,
   .redis-packet,
   .redis-orbit,

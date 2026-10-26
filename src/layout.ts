@@ -58,6 +58,8 @@ export function instanceColor(
       return "#b49aff";
     case "cache":
       return "#7ee787";
+    case "cdn":
+      return "#7ab8ff";
   }
 }
 
@@ -73,12 +75,13 @@ const INSTANCE_TYPES: Readonly<Record<string, PlacedInstance["type"]>> = {
   webpage: "webpage",
   frontend: "webpage",
   cache: "cache",
+  cdn: "cdn",
 };
 
 /**
  * Infer the renderer type from an ID's leading word.
  *
- * Database, compute/server/api, web/webpage/frontend, and cache prefixes
+ * Database, compute/server/api, web/webpage/frontend, cache, and CDN prefixes
  * select distinct visuals. Unknown prefixes retain the database fallback so
  * existing documents with arbitrary IDs keep their appearance.
  *

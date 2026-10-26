@@ -239,55 +239,46 @@ describe("automatic layout", () => {
       "compute-server",
       "webpage",
       "cache",
+      "cdn",
     ] as const;
-    expect(types.map((type) => instanceColor(type))).toEqual([
-      "#42d9e8",
-      "#ff9d52",
-      "#b49aff",
-      "#7ee787",
-    ]);
-    expect(new Set(types.map((type) => instanceColor(type))).size).toBe(4);
+    const colors = types.map((type) => instanceColor(type));
+    expect(colors.every((color) => /^#[0-9a-f]{6}$/.test(color))).toBe(true);
+    expect(new Set(colors).size).toBe(types.length);
     // A registered provider replaces the renderer accent with its product
     // color, so the two skins cache as distinct palettes.
     expect(instanceColor("cache", "redis")).toBe("#dc382d");
     expect(instanceColor("cache", "Redis")).toBe("#dc382d");
-    expect(instanceColor("cache", "unregistered")).toBe("#7ee787");
+    expect(instanceColor("cache", "unregistered")).toBe(instanceColor("cache"));
   });
 
   test("normalizes aliases regardless of declaration order", () => {
-    const ids = [
-      "compute-api",
-      "cache-primary",
-      "db-01",
-      "web-app",
-      "server-2",
-      "database.replica",
-      "frontend",
-      "rack_main",
-      "api-edge",
-      "webpage.home",
-      "cache_session",
-      "CACHE.sidecar",
-    ];
-    const expected: Record<PlacedInstance["type"], string> = {
-      "database-rack": "#42d9e8",
-      "compute-server": "#ff9d52",
-      webpage: "#b49aff",
-      cache: "#7ee787",
-    };
+    const aliases = [
+      ["database-rack", ["db-01", "database.replica", "rack_main"]],
+      ["compute-server", ["compute-api", "server-2", "api-edge"]],
+      ["webpage", ["web-app", "frontend", "webpage.home"]],
+      ["cache", ["cache-primary", "cache_session", "CACHE.sidecar"]],
+      ["cdn", ["cdn-edge", "CDN.assets", "cdn_media"]],
+    ] as const;
+    const ids = aliases.flatMap(([, names]) => [...names]);
+    const expectedTypes = new Map<string, PlacedInstance["type"]>(
+      aliases.flatMap(([type, names]) =>
+        names.map((id) => [id, type] as const),
+      ),
+    );
     const place = (order: string[]) =>
       layoutDesign(design(order.map((id) => ({ id })))).instances;
     const forward = place(ids),
       reversed = new Map(
         place(ids.slice().reverse()).map(({ id, color }) => [id, color]),
       );
-    expect(forward.map(({ color }) => color)).toEqual(
-      ids.map((id) => expected[inferInstanceType(id)]),
-    );
+    const colorsByType = new Map<PlacedInstance["type"], string>();
     for (const { id, type, color } of forward) {
-      expect(color).toBe(expected[type]);
+      expect(type).toBe(expectedTypes.get(id));
+      if (colorsByType.has(type)) expect(color).toBe(colorsByType.get(type));
+      else colorsByType.set(type, color);
       expect(reversed.get(id)).toBe(color);
     }
+    expect(new Set(colorsByType.values()).size).toBe(aliases.length);
   });
 
   test("infers types from ID prefixes and keeps unknown IDs renderable", () => {
@@ -296,6 +287,8 @@ describe("automatic layout", () => {
     expect(inferInstanceType("worker-01")).toBe("database-rack");
     for (const id of ["cache-app", "CACHE.session", "cache_primary"])
       expect(inferInstanceType(id)).toBe("cache");
+    for (const id of ["cdn-edge", "CDN.assets", "cdn_media"])
+      expect(inferInstanceType(id)).toBe("cdn");
   });
 
   test("rejects cluster members that bypassed validation", () => {

@@ -97,6 +97,7 @@ const RENDERER_TYPES = [
   "compute-server",
   "webpage",
   "cache",
+  "cdn",
 ] as const;
 
 const isRendererType = (value: string | undefined): value is RendererType =>
