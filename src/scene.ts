@@ -4,7 +4,7 @@ import type { Connection, Design, GroundPoint, PlacedInstance } from "./design";
 import { MAX_WORLD_COORDINATE } from "./design";
 import type { BuildItem } from "./construction";
 import { instanceColor } from "./layout";
-import { instanceFootprint, layoutDesign } from "./layout";
+import { instanceFootprint, isWireJunction, layoutDesign } from "./layout";
 import type { Layout, PlacedCluster } from "./layout";
 import { createPlatforms } from "./platform";
 import {
@@ -1024,6 +1024,11 @@ export class SystemScene {
     const layout = layoutDesign(design);
     this.applyDragOffsets(layout);
     this.worldInstances = layout.instances;
+    const junctionKeys = new Set(
+      layout.instances
+        .filter((instance) => isWireJunction(instance.type))
+        .map((instance) => `${INSTANCE_KEY}${instance.id}`),
+    );
 
     // Every draggable node gets a border. A declared cluster is one group
     // border around all its members; each unclustered instance gets its own.
@@ -1119,7 +1124,11 @@ export class SystemScene {
 
     const layer = document.createElementNS(NS, "g");
     layer.append(
-      createNodeFrames(this.borderFrames.values()),
+      createNodeFrames(
+        [...this.borderFrames.values()].filter(
+          (frame) => !junctionKeys.has(frame.id),
+        ),
+      ),
       createPlatforms(layout.instances),
       createClusterLabels(layout.clusters),
     );
@@ -1138,12 +1147,14 @@ export class SystemScene {
       const fromCluster = this.instanceCluster.get(from.id),
         toCluster = this.instanceCluster.get(to.id),
         internal = fromCluster !== undefined && fromCluster === toCluster,
-        fromFrame = internal
-          ? undefined
-          : this.borderFrames.get(fromCluster ?? `${INSTANCE_KEY}${from.id}`),
-        toFrame = internal
-          ? undefined
-          : this.borderFrames.get(toCluster ?? `${INSTANCE_KEY}${to.id}`);
+        fromFrame =
+          internal || isWireJunction(from.type)
+            ? undefined
+            : this.borderFrames.get(fromCluster ?? `${INSTANCE_KEY}${from.id}`),
+        toFrame =
+          internal || isWireJunction(to.type)
+            ? undefined
+            : this.borderFrames.get(toCluster ?? `${INSTANCE_KEY}${to.id}`);
       return {
         link,
         index,
@@ -1155,9 +1166,18 @@ export class SystemScene {
         internal,
         fromFrame,
         toFrame,
-        fromPort: fromFrame
-          ? clusterPort(fromFrame, from.position, to.position)
-          : undefined,
+        // Separate branch outlets at the fitting itself, not at a later bend
+        // where two coincident routes would look like one uncontrolled fork.
+        fromPort:
+          from.type === "branch"
+            ? {
+                x: from.position.x,
+                y: from.position.y,
+                edge: link.outlet === "true" ? "right" : "top",
+              }
+            : fromFrame
+              ? clusterPort(fromFrame, from.position, to.position)
+              : undefined,
         toPort: toFrame
           ? clusterPort(toFrame, to.position, from.position)
           : undefined,
@@ -1275,7 +1295,13 @@ export class SystemScene {
         // start outside the border. Member borders inside a cluster are not
         // obstacles: external cables approach the group border, not the rack.
         const obstacles: RouteRect[] = [
-          ...layout.clusters.map(clusterFrameRect),
+          ...layout.clusters
+            .filter(
+              (cluster) =>
+                !(isWireJunction(from.type) && cluster.id === fromCluster) &&
+                !(isWireJunction(to.type) && cluster.id === toCluster),
+            )
+            .map(clusterFrameRect),
           ...layout.instances
             .filter(
               (instance) =>
@@ -1283,11 +1309,14 @@ export class SystemScene {
                 instance.id !== from.id &&
                 instance.id !== to.id,
             )
-            .map((instance) =>
-              clusterFrameRect(
-                this.borderFrames.get(`${INSTANCE_KEY}${instance.id}`)!,
-              ),
-            ),
+            .map((instance) => {
+              const frame = this.borderFrames.get(
+                `${INSTANCE_KEY}${instance.id}`,
+              )!;
+              return isWireJunction(instance.type)
+                ? frame.bounds
+                : clusterFrameRect(frame);
+            }),
         ];
         const route = routeOrthogonal(fromAnchor, toAnchor, obstacles);
         worldPath = [
@@ -1605,6 +1634,11 @@ export class SystemScene {
     )) {
       const id = element.dataset.instanceId;
       if (id) element.classList.toggle("focus-dimmed", dimmed.has(id));
+      element.classList.toggle(
+        "junction-focused",
+        element.classList.contains("wire-junction") &&
+          key === `${INSTANCE_KEY}${id}`,
+      );
     }
     // The selected border keeps its highlight and marches; clearing the key
     // removes both, so the animation only runs while the focus is held. A
@@ -1876,9 +1910,15 @@ export class SystemScene {
       this.anchor.remove();
       return;
     }
+    // A centered machine handle would cover the entire cable-sized junction.
+    const junction = this.worldInstances.some(
+      (instance) =>
+        `${INSTANCE_KEY}${instance.id}` === this.anchorKey &&
+        isWireJunction(instance.type),
+    );
     this.anchor.setAttribute(
       "transform",
-      `translate(${((bounds.minX + bounds.maxX) / 2).toFixed(1)} ${(
+      `translate(${(junction ? bounds.maxX + 28 : (bounds.minX + bounds.maxX) / 2).toFixed(1)} ${(
         (bounds.minY + bounds.maxY) /
         2
       ).toFixed(1)})`,

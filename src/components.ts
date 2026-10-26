@@ -15,6 +15,7 @@ import {
 import type { TransformerEnvelope } from "./transformer-model";
 import { CDN_SKINS } from "./cdn-skins";
 import { mediaModel } from "./media-models";
+import { isWireJunction } from "./layout";
 
 import {
   box,
@@ -876,6 +877,7 @@ export function createComponent(instance: PlacedInstance): SVGGElement {
       ? `${theme.label} ${TYPE_LABELS[instance.type]}`
       : TYPE_LABELS[instance.type];
   element.classList.add("scene-instance");
+  if (isWireJunction(instance.type)) element.classList.add("wire-junction");
   element.dataset.instanceId = instance.id;
   element.setAttribute("role", "img");
   element.setAttribute(
@@ -922,6 +924,15 @@ export function createComponent(instance: PlacedInstance): SVGGElement {
     variant?.markup ??
     COMPONENT_GEOMETRY[instance.type as keyof typeof COMPONENT_GEOMETRY]
   }</g>`;
+  if (isWireJunction(instance.type)) {
+    // Keep a live hit/selection ring outside the raster so compact knots remain
+    // easy to pick without caching hover state or enlarging their artwork.
+    const hit = document.createElementNS(NS, "circle");
+    hit.classList.add("junction-hit");
+    hit.setAttribute("cy", "-5");
+    hit.setAttribute("r", "26");
+    geometry.append(hit);
+  }
   const motion = createComponentMotion(instance);
   if (motion) geometry.append(motion);
   element.append(geometry);

@@ -87,16 +87,14 @@ export const BUILD_TYPES: readonly BuildItem[] = [
     prefix: "branch",
     type: "branch",
     label: "If / Else",
-    description:
-      "Evaluate request data and send it through the true or false output.",
+    description: "A compact wire junction with explicit true and false routes.",
   },
   {
     id: "merge",
     prefix: "merge",
     type: "merge",
     label: "Merge",
-    description:
-      "Wait for parallel inputs or pass arrivals through independently.",
+    description: "A compact wire junction for converging parallel routes.",
   },
 ];
 export const BUILD_ITEMS: readonly BuildItem[] = BUILD_TYPES.flatMap((item) => [

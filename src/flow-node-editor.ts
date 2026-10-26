@@ -1,7 +1,7 @@
 import { parseDesign, type Design, type FlowCondition } from "./design";
 import { inferInstanceType } from "./layout";
 
-/** Author workflow behavior through the same validated document used by import/export and simulation. */
+/** Author routing intent through the same validated document used by import/export. */
 export class FlowNodeEditor {
   private readonly root = document.createElement("section");
   private members: readonly string[] = [];
@@ -11,11 +11,10 @@ export class FlowNodeEditor {
     private readonly commit: (design: Design) => void,
   ) {
     this.root.className = "detail-section flow-node-editor";
-    this.root.innerHTML = `<form id="flow-node-form"><h3 class="detail-label">Simulation behavior</h3>
-      <div id="flow-condition-fields"><label>Request field<input id="node-condition-field" maxlength="100" placeholder="mediaType" required/></label><label>Operator<select id="node-condition-operator"><option value="equals">Equals</option><option value="not-equals">Does not equal</option><option value="greater-than">Greater than (number)</option><option value="contains">Contains (text)</option></select></label><label>Value type<select id="node-value-type"><option value="string">Text</option><option value="number">Number</option><option value="boolean">Boolean</option><option value="null">Null</option></select></label><label>Value<input id="node-condition-value" maxlength="100"/></label></div>
+    this.root.innerHTML = `<form id="flow-node-form"><h3 class="detail-label">Routing rule</h3>
+      <div id="flow-condition-fields"><label>Data field<input id="node-condition-field" maxlength="100" placeholder="mediaType" required/></label><label>Operator<select id="node-condition-operator"><option value="equals">Equals</option><option value="not-equals">Does not equal</option><option value="greater-than">Greater than (number)</option><option value="contains">Contains (text)</option></select></label><label>Value type<select id="node-value-type"><option value="string">Text</option><option value="number">Number</option><option value="boolean">Boolean</option><option value="null">Null</option></select></label><label>Value<input id="node-condition-value" maxlength="100"/></label></div>
       <label id="flow-merge-field">Synchronization<select id="node-merge-mode"><option value="all">All inputs — wait for parallel branches</option><option value="any">Any input — converge conditional branches</option></select></label>
-      <label>Simulated latency (ms)<input id="node-latency" type="number" min="100" max="30000" step="100" placeholder="Default model timing"/></label>
-      <button id="flow-node-save" class="btn" type="submit">Apply behavior</button><p id="flow-node-message" role="status"></p></form>`;
+      <button id="flow-node-save" class="btn" type="submit">Save routing rule</button><p id="flow-node-message" role="status"></p></form>`;
     host.append(this.root);
     this.query<HTMLFormElement>("#flow-node-form").addEventListener(
       "submit",
@@ -37,14 +36,14 @@ export class FlowNodeEditor {
     return element;
   }
 
-  /** Render behavior for one logical target; changing a replica group's latency updates its whole machine pool. */
+  /** Only junctions have routing rules; ordinary machines keep their inspector uncluttered. */
   show(members: readonly string[]): void {
     this.members = members;
     const node = this.read().instances.find((item) => item.id === members[0]);
-    this.root.hidden = !node;
-    if (!node) return;
-    const type = inferInstanceType(node.id),
-      branch = type === "branch";
+    const type = node ? inferInstanceType(node.id) : undefined;
+    this.root.hidden = type !== "branch" && type !== "merge";
+    if (!node || this.root.hidden) return;
+    const branch = type === "branch";
     this.query("#flow-condition-fields").hidden = !branch;
     this.query<HTMLInputElement>("#node-condition-field").disabled = !branch;
     this.query("#flow-merge-field").hidden = type !== "merge";
@@ -65,10 +64,8 @@ export class FlowNodeEditor {
       condition.value === null;
     this.query<HTMLSelectElement>("#node-merge-mode").value =
       node.mergeMode ?? "all";
-    this.query<HTMLInputElement>("#node-latency").value =
-      node.latencyMs?.toString() ?? "";
     this.query("#flow-node-message").textContent =
-      "Visual behavior only. No external integration.";
+      "Design annotation only; no request data is executed.";
   }
 
   /** Parse scalars without evaluating expressions, then atomically validate before committing any world change. */
@@ -104,28 +101,21 @@ export class FlowNodeEditor {
                   : raw,
         };
       }
-      const latency = this.query<HTMLInputElement>("#node-latency").value;
       const mode = this.query<HTMLSelectElement>("#node-merge-mode").value as
         | "all"
         | "any";
       const instances = design.instances.map((node) => {
         if (!this.members.includes(node.id)) return node;
-        const {
-          condition: _condition,
-          mergeMode: _mode,
-          latencyMs: _latency,
-          ...rest
-        } = node;
+        const { condition: _condition, mergeMode: _mode, ...rest } = node;
         return {
           ...rest,
           ...(condition ? { condition } : {}),
           ...(type === "merge" ? { mergeMode: mode } : {}),
-          ...(latency ? { latencyMs: Number(latency) } : {}),
         };
       });
       this.commit(parseDesign(JSON.stringify({ ...design, instances })));
       this.query("#flow-node-message").textContent =
-        "Behavior saved to the design.";
+        "Routing rule saved to the design.";
     } catch (error) {
       this.query("#flow-node-message").textContent =
         error instanceof Error

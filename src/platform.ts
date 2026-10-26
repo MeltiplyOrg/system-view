@@ -1,6 +1,6 @@
 import { project } from "./database";
 import type { PlacedInstance } from "./design";
-import { instanceFootprint } from "./layout";
+import { instanceFootprint, isWireJunction } from "./layout";
 
 /** A world-space X/Y vertex; platform contours never carry elevation. */
 type Point = readonly [number, number];
@@ -77,6 +77,7 @@ export function mergePlatformFootprints(
   // inputs are validated numbers, so no epsilon merge is appropriate.
   const levels = new Map<number, PlacedInstance[]>();
   for (const instance of instances) {
+    if (isWireJunction(instance.type)) continue;
     const level = levels.get(instance.position.z);
     if (level) level.push(instance);
     else levels.set(instance.position.z, [instance]);

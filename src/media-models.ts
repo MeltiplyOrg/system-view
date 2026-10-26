@@ -80,15 +80,23 @@ function worker(ffmpeg: boolean): string {
   return art;
 }
 
-/** A switching deck makes workflow decisions legible without another server-shaped box. */
-function switcher(join: boolean): string {
-  return (
-    plinth() +
-    box(-98, -48, 18, 196, 96, 48, 3) +
-    `<g transform="${frontFace(-98, 48, 66)}"><rect class="face recess" x="9" y="8" width="178" height="30" rx="3"/><text class="label" x="18" y="27" font-size="10">${join ? "MERGE / SYNC" : "IF / ELSE"}</text><path class="led" d="${circle(167, 22, 3)}"/></g>` +
-    box(-100, -50, 66, 200, 100, 6, 3) +
-    `<g transform="${topFace(-100, -50, 72)}"><rect class="face recess" x="12" y="12" width="176" height="76" rx="5"/><path class="cdn-map" d="${join ? "M30 25H75L118 50H166M30 75H75L118 50" : "M30 50H85L125 25H170M85 50L125 75H170"}"/><path class="led" d="${circle(30, join ? 25 : 50, 4)}${circle(170, join ? 50 : 25, 4)}${circle(join ? 30 : 170, 75, 4)}"/><text class="label" x="140" y="18" font-size="7">${join ? "OUT" : "TRUE"}</text><text class="label" x="140" y="88" font-size="7">${join ? "SYNC" : "FALSE"}</text></g>`
-  );
+/** Cable-sized decision and convergence fittings; no cabinet, plinth or nameplate. */
+function junction(join: boolean): MediaModel {
+  const body = join
+    ? `<g transform="${topFace(0, 0, 3)}"><path class="face" d="${circle(0, 0, 20)}"/></g><g transform="${topFace(0, 0, 10)}"><path class="face top junction-core" d="${circle(0, 0, 20)}"/></g>`
+    : box(-16, -16, 3, 32, 32, 7, 3);
+  return {
+    markup:
+      body +
+      `<g transform="${topFace(0, 0, 10)}"><path class="junction-symbol" d="${join ? "M-11-8L0 0H12M-11 8L0 0m7-4 5 4-5 4" : "M-12 0H-2L10-10M-2 0L10 10M4-10H10V-4M4 10H10V4"}"/></g>`,
+    height: 10,
+    envelope: { x: -20, y: -20, z: 3, width: 40, depth: 40, height: 7 },
+    labelTransform: "translate(0 22)",
+    labelX: 0,
+    labelY: 0,
+    labelMaxChars: 24,
+    labelTextLength: 100,
+  };
 }
 
 /** A stepped crossbar switch: ingress console, exposed routing deck and raised backend port bank. */
@@ -145,8 +153,8 @@ const S3 = model(STORAGE.markup, 136, "amazon-s3", topFace(-91, -52, 136));
 const R2 = model(storage(true), 136, "cloudflare-r2", topFace(-91, -52, 136));
 const WORKER = model(worker(false), 91);
 const FFMPEG = model(worker(true), 91, "ffmpeg", topFace(-126, -43, 91));
-const BRANCH = model(switcher(false), 72);
-const MERGE = model(switcher(true), 72);
+const BRANCH = junction(false);
+const MERGE = junction(true);
 const LOAD_BALANCER = model(loadBalancer(), 86);
 
 /** Resolve a media renderer's actual body, height and nameplate as one contract. */

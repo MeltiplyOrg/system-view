@@ -163,6 +163,11 @@ const CLUSTER_CLEARANCE = CLUSTER_GAP - RACK_HALF_WIDTH * 2;
 /** Half extents of one instance's ground footprint in world units. */
 export type InstanceFootprint = ProviderFootprint;
 
+/** Logical routing controls sit directly on cables, never on machine platforms. */
+export function isWireJunction(type: PlacedInstance["type"]): boolean {
+  return type === "branch" || type === "merge";
+}
+
 /**
  * Ground footprint under one instance.
  *
@@ -179,6 +184,7 @@ export function instanceFootprint(
   type: PlacedInstance["type"],
   provider?: string,
 ): InstanceFootprint {
+  if (isWireJunction(type)) return { halfWidth: 24, halfDepth: 24 };
   const theme = findProvider(provider, type);
   return (
     theme?.footprints?.[type] ?? {

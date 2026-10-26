@@ -483,7 +483,7 @@ export const examples: readonly DesignExample[] = [
   {
     id: "media-processing",
     summary:
-      "Upload original media, buffer encoding jobs, scale workers, publish renditions and play through the CDN. Open Simulate to run this topology.",
+      "Design media uploads, queued encoding, parallel processing, publication and CDN playback. Edit the compact routing junctions and wires directly in the world.",
     design: mediaExample,
   },
   {

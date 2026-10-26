@@ -8,9 +8,7 @@ import { SystemScene } from "./scene";
 import { WorldBuilder } from "./world-builder";
 import { pinWorld, BUILD_TYPES } from "./construction";
 import { replicaIssue } from "./component-rules";
-import { FlowPanel } from "./flow-panel";
 import { FlowNodeEditor } from "./flow-node-editor";
-import { mediaExample } from "./media-example";
 import { placeCallout, type CalloutRect } from "./callout-layout";
 
 /**
@@ -147,9 +145,8 @@ app.innerHTML = `
             )}. Select an independent edge and choose its provider in the inspector, or set provider in JSON. Repeated products share cached artwork, not replica controls.</p>
           <p>Only supported machines scale: API/compute and worker instances, database/cache replicas, never SQLite server replicas. Clients, CDNs, queues, buckets, If/Else and Merge nodes are logical components, not replicable machines. Replica groups require the same component type and provider. Scale from 1 to 10 within the world limit; new members inherit behavior, not an occupied placement.</p>
           <p>Each renderer has a default palette: databases cyan, backend servers orange, frontend pages violet, caches green, and CDN edges blue. A provider may supply its own accent, artwork, and live detail layer; only static artwork is cached, so activity LEDs and packets keep moving. Every node shares cached artwork by type and provider, so replicas and repeated designs reuse the same images. Visible nodes are prewarmed while idle, and removing a replica keeps shared images available for re-addition. Zoom reuses the previous image until a sharper tier is ready; labels remain live. Internal cable pulses pause during navigation and resume at rest. Offscreen nodes are culled and return when panned into view. Links between components remain visible.</p>
-          <p>Open Simulate to run requests through your actual graph, or load the media-app example. Everything is visual and local: no external integrations, cloud calls, real uploads or transcoding. Provider models include RabbitMQ, Amazon SQS, NATS JetStream, Amazon S3, Cloudflare R2 and FFmpeg; names do not activate those services.</p>
-          <p>Ordinary outputs fan out. If/Else evaluates a request field and chooses its explicit TRUE/FALSE output; choose the output in Wire. Merge All waits for parallel inputs; Merge Any converges conditional branches without waiting. Select a node to edit its condition, merge mode or simulated latency. Invalid connection types are rejected in both the builder and JSON imports.</p>
-          <p>Run, pause, step 0.5 seconds, or inject a burst of requests. Click a trace step to inspect its input/output; Locate node reveals it in the world. Queues wait for available workers, and scaling increases capacity without restarting the flow. Runs and cache state are transient; node behavior and wire outlets are saved in the design. Limits of 32 requests, 128 steps per request and 8,192 JSON characters prevent runaway simulations.</p>
+          <p>This is a visual system-design sandbox: no external integrations, cloud calls, real uploads or transcoding. The editable media-app example is available in the Examples menu.</p>
+          <p>If/Else and Merge are compact junctions directly on the wires, not machines. Choose TRUE/FALSE in Wire, and select a junction to edit its condition or merge mode. Invalid connection types are rejected in both the builder and JSON imports.</p>
         </section>
       </div>
       <footer class="sidebar-footer">
@@ -165,7 +162,6 @@ const message = mustQuery<HTMLParagraphElement>("#message");
 const sceneSvg = mustQuery<SVGSVGElement>("#scene");
 const scene = new SystemScene(sceneSvg);
 let builder: WorldBuilder | undefined;
-let flow: FlowPanel | undefined;
 let nodeEditor: FlowNodeEditor | undefined;
 const sceneTitle = mustQuery<HTMLElement>("#scene-title");
 const sceneCount = mustQuery<HTMLElement>("#scene-count");
@@ -692,8 +688,6 @@ function openDetail(ids: TargetIds): void {
     current.instances.length >= MAX_INSTANCES;
   detailLinkCount.textContent = String(links.length);
   nodeEditor?.show(memberIds);
-  if (memberIds[0]) flow?.inspectNode(memberIds[0]);
-  if (window.innerWidth < 900) flow?.collapse();
 
   const specRow = (term: string, value: string) => {
     const row = document.createElement("div"),
@@ -933,7 +927,6 @@ function apply(design: Design): void {
   // must not leak into a document whose ids may repeat with new meaning.
   scene.clearOffsets();
   scene.render(design);
-  flow?.reset(design);
   current = design;
   syncDesign();
 }
@@ -953,7 +946,6 @@ function syncDesign(): void {
   message.classList.remove("error");
   message.textContent = "Canvas is up to date.";
   builder?.sync(design);
-  flow?.sync(design);
 }
 
 /**
@@ -1125,7 +1117,6 @@ function setPanelOpen(open: boolean): void {
         ? document.activeElement
         : toggle;
     builder?.close();
-    flow?.collapse();
     sidebar.inert = false;
     sidebar.removeAttribute("aria-hidden");
     closeButton.focus({ preventScroll: true });
@@ -1188,7 +1179,6 @@ builder = new WorldBuilder(stage, sceneSvg, scene, {
   commit: commitWorld,
   enter: () => {
     scene.freezeView();
-    flow?.collapse();
     clearSelection();
     hideCallout();
     if (sidebar.classList.contains("open")) setPanelOpen(false);
@@ -1198,39 +1188,6 @@ scene.onPlacementChange(() =>
   commitWorld(pinWorld(current, scene.getWorldInstances())),
 );
 
-flow = new FlowPanel(stage, sceneSvg, scene, current, {
-  enter: () => {
-    scene.freezeView();
-    builder?.close();
-    if (window.innerWidth < 900) clearSelection();
-    if (sidebar.classList.contains("open")) setPanelOpen(false);
-  },
-  locate: (id: string) => {
-    clearSelection();
-    const anchor = [
-      ...sceneSvg.querySelectorAll<SVGGElement>(".scene-instance"),
-    ].find((node) => node.dataset.instanceId === id);
-    const ids = targetIds(anchor ?? null);
-    if (!ids) return;
-    const mobile = window.innerWidth < 900;
-    if (mobile) flow?.collapse();
-    const left = mobile
-      ? 16
-      : mustQuery<HTMLElement>(".flow-panel").getBoundingClientRect().right +
-        24;
-    scene.focus(ids.key, {
-      x: left,
-      y: 80,
-      width: Math.max(200, stageBounds.width - left - 24),
-      height: Math.max(200, stageBounds.height - 170),
-    });
-  },
-  loadExample: () => {
-    apply(mediaExample);
-    exampleSelect.value = "media-processing";
-    showExampleSummary("media-processing");
-  },
-});
 nodeEditor = new FlowNodeEditor(
   mustQuery<HTMLElement>(".detail-body"),
   () => current,
@@ -1243,7 +1200,6 @@ nodeEditor = new FlowNodeEditor(
  * final open position rather than a sliding animation's intermediate position.
  */
 const calloutOverlays = [
-  mustQuery<HTMLElement>(".flow-panel"),
   mustQuery<HTMLElement>(".build-dock"),
   mustQuery<HTMLElement>("#build-status"),
   toggle,

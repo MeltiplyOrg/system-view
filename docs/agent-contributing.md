@@ -45,9 +45,7 @@ this guide adds the app's mechanics.
 | Factory drawer and pointer/keyboard tool state    | `src/world-builder.ts`           | `src/main.ts` commits; `src/scene.ts` preview and ground projection          |
 | Typed connections and replication capabilities    | `src/component-rules.ts`         | `src/design.ts`, `src/construction.ts`, `src/replicas.ts`, builder/inspector |
 | Queue/storage/worker and workflow models          | `src/media-models.ts`            | `src/media-provider-marks.ts`, `src/components.ts`, `src/providers.ts`       |
-| Deterministic request execution                   | `src/flow-simulation.ts`         | validated `Design`; no DOM, timers, SDKs or external services                |
-| Request controls, trace and input/output viewer   | `src/flow-panel.ts`              | `src/main.ts`, existing cached scene nodes and cables                        |
-| Node conditions, merge mode and simulated latency | `src/flow-node-editor.ts`        | parser-backed document commits; `src/main.ts` inspector                      |
+| Junction conditions and merge mode                | `src/flow-node-editor.ts`        | parser-backed design annotations; `src/main.ts` inspector                    |
 | Orthogonal cable routing                          | `src/routing.ts`                 | `src/scene.ts` obstacles and ports                                           |
 
 ## Render pass
@@ -147,61 +145,34 @@ One pass explains where most edits belong:
   cancels construction and collapses its drawer; controls remain keyboard
   reachable, and collapsed content leaves the tab order.
 
-### Visual request workflows
+### Visual routing workflows
 
-- This is a local system-design sandbox, not an integration platform. Provider
+- This is a visual system-design sandbox, not an integration platform. Provider
   skins never connect to external apps. No real uploads, transcoding, queues,
-  databases or cloud APIs run. Timings and service output fields are illustrative,
-  not vendor benchmarks or SLAs. RabbitMQ, Amazon SQS and NATS JetStream share
-  the simulated FIFO/competing-consumer behavior; S3/R2 and FFmpeg are visual models.
-- Open **Simulate** to inject JSON at an entry node. **Run request**, **Burst ×10**,
-  **Pause/Resume**, **Step 0.5s** and speed controls operate the same interpreter.
-  The media-app example is editable topology: video/image routing, parallel
-  original/processing branches, a queue/worker bottleneck, synchronized publication,
-  and playback with explicit hit/miss branching. It is not a scripted animation.
-- Ordinary outputs fan out across every connected wire. Each branch gets an
-  immutable input snapshot; node results are inspectable in the selected request's
-  trace. **Locate node** moves the camera to the chosen step without executing it.
-  A run completes only after every reachable branch finishes.
-- Load balancers use round-robin dispatch to exactly one physical backend per
-  request. Connected replica pools expand into individual eligible machines;
-  duplicate pool wires do not add weight or duplicate calls. A busy selected
-  backend queues that request without stealing another machine's slot. Each
-  balancer has an independent cursor retained across wiring/scaling edits.
-  No connected backend leaves it blocked without an idle clock; wiring a backend
-  resumes the request. Output adds `balancedBy`, and the backend adds `handledBy`.
-  This is local simulation only, with no real proxy, health checks or cloud calls.
-- `condition: {field, operator, value}` applies only to If/Else nodes. Dot paths
-  read own JSON properties; supported operators are `equals`, `not-equals`,
-  `greater-than` and `contains`. Values are JSON scalars. No expressions/scripts
-  are evaluated. The inspector edits conditions through the validated document.
-- Merge nodes persist `mergeMode: "all" | "any"` (default `all`). All waits for
-  each connected incoming wire and emits one result with a `branches` array.
-  Any passes arrivals independently and is appropriate for mutually exclusive
-  If/Else routes. An unconnected selected branch port remains visibly blocked.
-- Optional `latencyMs` is finite, 100–30,000 ms. Execution uses deterministic
-  100 ms quanta. Compute/database/cache/worker pools consume one physical machine
-  per operation. Queues hold FIFO work until a connected consumer is available
-  and hand each job to one worker, never broadcast it to every consumer.
-- Replica groups are logical capacity pools. Their internal replication wires
-  are not request hops; equivalent external pool wires do not duplicate calls.
-  Scaling updates available capacity without resetting in-flight requests.
-  Removing an executing node explicitly fails its affected request.
-- Cache/CDN nodes expose `cache: "hit" | "miss"` and `servedBy`; a miss warms
-  only after its request completes. API, worker, storage and database nodes add
-  provenance (`handledBy`, `processedBy`, `storedBy`/`readFrom`, `persistedBy`).
-  These are simulated metadata, not processed files or external service responses.
-- Runtime state is bounded: 32 requests, 128 trace steps per request, 64 hops
-  per branch, and 8,192 serialized JSON characters per input/output. Cycles,
-  excessive fan-out and oversized results fail visibly. Reset clears runtime
-  state but leaves topology untouched; Apply/import/new examples start a new run.
-  Conditions, latency, merge mode and wire outlets round-trip through JSON;
-  transient requests, traces and cache state do not.
-- The UI uses one 5 Hz clock only while unpaused work can advance. Hidden tabs
-  stop without wall-clock catch-up. Incomplete merges/queues/ports need no idle
-  clock; graph edits wake them. Rendering changes status attributes and existing
-  wire styling, never recreates detailed models or spawns a packet actor per job.
-  Existing raster/assembly budgets remain unchanged.
+  databases or cloud APIs run. The request simulator, its clock, JSON injection,
+  trace viewer and input/output panel have been removed; cable pulses are
+  decorative traffic, not execution results.
+- The editable media-app reference remains in Design → Reference design. It
+  illustrates video/image routing, parallel original/processing paths, a
+  queue/worker topology, publication and CDN playback.
+- If/Else and Merge render as cable-sized fittings, not machine appliances.
+  `isWireJunction` in `layout.ts` owns this classification. Their 48 × 48 ground
+  footprint drives placement, hit bounds and routing clearance; they contribute
+  no platform and have no standalone dashed frame. Cables terminate at the
+  fitting center, never at an invisible machine-sized frame port.
+- Static fitting artwork uses the normal shared raster cache. A live transparent
+  hit/selection ring remains outside cached pixels; full names stay accessible
+  through the root label, tooltip and inspector rather than a large nameplate.
+  The move handle sits beside a fitting so it cannot cover its entire hit target.
+- Select a junction to edit its routing annotation. If/Else persists
+  `condition: {field, operator, value}` with scalar comparisons and explicit
+  TRUE/FALSE wire outlets. Merge persists `mergeMode: \"all\" | \"any\"` to express
+  synchronization or independent convergence. These describe design intent;
+  no request data or expressions are executed.
+- Ordinary machines do not show a simulation-behavior form. Existing imported
+  `latencyMs` annotations still validate and round-trip without being executed
+  or changed by routing-rule edits. Typed connection and replica restrictions
+  remain enforced by the shared parser and builder.
 
 ### Geometry and artwork
 

@@ -57,7 +57,6 @@ export default defineConfig({
       exclude: [
         "src/main.ts",
         "src/world-builder.ts",
-        "src/flow-panel.ts",
         "src/flow-node-editor.ts",
         "src/scene.ts",
         "src/component-raster.ts",

@@ -103,3 +103,13 @@ test("overlapping bases at different elevations never merge", () => {
     [288 * 150],
   ]);
 });
+
+test("routing junctions never create or bridge machine platforms", () => {
+  const gate = { ...rack("branch-route", 160, 0), type: "branch" as const };
+  const merge = { ...rack("merge-route", 400, 0), type: "merge" as const };
+  expect(mergePlatformFootprints([gate, merge])).toEqual([]);
+  const machines = [rack("left", 0, 0), rack("right", 560, 0)];
+  expect(mergePlatformFootprints([...machines, gate, merge])).toEqual(
+    mergePlatformFootprints(machines),
+  );
+});

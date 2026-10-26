@@ -2072,9 +2072,33 @@ aside.detail.open {
   }
 }
 
-/* Workflow execution uses existing cached models and cables, never per-request geometry. */
-.detail [hidden],
-.flow-panel [hidden] {
+/* Logic controls stay cable-sized; their full names live in the tooltip/inspector. */
+.wire-junction .component-label {
+  display: none;
+}
+.junction-symbol {
+  fill: none;
+  stroke: var(--cable-color);
+  stroke-width: 2.2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+.junction-hit {
+  fill: transparent;
+  stroke: transparent;
+  stroke-width: 1;
+  pointer-events: all;
+}
+.wire-junction:is(:hover, .junction-focused) .junction-hit {
+  stroke: var(--accent);
+}
+.wire-junction.wire-target-valid .junction-hit {
+  stroke: light-dark(#23723c, #8edd9c);
+}
+.wire-junction.wire-target-invalid .junction-hit {
+  stroke: light-dark(#b43434, #fb8888);
+}
+.detail [hidden] {
   display: none;
 }
 .wire-target-valid .instance-label {
@@ -2086,29 +2110,6 @@ aside.detail.open {
 .wire-invalid .build-wire-preview {
   stroke: light-dark(#b43434, #fb8888);
 }
-.flow-on .scene-instance[data-flow-state="running"] .instance-label {
-  fill: light-dark(#137f5c, #80e8ba);
-}
-.flow-on
-  .scene-instance:is([data-flow-state="waiting"], [data-flow-state="blocked"])
-  .instance-label {
-  fill: light-dark(#90621b, #f2c96e);
-}
-.flow-on .scene-instance[data-flow-state="failed"] .instance-label {
-  fill: light-dark(#b43434, #fb8888);
-}
-.flow-on .connection:not(.flow-traced) {
-  opacity: 0.35;
-}
-.flow-on .connection:not(.flow-traced) .pulse {
-  display: none;
-}
-.flow-on .connection.flow-traced .wire {
-  stroke-width: 2.3;
-}
-.flow-on:not(.flow-running) .connection .pulse {
-  animation-play-state: paused;
-}
 .build-wiring {
   grid-template-columns: minmax(150px, 1.15fr) minmax(
       110px,
@@ -2117,46 +2118,6 @@ aside.detail.open {
   gap: 12px;
 }
 
-.flow-panel {
-  position: absolute;
-  z-index: 8;
-  top: 16px;
-  left: 16px;
-  width: min(390px, calc(100vw - 32px));
-  border: 1px solid var(--border);
-  border-radius: 5px;
-  background: var(--panel);
-  color: var(--fg);
-  box-shadow: 0 6px 22px #00000012;
-}
-.flow-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  padding: 8px 12px;
-}
-#simulate-toggle {
-  border: 0;
-  background: transparent;
-  color: var(--fg);
-  padding: 6px 0;
-  font: 11px var(--mono);
-  cursor: pointer;
-}
-#flow-status {
-  color: var(--muted);
-  font: 9px var(--mono);
-}
-.flow-body {
-  max-height: calc(100dvh - 155px);
-  overflow-y: auto;
-  overscroll-behavior: contain;
-  border-top: 1px solid var(--border);
-  padding: 14px;
-  scrollbar-width: thin;
-}
-.flow-panel label,
 .flow-node-editor label {
   display: flex;
   flex-direction: column;
@@ -2166,7 +2127,6 @@ aside.detail.open {
   font: 10px var(--mono);
   min-width: 0;
 }
-.flow-panel :is(select, textarea),
 .flow-node-editor :is(select, input) {
   width: 100%;
   min-width: 0;
@@ -2177,129 +2137,9 @@ aside.detail.open {
   padding: 8px;
   font: 11px var(--mono);
 }
-.flow-panel textarea {
-  resize: vertical;
-  max-height: 220px;
-  min-height: 90px;
-  tab-size: 2;
-}
-.flow-panel :is(button, input, select, textarea):focus-visible,
 .flow-node-editor :is(button, input, select):focus-visible {
   outline: 2px solid var(--accent);
   outline-offset: 2px;
-}
-.flow-panel button:disabled {
-  opacity: 0.45;
-  cursor: not-allowed;
-}
-.flow-fields {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 10px;
-}
-.flow-note,
-.flow-message {
-  font: 10px/1.65 var(--sans);
-  color: var(--muted);
-  margin: 0 0 10px;
-}
-.flow-message {
-  margin-top: 10px;
-}
-.flow-message.error {
-  color: light-dark(#b43434, #fb8888);
-}
-.flow-actions {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  flex-wrap: wrap;
-}
-.flow-actions .btn {
-  padding: 7px 9px;
-  font-size: 10px;
-}
-.flow-actions label {
-  flex-direction: row;
-  align-items: center;
-  margin: 0 0 0 auto;
-}
-.flow-actions select {
-  width: 64px;
-  padding: 5px;
-}
-.flow-summary {
-  padding: 10px;
-  border: 1px solid var(--border);
-  border-radius: 3px;
-  color: var(--fg);
-  background: var(--raised);
-  font: 10px/1.8 var(--mono);
-}
-.flow-trace {
-  margin: 10px 0;
-  padding: 0;
-  list-style: none;
-  max-height: 230px;
-  overflow-y: auto;
-  scrollbar-width: thin;
-}
-.flow-trace li + li {
-  margin-top: 4px;
-}
-.flow-trace button {
-  display: block;
-  width: 100%;
-  border: 1px solid var(--border);
-  border-left: 3px solid var(--detail);
-  border-radius: 3px;
-  background: var(--page);
-  color: var(--fg);
-  padding: 8px;
-  text-align: left;
-  font: 10px/1.5 var(--mono);
-  cursor: pointer;
-  overflow-wrap: anywhere;
-}
-.flow-trace button[data-state="running"] {
-  border-left-color: light-dark(#26855d, #80d7ac);
-}
-.flow-trace button:is([data-state="waiting"], [data-state="blocked"]) {
-  border-left-color: light-dark(#9b701e, #e5c475);
-}
-.flow-trace button[data-state="failed"] {
-  border-left-color: light-dark(#b43434, #fb8888);
-}
-.flow-trace button[aria-pressed="true"] {
-  border-color: var(--accent);
-}
-.flow-data {
-  margin-top: 12px;
-  border-top: 1px solid var(--border);
-  padding-top: 10px;
-}
-.flow-data summary {
-  cursor: pointer;
-  font: 10px/1.6 var(--mono);
-  overflow-wrap: anywhere;
-}
-.flow-data h3 {
-  color: var(--muted);
-  font: 10px var(--mono);
-  margin: 12px 0 6px;
-}
-.flow-data pre {
-  padding: 10px;
-  border: 1px solid var(--border);
-  border-radius: 3px;
-  background: var(--page);
-  color: var(--fg);
-  font: 10px/1.65 var(--mono);
-  max-height: 220px;
-  overflow: auto;
-  white-space: pre-wrap;
-  overflow-wrap: anywhere;
-  margin: 0;
 }
 .flow-node-editor h3 {
   margin: 0;
@@ -2325,50 +2165,10 @@ aside.detail.open {
     grid-column: 1 / -1;
   }
 }
-@media (max-width: 600px) {
-  .flow-panel {
-    left: 10px;
-    top: 10px;
-    width: calc(100vw - 110px);
-  }
-  .flow-panel:has(#simulate-toggle[aria-expanded="true"]) {
-    width: calc(100vw - 20px);
-    top: 60px;
-  }
-  .flow-body {
-    max-height: calc(100dvh - 190px);
-    padding: 12px;
-  }
-  .flow-fields {
-    grid-template-columns: 1fr;
-    gap: 0;
-  }
-  .flow-header {
-    padding: 7px 10px;
-  }
-  .flow-trace {
-    max-height: 180px;
-  }
-}
-.flow-panel textarea {
-  height: 128px;
-}
-#flow-locate {
-  margin-top: 10px;
-  padding: 6px 9px;
-  font-size: 10px;
-}
 .scene-frame.wire-target-valid {
   stroke: light-dark(#23723c, #8edd9c);
   stroke-width: 2;
 }
 .scene-frame.wire-target-invalid {
   stroke-opacity: 0.3;
-}
-@media (max-width: 600px) {
-  /* The expanded simulator replaces the generic Select hint, not construction errors. */
-  .stage:has(#simulate-toggle[aria-expanded="true"])
-    .build-status:not(.build-error) {
-    display: none;
-  }
 }
