@@ -91,6 +91,23 @@ function switcher(join: boolean): string {
   );
 }
 
+/** A stepped crossbar switch: ingress console, exposed routing deck and raised backend port bank. */
+function loadBalancer(): string {
+  // Seated base → lower console → deck details → raised rear I/O bank.
+  let art = plinth() + box(-126, -57, 18, 252, 114, 34, 2);
+  art += `<g transform="${frontFace(-126, 57, 52)}"><rect class="face recess" x="7" y="5" width="238" height="23" rx="2"/><rect class="port" x="15" y="10" width="30" height="13" rx="1"/><path class="detail" d="M20 13h20m-20 3h20m-20 3h20"/><path class="led" d="${circle(51, 12, 1.5)}"/><text class="label" x="65" y="20" font-size="7">INGRESS / ROUND ROBIN</text><path class="led" d="${circle(224, 12, 2)}${circle(233, 12, 2)}"/></g>`;
+  art += `<g transform="${endFace(126, 57, 52)}"><rect class="face recess" x="8" y="6" width="98" height="21" rx="2"/><path class="detail" d="${rows(10, 23, 3, 15, 80)}"/><rect class="port" x="89" y="11" width="11" height="10" rx="1"/></g>`;
+  art += `<g transform="${topFace(-126, -57, 52)}"><path class="detail" d="M7 53H245V106H7Z"/><path class="cdn-map" d="M30 99V75H210M80 75V56m65 19V56m65 19V56"/><path class="led" d="${circle(30, 99, 3)}${circle(80, 56, 2)}${circle(145, 56, 2)}${circle(210, 56, 2)}"/><text class="label" x="75" y="99" font-size="6">ONE REQUEST / ONE BACKEND</text></g>`;
+  art += box(-110, -49, 52, 220, 38, 34, 2);
+  art += `<g transform="${frontFace(-110, -11, 86)}"><rect class="face recess" x="6" y="5" width="208" height="24" rx="2"/>`;
+  for (let bank = 0; bank < 3; bank++) {
+    const x = 14 + bank * 65;
+    art += `<rect class="face drawer-front" x="${x}" y="8" width="56" height="18" rx="1"/><rect class="port" x="${x + 5}" y="12" width="18" height="10" rx="1"/><rect class="port" x="${x + 30}" y="12" width="18" height="10" rx="1"/><path class="led" d="${circle(x + 51, 12, 1.2)}"/>`;
+  }
+  art += `</g><g transform="${topFace(-110, -49, 86)}"><path class="detail" d="M8 7h204v24H8Z"/><path class="detail" d="${rows(11, 27, 4, 90, 202)}"/><text class="label" x="15" y="22" font-size="6">BACKENDS / 01–03</text></g>`;
+  return art;
+}
+
 /** Freeze artwork once; every world node and placement ghost shares the normal raster cache. */
 function model(
   markup: string,
@@ -130,12 +147,14 @@ const WORKER = model(worker(false), 91);
 const FFMPEG = model(worker(true), 91, "ffmpeg", topFace(-126, -43, 91));
 const BRANCH = model(switcher(false), 72);
 const MERGE = model(switcher(true), 72);
+const LOAD_BALANCER = model(loadBalancer(), 86);
 
 /** Resolve a media renderer's actual body, height and nameplate as one contract. */
 export function mediaModel(
   type: string,
   provider?: string,
 ): MediaModel | undefined {
+  if (type === "load-balancer") return LOAD_BALANCER;
   if (type === "message-queue")
     return provider === "amazon-sqs"
       ? SQS

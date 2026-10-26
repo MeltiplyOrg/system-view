@@ -213,6 +213,81 @@ test("wires and executes an arbitrary conditional graph through typed native out
   ).toHaveCount(0);
 });
 
+test("builds a load balancer and routes a burst through exactly one backend per request", async ({
+  page,
+}) => {
+  await page.goto("/");
+  await page.locator("#panel-toggle").click();
+  await page.locator("#source").fill(
+    JSON.stringify({
+      version: 1,
+      name: "Balanced web app",
+      instances: [
+        { id: "web-client", placement: { x: -480, y: 0 } },
+        { id: "compute-a", placement: { x: 240, y: -200 } },
+        { id: "compute-b", placement: { x: 240, y: 200 } },
+      ],
+    }),
+  );
+  await page.locator("#apply").click();
+  await page.locator("#panel-close").click();
+  await page.getByRole("button", { name: "Build", exact: true }).click();
+  await page.locator('[data-category="load-balancer"]').click();
+  await page
+    .getByRole("button", { name: "Build Load balancer", exact: true })
+    .focus();
+  await page.keyboard.press("Enter");
+  await expect(page.locator(".build-placement")).not.toHaveClass(
+    /placement-invalid/,
+  );
+  await page.keyboard.press("Enter");
+  await expect(
+    page.locator(
+      '.scene-instance[data-instance-id="lb-1"] [data-raster-ready="true"]',
+    ),
+  ).toBeVisible();
+  await page.locator("#build-wire").click();
+  for (const [from, to] of [
+    ["web-client", "lb-1"],
+    ["lb-1", "compute-a"],
+    ["lb-1", "compute-b"],
+  ]) {
+    await page.selectOption("#build-from", from);
+    await page.selectOption("#build-to", to);
+    await page.locator("#build-connect").click();
+  }
+  await page.locator("#simulate-toggle").click();
+  await page.selectOption("#flow-speed", "16");
+  await page.locator("#flow-burst").click();
+  await expect(page.locator("#flow-summary")).toContainText("10/10 complete");
+  const backends: unknown[] = [];
+  for (let request = 1; request <= 10; request++) {
+    await page.selectOption("#flow-request", String(request));
+    const data = await output(page);
+    expect(data.balancedBy).toBe("lb-1");
+    backends.push(data.handledBy);
+    await expect(page.locator("#flow-trace button")).toHaveCount(3);
+  }
+  expect(backends).toEqual([
+    "compute-a",
+    "compute-b",
+    "compute-a",
+    "compute-b",
+    "compute-a",
+    "compute-b",
+    "compute-a",
+    "compute-b",
+    "compute-a",
+    "compute-b",
+  ]);
+  await expect(
+    page.locator('.connection.flow-traced[data-connection-id="wire-3"]'),
+  ).toHaveCount(1);
+  await expect(
+    page.locator('.connection.flow-traced[data-connection-id="wire-2"]'),
+  ).toHaveCount(0);
+});
+
 test("media tooltips reserve provider space and stay clear of simulator controls", async ({
   page,
 }) => {

@@ -98,6 +98,7 @@ const RENDERER_TYPES = [
   "webpage",
   "cache",
   "cdn",
+  "load-balancer",
   "message-queue",
   "object-storage",
   "media-worker",

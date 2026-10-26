@@ -30,11 +30,54 @@ describe("component relationships", () => {
     ).toThrow(/cannot connect/i);
     expect(design.connections).toEqual([]);
   });
+  test("allows HTTP ingress to compute backends but rejects balancing directly into data services", () => {
+    const design = world(
+      "web-client",
+      "cdn-edge",
+      "lb-entry",
+      "compute-api",
+      "db-data",
+      "cache-data",
+      "queue-jobs",
+      "storage-media",
+    );
+    let wired = design;
+    for (const [from, to] of [
+      ["web-client", "lb-entry"],
+      ["cdn-edge", "lb-entry"],
+      ["compute-api", "lb-entry"],
+      ["lb-entry", "compute-api"],
+    ])
+      wired = connectComponents(wired, from, to);
+    expect(parseDesign(JSON.stringify(wired)).connections).toEqual(
+      wired.connections,
+    );
+    for (const to of [
+      "db-data",
+      "cache-data",
+      "queue-jobs",
+      "storage-media",
+      "web-client",
+    ]) {
+      expect(() => connectComponents(design, "lb-entry", to)).toThrow(
+        /cannot connect/,
+      );
+      expect(() =>
+        parseDesign(
+          JSON.stringify({
+            ...design,
+            connections: [{ from: "lb-entry", to }],
+          }),
+        ),
+      ).toThrow(/cannot connect/);
+    }
+  });
   test("logical services and SQLite cannot become machine replicas", () => {
     for (const id of [
       "web-client",
       "cdn-edge",
       "queue-jobs",
+      "lb-entry",
       "storage-media",
       "db-embedded",
     ]) {

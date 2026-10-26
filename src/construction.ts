@@ -55,6 +55,13 @@ export const BUILD_TYPES: readonly BuildItem[] = [
     description: "Deliver cached assets from the edge to your clients.",
   },
   {
+    id: "load-balancer",
+    prefix: "lb",
+    type: "load-balancer",
+    label: "Load balancer",
+    description: "Distribute each request to one backend in round-robin order.",
+  },
+  {
     id: "queue",
     prefix: "queue",
     type: "message-queue",

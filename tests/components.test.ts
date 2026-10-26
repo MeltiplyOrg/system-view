@@ -13,6 +13,7 @@ const types: PlacedInstance["type"][] = [
   "webpage",
   "cache",
   "cdn",
+  "load-balancer",
   "message-queue",
   "object-storage",
   "media-worker",
@@ -101,6 +102,7 @@ describe("component provider boundaries", () => {
       ["media-worker", [undefined, "ffmpeg"]],
       ["branch", [undefined]],
       ["merge", [undefined]],
+      ["load-balancer", [undefined]],
     ] as const) {
       for (const provider of providers) {
         const envelope = componentEnvelope(type, provider)!;

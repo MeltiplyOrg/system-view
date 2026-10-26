@@ -54,6 +54,119 @@ test("executes only the chosen branch and exposes each node's input/output", () 
   );
 });
 
+test("load balances each request to one backend in round-robin order", () => {
+  const design = parseDesign(
+    JSON.stringify({
+      version: 1,
+      name: "Balanced API",
+      instances: ["web-start", "lb-entry", "compute-a", "compute-b"],
+      connections: [
+        { from: "web-start", to: "lb-entry" },
+        { from: "lb-entry", to: "compute-a" },
+        { from: "lb-entry", to: "compute-b" },
+      ],
+    }),
+  );
+  const sim = new FlowSimulation(design);
+  for (let request = 0; request < 4; request++) {
+    sim.start("web-start", { request });
+    sim.advance(2000);
+  }
+  expect(sim.runs.map((run) => run.status)).toEqual([
+    "complete",
+    "complete",
+    "complete",
+    "complete",
+  ]);
+  expect(sim.runs.map((run) => run.outputs)).toEqual([
+    [{ request: 0, balancedBy: "lb-entry", handledBy: "compute-a" }],
+    [{ request: 1, balancedBy: "lb-entry", handledBy: "compute-b" }],
+    [{ request: 2, balancedBy: "lb-entry", handledBy: "compute-a" }],
+    [{ request: 3, balancedBy: "lb-entry", handledBy: "compute-b" }],
+  ]);
+  expect(sim.activity(sim.runs[3].id).wires).toEqual(
+    new Set(["web-start->lb-entry", "lb-entry->compute-b"]),
+  );
+});
+
+test("balances physical pool members without duplicating pool wires or stealing a busy backend's slot", () => {
+  const design = parseDesign(
+    JSON.stringify({
+      version: 1,
+      name: "Balanced pools",
+      instances: [
+        "lb-pool",
+        { id: "compute-a", latencyMs: 3000 },
+        { id: "compute-b", latencyMs: 100 },
+        "compute-c",
+      ],
+      clusters: [{ instances: ["compute-a", "compute-b"] }],
+      connections: [
+        { from: "lb-pool", to: "compute-a" },
+        { from: "lb-pool", to: "compute-b" },
+        { from: "lb-pool", to: "compute-c" },
+      ],
+    }),
+  );
+  const sim = new FlowSimulation(design);
+  for (let request = 0; request < 6; request++) {
+    sim.start("lb-pool", { request });
+    sim.advance(6000);
+  }
+  expect(
+    sim.runs.flatMap((run) => run.outputs.map((out) => out.handledBy)),
+  ).toEqual([
+    "compute-a",
+    "compute-b",
+    "compute-c",
+    "compute-a",
+    "compute-b",
+    "compute-c",
+  ]);
+  sim.start("lb-pool", { request: "burst" }, 4);
+  sim.advance(1000);
+  expect(sim.runs.slice(6).map((run) => run.status)).toEqual([
+    "running",
+    "complete",
+    "complete",
+    "waiting",
+  ]);
+  expect(sim.runs[9].steps.at(-1)!.instanceId).toBeUndefined();
+  sim.advance(6000);
+  expect(
+    sim.runs.slice(6).flatMap((run) => run.outputs.map((out) => out.handledBy)),
+  ).toEqual(["compute-a", "compute-b", "compute-c", "compute-a"]);
+});
+
+test("unconnected balancers stop the clock and resume after wiring without resetting other balancers", () => {
+  const design = parseDesign(
+    JSON.stringify({
+      version: 1,
+      name: "Editable balancers",
+      instances: ["lb-main", "lb-other", "compute-a", "compute-b"],
+      connections: [
+        { from: "lb-main", to: "compute-a" },
+        { from: "lb-main", to: "compute-b" },
+      ],
+    }),
+  );
+  const sim = new FlowSimulation(design);
+  sim.start("lb-main", {});
+  sim.start("lb-other", {});
+  sim.advance(1000);
+  expect(sim.runs.map((run) => run.status)).toEqual(["complete", "waiting"]);
+  expect(sim.hasWork).toBe(false);
+  sim.updateDesign(connectComponents(design, "lb-other", "compute-a"));
+  expect(sim.hasWork).toBe(true);
+  sim.start("lb-main", {});
+  sim.advance(2000);
+  expect(sim.runs.flatMap((run) => run.outputs)).toEqual([
+    { balancedBy: "lb-main", handledBy: "compute-a" },
+    { balancedBy: "lb-other", handledBy: "compute-a" },
+    { balancedBy: "lb-main", handledBy: "compute-b" },
+  ]);
+});
+
 test("fans out and waits for both parallel inputs before executing a merge once", () => {
   const design = parseDesign(
     JSON.stringify({

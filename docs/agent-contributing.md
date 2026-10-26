@@ -83,6 +83,7 @@ One pass explains where most edits belong:
   `compute`/`server`/`api` → compute, `web`/`webpage`/`frontend` → webpage,
   `cache` → cache, `cdn` → delivery edge, `queue`/`broker` → message queue,
   `storage`/`bucket` → object storage, `worker`/`encoder` → media worker,
+  `lb`/`balancer`/`loadbalancer` → load balancer,
   `branch`/`condition` → If/Else, `merge`/`join` → Merge; unknown → database.
 - `layoutDesign` is deterministic from the document alone. Explicit sites
   override automatic slots; a pinned first replica anchors the default slots
@@ -92,8 +93,8 @@ One pass explains where most edits belong:
   64-component limit. New replicas inherit presentation, not the primary's
   exact site. Removed members' external links move to the first member.
   Only API/compute and worker machines scale as instances; databases and caches
-  support replicas, except SQLite. Clients, CDNs, logical queues/buckets, and
-  workflow controls are not machine replicas. Groups require the same type
+  support replicas, except SQLite. Clients, CDNs, load balancers, logical queues/buckets,
+  and workflow controls are not machine replicas. Groups require the same type
   and provider; imports and mutations enforce this, not only the inspector.
 - `parseDesign` owns limits and reference checks. Add a field there before
   teaching the renderer or editor about it.
@@ -124,6 +125,10 @@ One pass explains where most edits belong:
   imports and construction use those same rules. Invalid destinations are
   disabled in the form and their world footprints are dimmed. Queue outputs
   deliver to workers; a browser cannot wire directly to a database.
+- Load balancers accept browser, CDN or compute ingress and route to compute
+  backends, not directly to databases, caches, queues or buckets. Workflow
+  controls remain valid explicit routing points. Build → **Load balancer**
+  adds a stepped crossbar appliance using the shared geometry and raster cache.
 - Branches require an explicit `true`/`false` outlet. Other nodes use `out`
   (omitted by default). Construction rejects duplicate source/destination/port
   triples. Distinct ports may reach the same target; parallel imported links
@@ -158,6 +163,14 @@ One pass explains where most edits belong:
   immutable input snapshot; node results are inspectable in the selected request's
   trace. **Locate node** moves the camera to the chosen step without executing it.
   A run completes only after every reachable branch finishes.
+- Load balancers use round-robin dispatch to exactly one physical backend per
+  request. Connected replica pools expand into individual eligible machines;
+  duplicate pool wires do not add weight or duplicate calls. A busy selected
+  backend queues that request without stealing another machine's slot. Each
+  balancer has an independent cursor retained across wiring/scaling edits.
+  No connected backend leaves it blocked without an idle clock; wiring a backend
+  resumes the request. Output adds `balancedBy`, and the backend adds `handledBy`.
+  This is local simulation only, with no real proxy, health checks or cloud calls.
 - `condition: {field, operator, value}` applies only to If/Else nodes. Dot paths
   read own JSON properties; supported operators are `equals`, `not-equals`,
   `greater-than` and `contains`. Values are JSON scalars. No expressions/scripts

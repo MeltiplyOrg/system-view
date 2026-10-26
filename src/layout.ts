@@ -60,6 +60,8 @@ export function instanceColor(
       return "#7ee787";
     case "cdn":
       return "#7ab8ff";
+    case "load-balancer":
+      return "#8aa9f2";
     case "message-queue":
       return "#eab464";
     case "object-storage":
@@ -86,6 +88,9 @@ const INSTANCE_TYPES: Readonly<Record<string, PlacedInstance["type"]>> = {
   frontend: "webpage",
   cache: "cache",
   cdn: "cdn",
+  lb: "load-balancer",
+  balancer: "load-balancer",
+  loadbalancer: "load-balancer",
   queue: "message-queue",
   broker: "message-queue",
   storage: "object-storage",

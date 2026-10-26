@@ -772,6 +772,7 @@ const TYPE_LABELS: Readonly<Record<PlacedInstance["type"], string>> = {
   webpage: "Webpage",
   cache: "Cache",
   cdn: "CDN",
+  "load-balancer": "Load Balancer",
   "message-queue": "Message Queue",
   "object-storage": "Object Storage",
   "media-worker": "Media Worker",

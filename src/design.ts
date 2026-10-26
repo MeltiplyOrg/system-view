@@ -45,6 +45,7 @@ export interface PlacedInstance {
     | "webpage"
     | "cache"
     | "cdn"
+    | "load-balancer"
     | "message-queue"
     | "object-storage"
     | "media-worker"

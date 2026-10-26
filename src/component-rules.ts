@@ -5,9 +5,10 @@ import { inferInstanceType } from "./layout";
 const TARGETS: Readonly<
   Record<PlacedInstance["type"], readonly PlacedInstance["type"][]>
 > = {
-  webpage: ["compute-server", "cdn", "object-storage"],
+  webpage: ["compute-server", "cdn", "object-storage", "load-balancer"],
   "compute-server": [
     "compute-server",
+    "load-balancer",
     "database-rack",
     "cache",
     "message-queue",
@@ -16,7 +17,8 @@ const TARGETS: Readonly<
   ],
   "database-rack": ["database-rack", "compute-server", "cache"],
   cache: ["cache", "database-rack", "object-storage"],
-  cdn: ["cdn", "compute-server", "cache", "object-storage"],
+  cdn: ["cdn", "compute-server", "cache", "object-storage", "load-balancer"],
+  "load-balancer": ["compute-server"],
   "message-queue": ["media-worker"],
   "media-worker": ["object-storage", "database-rack", "cache", "message-queue"],
   "object-storage": [
@@ -28,6 +30,7 @@ const TARGETS: Readonly<
   ],
   branch: [
     "compute-server",
+    "load-balancer",
     "database-rack",
     "cache",
     "message-queue",
@@ -39,6 +42,7 @@ const TARGETS: Readonly<
   ],
   merge: [
     "compute-server",
+    "load-balancer",
     "database-rack",
     "cache",
     "message-queue",

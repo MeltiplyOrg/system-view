@@ -26,6 +26,7 @@ const LATENCY: Readonly<Record<PlacedInstance["type"], number>> = {
   "database-rack": 300,
   cache: 100,
   cdn: 200,
+  "load-balancer": 100,
   "message-queue": 100,
   "object-storage": 400,
   "media-worker": 3000,
@@ -76,6 +77,8 @@ interface Token extends FlowStep {
   hops: number;
   remaining: number;
   duration: number;
+  /** A balancer chooses a physical backend before it acquires that machine's slot. */
+  preferredInstanceId?: string;
 }
 
 /** Stable wire identity agrees with the scene and imported document. Explicit IDs distinguish parallel port wires. */
@@ -123,6 +126,11 @@ export class FlowSimulation {
   private readonly members = new Map<string, readonly string[]>();
   private readonly outgoing = new Map<string, Connection[]>();
   private readonly incoming = new Map<string, Set<string>>();
+  private readonly backends = new Map<
+    string,
+    { link: Connection; member: string }[]
+  >();
+  private readonly nextBackend = new Map<string, number>();
   private readonly occupied = new Set<string>();
   private readonly tokens: Token[] = [];
   private readonly history: FlowRun[] = [];
@@ -148,6 +156,7 @@ export class FlowSimulation {
     this.members.clear();
     this.outgoing.clear();
     this.incoming.clear();
+    this.backends.clear();
     for (const node of design.instances) {
       this.nodes.set(node.id, node);
       this.canonical.set(node.id, node.id);
@@ -187,15 +196,32 @@ export class FlowSimulation {
       inputs.add(edgeId(link));
       this.incoming.set(to, inputs);
     }
+    // Expand each connected pool once per graph edit, not once per request.
+    for (const node of design.instances) {
+      if (inferInstanceType(node.id) !== "load-balancer") continue;
+      const backends: { link: Connection; member: string }[] = [];
+      const seen = new Set<string>();
+      for (const link of this.outgoing.get(node.id) ?? [])
+        for (const member of this.members.get(this.key(link.to))!)
+          if (!seen.has(member)) {
+            seen.add(member);
+            backends.push({ link, member });
+          }
+      this.backends.set(node.id, backends);
+    }
+    for (const id of this.nextBackend.keys())
+      if (!this.backends.has(id)) this.nextBackend.delete(id);
     for (const token of this.tokens)
       if (
         this.active(token) &&
         (!this.nodes.has(token.nodeId) ||
-          (token.instanceId && !this.nodes.has(token.instanceId)))
+          (token.instanceId && !this.nodes.has(token.instanceId)) ||
+          (token.preferredInstanceId &&
+            !this.nodes.has(token.preferredInstanceId)))
       )
         this.fail(
           token.run,
-          `Executing node ${token.instanceId ?? token.nodeId} was removed.`,
+          `Executing node ${token.instanceId ?? token.preferredInstanceId ?? token.nodeId} was removed.`,
         );
     this.refresh();
   }
@@ -357,7 +383,8 @@ export class FlowSimulation {
       token.state === "blocked"
     );
   }
-  private free(node: string): string | undefined {
+  private free(node: string, preferred?: string): string | undefined {
+    if (preferred) return this.occupied.has(preferred) ? undefined : preferred;
     return (this.members.get(this.key(node)) ?? []).find(
       (id) => !this.occupied.has(id),
     );
@@ -397,7 +424,9 @@ export class FlowSimulation {
       const expected = this.incoming.get(token.nodeId);
       return !expected?.size || [...expected].every((id) => arrived.has(id));
     }
-    return !MACHINES[type] || !!this.free(token.nodeId);
+    return (
+      !MACHINES[type] || !!this.free(token.nodeId, token.preferredInstanceId)
+    );
   }
 
   /** Append at most 128 observations per request; cycles and exponential fan-out fail visibly instead of exhausting the browser. */
@@ -471,7 +500,9 @@ export class FlowSimulation {
           item.finishedAt = this.elapsed;
         }
     }
-    token.instanceId = MACHINES[type] ? this.free(node.id)! : node.id;
+    token.instanceId = MACHINES[type]
+      ? this.free(node.id, token.preferredInstanceId)!
+      : node.id;
     if (MACHINES[type]) this.occupied.add(token.instanceId);
     token.duration =
       this.nodes.get(token.instanceId)!.latencyMs ?? LATENCY[type];
@@ -506,6 +537,7 @@ export class FlowSimulation {
     if (type === "compute-server")
       output = { ...output, handledBy: token.instanceId };
     if (type === "message-queue") output = { ...output, queuedBy: node.id };
+    if (type === "load-balancer") output = { ...output, balancedBy: node.id };
     if (type === "media-worker")
       output = {
         ...output,
@@ -541,18 +573,39 @@ export class FlowSimulation {
     token.output = output;
     token.finishedAt = this.elapsed;
     if (token.instanceId) this.occupied.delete(token.instanceId);
-    if (type === "branch" && !this.routes(token).length) {
+    if (
+      (type === "branch" && !this.routes(token).length) ||
+      (type === "load-balancer" && !this.backends.get(node.id)!.length)
+    ) {
       token.state = "blocked";
-      token.issue = `Connect this node's ${token.outlet!.toUpperCase()} output.`;
+      token.issue =
+        type === "load-balancer"
+          ? "Connect at least one compute backend."
+          : `Connect this node's ${token.outlet!.toUpperCase()} output.`;
       return;
     }
     this.deliver(token);
   }
 
-  /** Broadcast ordinary outputs; a queue hands off to exactly one reserved consumer. New work starts no earlier than this quantum. */
+  /** Broadcast ordinary outputs; queues and balancers hand off to exactly one destination. */
   private deliver(token: Token): void {
     token.state = "done";
     token.issue = "";
+    if (inferInstanceType(token.nodeId) === "load-balancer") {
+      const backends = this.backends.get(token.nodeId)!;
+      const index = (this.nextBackend.get(token.nodeId) ?? 0) % backends.length;
+      const backend = backends[index];
+      this.nextBackend.set(token.nodeId, (index + 1) % backends.length);
+      const next = this.add(
+        token.run,
+        this.key(backend.link.to),
+        token.output!,
+        edgeId(backend.link),
+        token.hops + 1,
+      );
+      if (next) next.preferredInstanceId = backend.member;
+      return;
+    }
     const queue = inferInstanceType(token.nodeId) === "message-queue";
     const links = queue ? [this.consumer(token)!] : this.routes(token);
     if (!links.length) token.run.outputs.push(token.output!);
