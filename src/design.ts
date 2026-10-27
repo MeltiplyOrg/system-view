@@ -10,6 +10,9 @@ import { connectionIssue, replicaGroupIssue } from "./component-rules";
 import { mediaExample } from "./media-example";
 import { inferInstanceType } from "./layout";
 
+/** Omitted coverage is a read-through cache that serves 90% of requests locally. */
+export const DEFAULT_CACHE_HIT_PERCENT = 90;
+
 export interface Position {
   /** Generated rack-center X in world units. */
   x: number;
@@ -98,6 +101,8 @@ export interface DesignInstance {
   capacityRps?: number;
   /** Requests emitted per second by a Users source, 0–20; omitted defaults to one. */
   trafficRps?: number;
+  /** Cache-only local hit coverage, 0–100%; misses continue to downstream dependencies. */
+  cacheHitPercent?: number;
 }
 
 /**
@@ -625,6 +630,22 @@ function sourceTraffic(value: unknown, id: string, path: string): number {
   return value;
 }
 
+/** Validate cache coverage independently of provider skins; zero and fractional percentages are meaningful. */
+function cacheCoverage(value: unknown, id: string, path: string): number {
+  if (inferInstanceType(id) !== "cache")
+    throw new Error(`${path}.cacheHitPercent applies only to caches.`);
+  if (
+    typeof value !== "number" ||
+    !Number.isFinite(value) ||
+    value < 0 ||
+    value > 100
+  )
+    throw new Error(
+      `${path}.cacheHitPercent must be between 0 and 100 percent.`,
+    );
+  return value;
+}
+
 /** Validate authored workflow behavior independently of renderer/provider presentation. */
 function flowSettings(
   instance: Record<string, unknown>,
@@ -755,6 +776,11 @@ export function parseDesign(source: string): Design {
       ...(instance.trafficRps === undefined
         ? {}
         : { trafficRps: sourceTraffic(instance.trafficRps, id, path) }),
+      ...(instance.cacheHitPercent === undefined
+        ? {}
+        : {
+            cacheHitPercent: cacheCoverage(instance.cacheHitPercent, id, path),
+          }),
       ...flowSettings(instance, path),
     };
   });

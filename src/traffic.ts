@@ -1,4 +1,5 @@
 import type { Design, DesignInstance, PlacedInstance } from "./design";
+import { DEFAULT_CACHE_HIT_PERCENT } from "./design";
 import { inferInstanceType } from "./layout";
 import { hasResponse } from "./component-rules";
 
@@ -109,12 +110,13 @@ export function capacityRps(instance: DesignInstance): number | null {
  * capacity tokens. Excess arrivals wait FIFO; queueing time contributes to root
  * response percentiles. All calls share the 512-actor ceiling; the 32-hop TTL
  * rejects cycles. Rolling root-response SLO breaches latch a frozen crash state.
- * No payload execution, cache-hit model, merge barrier or durable queue is implied.
+ * No payload execution, merge barrier or durable queue is implied.
  */
 export class TrafficModel {
   private readonly types: PlacedInstance["type"][];
   private readonly outputs: Output[][];
   private readonly turns: number[];
+  private readonly cacheMissCredit: number[];
   private readonly sources: { node: number; period: number; next: number }[];
   private readonly services: (Service | null)[];
   private readonly sends: number[][];
@@ -137,6 +139,7 @@ export class TrafficModel {
     private readonly design: Design,
     limits: CrashLimits = DEFAULT_CRASH_LIMITS,
   ) {
+    this.cacheMissCredit = design.instances.map(() => 0);
     if (
       ![limits.p95Ms, limits.p99Ms].every(
         (value) => Number.isFinite(value) && value > 0,
@@ -360,6 +363,26 @@ export class TrafficModel {
       actor.failed = true;
       this.finish(actor, at);
       return;
+    }
+    if (this.types[actor.node] === "cache") {
+      // Accumulate misses instead of sampling randomness: at 90%, the first nine hit and the tenth misses.
+      const credit =
+        this.cacheMissCredit[actor.node] +
+        100 -
+        (this.design.instances[actor.node].cacheHitPercent ??
+          DEFAULT_CACHE_HIT_PERCENT);
+      if (credit < 100 - 1e-9) {
+        this.cacheMissCredit[actor.node] = credit;
+        this.finish(actor, at);
+        return;
+      }
+      this.cacheMissCredit[actor.node] = Math.max(0, credit - 100);
+      if (!outputs.length) {
+        this.state.rejected++;
+        actor.failed = true;
+        this.finish(actor, at);
+        return;
+      }
     }
     actor.phase = "waiting";
     actor.ready = Infinity;

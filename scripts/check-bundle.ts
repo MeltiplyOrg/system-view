@@ -13,14 +13,14 @@ import { gzipSync } from "node:zlib";
 /**
  * Maximum gzipped bytes per emitted asset type.
  *
- * Includes artwork, assembly controls, Users, paired request/response lanes,
- * FIFO admission and the rolling SLO/crash HUD. The complete build measures
- * 79.60 KiB JS gzip / 88.24 KiB total; 80 / 89 KiB retains bounded headroom.
+ * Includes artwork, assembly controls, visible traffic, queued capacity,
+ * rolling SLO/crash HUD, inline wire insertion and cache coverage. The build
+ * measures about 80 KiB JS gzip / 89 KiB total; 81 / 89 KiB bounds transfer.
  * No SDKs, codecs or model copies are loaded. The 512-call runtime ceiling,
  * shared raster pixel budget and single-encoder limit remain independent.
  */
 const budgets = {
-  ".js": 80 * 1024,
+  ".js": 81 * 1024,
   ".css": 10 * 1024,
   ".html": 2 * 1024,
 } as const;

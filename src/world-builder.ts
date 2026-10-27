@@ -6,6 +6,9 @@ import {
   BUILD_GRID,
   canPlace,
   connectComponents,
+  disconnectComponents,
+  insertComponent,
+  insertionIssue,
   pinWorld,
   placeComponent,
   removeComponent,
@@ -791,6 +794,7 @@ export class WorldBuilder {
   /** Dismiss without losing a multi-selection; focus returns only on keyboard dismissal. */
   private hideContext(restore: boolean): void {
     if (this.menu.hidden) return;
+    this.menuReturn?.closest(".connection")?.classList.remove("wire-hovered");
     this.menu.hidden = true;
     if (restore && this.menuReturn?.isConnected) {
       (this.menuReturn as HTMLElement | SVGElement).focus({
@@ -801,10 +805,19 @@ export class WorldBuilder {
   }
 
   /** Build context-specific actions from the actual clicked node or group, never hover/inspector leftovers. */
-  private showContext(target: Element, x: number, y: number): void {
+  private showContext(
+    target: Element,
+    x: number,
+    y: number,
+    choosingNode = false,
+  ): void {
     if (this.pointer || this.tool !== "select") this.reset();
     this.scene.freezeView();
     const design = this.options.read();
+    const wire = target.closest<SVGGElement>(".connection");
+    const wireIndex = wire ? Number(wire.dataset.connectionIndex) : -1;
+    const edge = design.connections[wireIndex];
+    if (wire && !edge) return;
     const frameId =
       target.closest<SVGGElement>(".scene-frame")?.dataset.clusterId;
     const pool = design.clusters.find(
@@ -831,16 +844,18 @@ export class WorldBuilder {
             ? [...selection]
             : [node.id]
           : [...selection];
-    this.menuReturn = target.closest(".node-group-header") ?? this.svg;
+    this.menuReturn =
+      target.closest(".connection,.node-group-header") ?? this.svg;
     this.menu.replaceChildren();
     const heading = document.createElement("div");
     heading.className = "context-heading";
     heading.setAttribute("role", "presentation");
-    heading.textContent =
-      group?.label ??
-      (ids.length > 1
-        ? `${ids.length} selected nodes`
-        : (node?.label ?? node?.id ?? "World"));
+    heading.textContent = wire
+      ? `${edge.from} → ${edge.to}`
+      : (group?.label ??
+        (ids.length > 1
+          ? `${ids.length} selected nodes`
+          : (node?.label ?? node?.id ?? "World")));
     this.menu.append(heading);
     const action = (
       label: string,
@@ -869,98 +884,134 @@ export class WorldBuilder {
       });
       this.menu.append(button);
     };
-    if (node) {
-      action("Inspect node", () => {
-        this.reset();
-        this.options.enter();
-        this.options.inspect(node.id);
-      });
-      for (const port of outputPorts(node))
+    if (wire) {
+      wire.classList.add("wire-hovered");
+      const items = BUILD_ITEMS.filter(
+        (item) => !insertionIssue(design, wireIndex, item),
+      );
+      if (choosingNode) {
+        action("Back to wire actions", () => this.showContext(wire, x, y));
+        for (const item of items)
+          action(`Add ${item.label}`, () => {
+            const next = insertComponent(this.pinned(), wireIndex, item);
+            this.reset();
+            this.options.enter();
+            this.options.commit(next);
+            this.say(
+              `Inserted ${item.label} between ${edge.from} and ${edge.to}. Select the node to configure it.`,
+            );
+          });
+      } else {
         action(
-          port === "out"
-            ? "Wire from this node…"
-            : `Wire ${port.toUpperCase()} output…`,
-          () => this.startContextWire(node.id, port),
+          "Cut",
+          () => {
+            const next = disconnectComponents(this.pinned(), wireIndex);
+            this.reset();
+            this.options.enter();
+            this.options.commit(next);
+            this.say("Wire cut. Existing nodes were kept.");
+          },
+          { danger: true },
         );
-      action(
-        selection.includes(node.id)
-          ? "Remove from selection"
-          : "Add to selection",
-        () => this.groups.toggleNode(node.id),
-      );
-    }
-    if (group) {
-      action("Rename / edit group…", () =>
-        this.groups.manage(group.instances, group.id),
-      );
-      action("Select group nodes", () => this.groups.manage(group.instances));
-      action("Ungroup · keep nodes", () => {
-        const next = ungroupNodes(this.pinned(), group.id);
-        this.reset();
-        this.options.enter();
-        this.options.commit(next);
-        this.say("Ungrouped. Nodes and wires were kept.");
-      });
+        action("Add node…", () => this.showContext(wire, x, y, true), {
+          disabled: !items.length,
+        });
+      }
     } else {
-      action(
-        `Group selected nodes${ids.length ? ` (${ids.length})` : ""}`,
-        () => {
-          const next = saveNodeGroup(this.pinned(), ids, "New group");
-          const created = next.groups!.find((item) =>
-            item.instances.includes(ids[0]),
-          )!;
-          this.options.commit(next);
-          this.groups.manage(created.instances, created.id);
-        },
-        { disabled: ids.length < 2 },
-      );
-      const owner =
-        node && design.groups?.find((item) => item.instances.includes(node.id));
-      if (owner)
-        action("Edit containing group…", () =>
-          this.groups.manage(owner.instances, owner.id),
+      if (node) {
+        action("Inspect node", () => {
+          this.reset();
+          this.options.enter();
+          this.options.inspect(node.id);
+        });
+        for (const port of outputPorts(node))
+          action(
+            port === "out"
+              ? "Wire from this node…"
+              : `Wire ${port.toUpperCase()} output…`,
+            () => this.startContextWire(node.id, port),
+          );
+        action(
+          selection.includes(node.id)
+            ? "Remove from selection"
+            : "Add to selection",
+          () => this.groups.toggleNode(node.id),
         );
-    }
-    if (ids.length)
-      action(
-        group
-          ? `Delete group nodes (${ids.length})`
-          : ids.length > 1
-            ? `Delete selected nodes (${ids.length})`
-            : "Delete node",
-        () => {
-          let next = this.pinned();
-          for (const id of ids) next = removeComponent(next, id);
+      }
+      if (group) {
+        action("Rename / edit group…", () =>
+          this.groups.manage(group.instances, group.id),
+        );
+        action("Select group nodes", () => this.groups.manage(group.instances));
+        action("Ungroup · keep nodes", () => {
+          const next = ungroupNodes(this.pinned(), group.id);
           this.reset();
           this.options.enter();
           this.options.commit(next);
-          this.say(
-            `Deleted ${ids.length} node${ids.length === 1 ? "" : "s"} and incident wires.`,
+          this.say("Ungrouped. Nodes and wires were kept.");
+        });
+      } else {
+        action(
+          `Group selected nodes${ids.length ? ` (${ids.length})` : ""}`,
+          () => {
+            const next = saveNodeGroup(this.pinned(), ids, "New group");
+            const created = next.groups!.find((item) =>
+              item.instances.includes(ids[0]),
+            )!;
+            this.options.commit(next);
+            this.groups.manage(created.instances, created.id);
+          },
+          { disabled: ids.length < 2 },
+        );
+        const owner =
+          node &&
+          design.groups?.find((item) => item.instances.includes(node.id));
+        if (owner)
+          action("Edit containing group…", () =>
+            this.groups.manage(owner.instances, owner.id),
           );
-        },
-        { danger: true },
-      );
-    if (!node && !group) {
-      action("Select nodes to group…", () => this.groups.manage([]));
-      action(
-        "Select all nodes",
-        () => this.groups.manage(design.instances.map((item) => item.id)),
-        { disabled: !design.instances.length },
-      );
-      action(
-        "Connect nodes…",
-        () => {
-          this.setTool("wire");
-          this.from.focus({ preventScroll: true });
-        },
-        { disabled: design.instances.length < 2 },
-      );
-      action("Add components…", () => {
-        this.setTool("select");
-        this.setOpen(true);
-      });
-      action("Fit world", () => this.scene.fit());
-      action("New world…", () => this.newWorld(), { danger: true });
+      }
+      if (ids.length)
+        action(
+          group
+            ? `Delete group nodes (${ids.length})`
+            : ids.length > 1
+              ? `Delete selected nodes (${ids.length})`
+              : "Delete node",
+          () => {
+            let next = this.pinned();
+            for (const id of ids) next = removeComponent(next, id);
+            this.reset();
+            this.options.enter();
+            this.options.commit(next);
+            this.say(
+              `Deleted ${ids.length} node${ids.length === 1 ? "" : "s"} and incident wires.`,
+            );
+          },
+          { danger: true },
+        );
+      if (!node && !group) {
+        action("Select nodes to group…", () => this.groups.manage([]));
+        action(
+          "Select all nodes",
+          () => this.groups.manage(design.instances.map((item) => item.id)),
+          { disabled: !design.instances.length },
+        );
+        action(
+          "Connect nodes…",
+          () => {
+            this.setTool("wire");
+            this.from.focus({ preventScroll: true });
+          },
+          { disabled: design.instances.length < 2 },
+        );
+        action("Add components…", () => {
+          this.setTool("select");
+          this.setOpen(true);
+        });
+        action("Fit world", () => this.scene.fit());
+        action("New world…", () => this.newWorld(), { danger: true });
+      }
     }
     this.menu.hidden = false;
     // One opening-time measurement; clamp both axes and allow internal scrolling
@@ -1026,7 +1077,14 @@ export class WorldBuilder {
       }
       return false;
     }
-    if (event.key !== "ContextMenu" && !(event.shiftKey && event.key === "F10"))
+    const wireKey =
+      target.closest(".connection") &&
+      (event.key === "Enter" || event.key === " ");
+    if (
+      !wireKey &&
+      event.key !== "ContextMenu" &&
+      !(event.shiftKey && event.key === "F10")
+    )
       return false;
     if (
       target.matches("input,textarea,select") ||
@@ -1036,7 +1094,7 @@ export class WorldBuilder {
     if (!target.closest("#scene") && target !== document.body) return false;
     const selected = this.options.selection()[0];
     const anchor =
-      target.closest(".node-group-header,.scene-instance") ??
+      target.closest(".connection,.node-group-header,.scene-instance") ??
       (selected
         ? [...this.svg.querySelectorAll<SVGGElement>(".scene-instance")].find(
             (node) => node.dataset.instanceId === selected,

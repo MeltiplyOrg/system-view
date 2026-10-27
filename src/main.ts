@@ -1,6 +1,12 @@
 import "./style.css";
 import type { Design } from "./design";
-import { examples, parseDesign, webAppExample, MAX_INSTANCES } from "./design";
+import {
+  examples,
+  parseDesign,
+  webAppExample,
+  MAX_INSTANCES,
+  DEFAULT_CACHE_HIT_PERCENT,
+} from "./design";
 import { inferInstanceType, instanceColor } from "./layout";
 import { resizeReplicas } from "./replicas";
 import { findProvider, providersFor } from "./providers";
@@ -12,7 +18,6 @@ import { FlowNodeEditor } from "./flow-node-editor";
 import { placeCallout, type CalloutRect } from "./callout-layout";
 import { TrafficControls } from "./traffic-controls";
 import { capacityRps } from "./traffic";
-import { WireActions } from "./wire-actions";
 
 /**
  * Resolve a required descendant or fail immediately.
@@ -80,6 +85,14 @@ app.innerHTML = `
             <input id="users-traffic-rps" type="number" min="0" max="20" step="any" required>
             <button class="btn" type="submit">Set traffic</button>
             <p id="source-traffic-message" class="detail-empty" role="status">One dot is one request. Set 0 to stop this source; maximum 20 requests/s.</p>
+          </form>
+        </section>
+        <section id="detail-cache" class="detail-section" hidden>
+          <form id="cache-settings-form">
+            <label class="detail-label" for="cache-hit-percent">Cache hit coverage · %</label>
+            <input id="cache-hit-percent" type="number" min="0" max="100" step="any" required>
+            <button class="btn" type="submit">Set cache coverage</button>
+            <p id="cache-settings-message" class="detail-empty" role="status">Hits return from this cache; only misses continue downstream.</p>
           </form>
         </section>
         <section id="detail-scaling" class="detail-section">
@@ -154,7 +167,7 @@ app.innerHTML = `
 
         <section class="section schema-note">
           <div class="section-label">Dynamic design</div>
-          <code>instances: [{ id, label?, provider?, placement?, trafficRps?, capacityRps?, condition?, mergeMode?, latencyMs? }]<br>connections: [{ id?, from, to, outlet?, relation? }]<br>clusters: [{ label?, instances }]<br>groups: [{ id, label, instances }]</code>
+          <code>instances: [{ id, label?, provider?, placement?, trafficRps?, capacityRps?, cacheHitPercent?, condition?, mergeMode?, latencyMs? }]<br>connections: [{ id?, from, to, outlet?, relation? }]<br>clusters: [{ label?, instances }]<br>groups: [{ id, label, instances }]</code>
           <p>Open Components at the bottom to add to your system. The drawer contains only component categories and cards. Drag a component into the world, or select a card and click clear ground. Placements snap to the build grid and are saved in placement. Arrow keys move a keyboard-selected preview; Enter places it and Escape cancels. Right-click nodes to wire or delete them. Wiring opens a separate endpoint editor; choose a destination in the world or use its controls. A machine's anchor handle moves an existing node or replica group; completed moves are saved with the design. Right-click empty ground for New world.</p>
           <p>Groups organize any mix of nodes without changing their connections or replica pools. Right-click empty ground and choose Select nodes to group, then click nodes or drag a selection box, name the selection and create a group. Group management opens separately from the component drawer. Shift-click starts multi-selection; Ctrl/Cmd+G opens grouping. Click a group's title or use its right-click menu to rename it or change membership. Drag its ground-plane title plate to move every member together; focused titles also support arrow keys. Ungroup removes only the container, never its nodes or wires. Groups and their positions round-trip through JSON.</p>
           <p>Right-click a node, group title or empty ground for quick actions: inspect, start a wire, add/remove selection, group, ungroup or delete. Multi-node actions apply to the selection only when you right-click one of its members; right-clicking another node targets just that node. If/Else exposes separate TRUE/FALSE wiring actions. Shift+F10 or the Context Menu key opens quick actions from the world; arrows navigate, Enter activates, and Escape closes without losing selection.</p>
@@ -166,9 +179,9 @@ app.innerHTML = `
               ", ",
             )}. Select an independent edge and choose its provider in the inspector, or set provider in JSON. Repeated products share cached artwork, not replica controls.</p>
           <p>Only supported machines scale: API/compute and worker instances, database/cache replicas, never SQLite server replicas. Clients, CDNs, queues, buckets, If/Else and Merge nodes are logical components, not replicable machines. Replica groups require the same component type and provider. Scale from 1 to 10 within the world limit; new members inherit behavior, not an occupied placement.</p>
-          <p>Wires stay neutral. Each moving circle is one actual simulated request with a stable request ID, never a repeating dash or sampled rate. Requests travel from Users to the frontend, then backend and database, waiting for arrival and node processing before continuing. Hover a wire to reveal Cut, or focus it and press Enter to reach Cut. Cutting preserves node sites and camera position.</p>
+          <p>Wires stay neutral; individual requests go out and response rings return. Right-click a wire for Cut or Add node. Add inserts a compatible component between endpoints without moving existing nodes. Select a cache to set hit coverage: 90% serves nine requests locally and sends every tenth downstream. Hits return immediately after cache processing; misses wait for the origin. Focus a wire and press Enter for the same menu.</p>
           <p>This is a visual system-design sandbox: no external integrations, cloud calls, real uploads or transcoding. The editable media-app example is available in the Examples menu.</p>
-          <p>Add a Users object and wire it to a frontend. Select Users to set traffic (0–20 requests/s) in its detail HUD, then Run. Every Users source has an independent persisted rate; frontends never generate traffic themselves. Pause freezes request positions, Step advances 0.1 seconds, and Reset clears requests. Service capacity bars reflect actual arrivals in the last second; rejected requests stop at the overloaded node. This is a local educational simulation, not a vendor benchmark or external integration.</p>
+          <p>Add Users and wire it to a frontend. Select Users to set traffic (0–20 requests/s), then Run. Each source has its own persisted rate. Playback defaults to 0.1× slow motion; latency remains simulated milliseconds. Step advances 10ms. Load stops at 100% and excess requests wait FIFO. The HUD tracks root-call p95, p99 and errors over 30 simulated seconds; crossing a crash limit freezes the system until Reset. This is an educational model, not a provider benchmark.</p>
           <p>If/Else and Merge are compact junctions directly on the wires, not machines. Choose TRUE/FALSE in Wire, and select a junction to edit its condition or merge mode. Invalid connection types are rejected in both the builder and JSON imports.</p>
         </section>
       </div>
@@ -187,7 +200,6 @@ const scene = new SystemScene(sceneSvg);
 let builder: WorldBuilder | undefined;
 let nodeEditor: FlowNodeEditor | undefined;
 let traffic: TrafficControls | undefined;
-let wireActions: WireActions | undefined;
 const sceneTitle = mustQuery<HTMLElement>("#scene-title");
 const sceneCount = mustQuery<HTMLElement>("#scene-count");
 const applyButton = mustQuery<HTMLButtonElement>("#apply");
@@ -702,6 +714,25 @@ function openDetail(ids: TargetIds): void {
     mustQuery<HTMLInputElement>("#users-traffic-rps").value = String(
       selectedSource.trafficRps ?? 1,
     );
+  const cacheMembers = current.instances.filter(
+    (node) => memberSet.has(node.id) && inferInstanceType(node.id) === "cache",
+  );
+  const cacheSection = mustQuery<HTMLElement>("#detail-cache");
+  cacheSection.hidden =
+    !cacheMembers.length || cacheMembers.length !== memberIds.length;
+  if (!cacheSection.hidden) {
+    const percentages = cacheMembers.map(
+      (node) => node.cacheHitPercent ?? DEFAULT_CACHE_HIT_PERCENT,
+    );
+    const common = percentages.every((percent) => percent === percentages[0]);
+    const input = mustQuery<HTMLInputElement>("#cache-hit-percent");
+    input.value = common ? String(percentages[0]) : "";
+    input.placeholder = common ? "" : "Mixed coverage";
+    mustQuery<HTMLElement>("#cache-settings-message").textContent =
+      memberIds.length > 1
+        ? "Applies this hit percentage to each cache in the pool. Only misses reach downstream nodes."
+        : "Hits return from this cache; only misses continue downstream.";
+  }
   detailTitle.textContent = ids.clusterId
     ? (cluster?.label ?? ids.clusterId)
     : ((ids.instanceId &&
@@ -995,7 +1026,6 @@ function syncDesign(): void {
   message.textContent = "Canvas is up to date.";
   builder?.sync(design);
   traffic?.sync(design);
-  wireActions?.hide();
 }
 
 /**
@@ -1256,17 +1286,6 @@ builder = new WorldBuilder(stage, sceneSvg, scene, {
 scene.onPlacementChange(() =>
   commitWorld(pinWorld(current, scene.getWorldInstances())),
 );
-wireActions = new WireActions(
-  stage,
-  sceneSvg,
-  () => current,
-  (design) => {
-    commitWorld(pinWorld(design, scene.getWorldInstances()));
-    clearSelection();
-  },
-);
-scene.onViewChange(() => wireActions?.hide());
-scene.onLayoutChange(() => wireActions?.hide());
 
 nodeEditor = new FlowNodeEditor(
   mustQuery<HTMLElement>(".detail-body"),
@@ -1332,6 +1351,42 @@ mustQuery<HTMLFormElement>("#source-traffic-form").addEventListener(
     } catch (error) {
       mustQuery<HTMLElement>("#source-traffic-message").textContent =
         error instanceof Error ? error.message : "Could not set Users traffic.";
+    }
+  },
+);
+
+/** Cache coverage is persisted on cache nodes; save through the same parser and world commit as capacity. */
+mustQuery<HTMLFormElement>("#cache-settings-form").addEventListener(
+  "submit",
+  (event) => {
+    event.preventDefault();
+    const ids = targetIds(selectedAnchor);
+    if (!ids || !selectedAnchor) return;
+    const members = new Set(
+      targetMembers(ids, selectedAnchor).map(
+        (node) => node.dataset.instanceId!,
+      ),
+    );
+    try {
+      const percent =
+        mustQuery<HTMLInputElement>("#cache-hit-percent").valueAsNumber;
+      const design = parseDesign(
+        JSON.stringify({
+          ...current,
+          instances: current.instances.map((node) =>
+            members.has(node.id) ? { ...node, cacheHitPercent: percent } : node,
+          ),
+        }),
+      );
+      commitWorld(design);
+      openDetail(ids);
+      mustQuery<HTMLElement>("#cache-settings-message").textContent =
+        `Cache coverage saved · ${percent}% hits, ${100 - percent}% misses. Simulation restarted.`;
+    } catch (error) {
+      mustQuery<HTMLElement>("#cache-settings-message").textContent =
+        error instanceof Error
+          ? error.message
+          : "Could not save cache coverage.";
     }
   },
 );

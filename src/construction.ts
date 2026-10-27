@@ -267,6 +267,97 @@ export function disconnectComponents(design: Design, index: number): Design {
   };
 }
 
+/** Both halves must be legal before offering a catalogue product for inline insertion. */
+export function insertionIssue(
+  design: Design,
+  index: number,
+  item: BuildItem,
+): string | null {
+  if (
+    !Number.isInteger(index) ||
+    index < 0 ||
+    index >= design.connections.length
+  )
+    return "This wire no longer exists.";
+  if (design.instances.length >= MAX_INSTANCES)
+    return `A world supports at most ${MAX_INSTANCES} components.`;
+  if (design.connections.length >= MAX_CONNECTIONS)
+    return `A world supports at most ${MAX_CONNECTIONS} wires.`;
+  const edge = design.connections[index];
+  const from = design.instances.find((node) => node.id === edge.from),
+    to = design.instances.find((node) => node.id === edge.to);
+  if (!from || !to) return "This wire has missing endpoints.";
+  const inserted = { id: `${item.prefix}-inserting`, provider: item.provider };
+  return (
+    connectionIssue(from, inserted, edge.outlet) ??
+    connectionIssue(inserted, to, item.type === "branch" ? "true" : "out")
+  );
+}
+
+/**
+ * Atomically split exactly one wire at a nearby free snapped site, preserving
+ * original source-edge identity/outlet/label and all existing world positions.
+ * Search is bounded to 64 build cells around the midpoint; a packed local area
+ * fails visibly rather than moving neighbours or inserting overlapping objects.
+ */
+export function insertComponent(
+  design: Design,
+  index: number,
+  item: BuildItem,
+): Design {
+  const issue = insertionIssue(design, index, item);
+  if (issue) throw new Error(issue);
+  const placed = layoutDesign(design).instances,
+    edge = design.connections[index];
+  const from = placed.find((node) => node.id === edge.from)!.position,
+    to = placed.find((node) => node.id === edge.to)!.position;
+  const center = snapPlacement({
+    x: (from.x + to.x) / 2,
+    y: (from.y + to.y) / 2,
+  });
+  let site: GroundPoint | null = null,
+    distance = Infinity;
+  for (let radius = 0; radius <= 64 && radius * radius <= distance; radius++)
+    for (let dx = -radius; dx <= radius; dx++)
+      for (let dy = -radius; dy <= radius; dy++) {
+        if (
+          Math.max(Math.abs(dx), Math.abs(dy)) !== radius ||
+          dx * dx + dy * dy >= distance
+        )
+          continue;
+        const point = {
+          x: center.x + dx * BUILD_GRID,
+          y: center.y + dy * BUILD_GRID,
+        };
+        if (
+          Math.abs(point.x) > MAX_WORLD_COORDINATE ||
+          Math.abs(point.y) > MAX_WORLD_COORDINATE ||
+          !canPlace(item, point, placed)
+        )
+          continue;
+        site = point;
+        distance = dx * dx + dy * dy;
+      }
+  if (!site)
+    throw new Error(
+      "No free site near this wire. Move an endpoint or clear some ground first.",
+    );
+  const added = placeComponent(pinWorld(design, placed), item, site);
+  const node = added.instances.at(-1)!;
+  return connectComponents(
+    {
+      ...added,
+      connections: added.connections.map((link, i) =>
+        i === index ? { ...link, to: node.id } : link,
+      ),
+    },
+    node.id,
+    edge.to,
+    "",
+    item.type === "branch" ? "true" : "out",
+  );
+}
+
 /** Remove a component and its incident wires; dissolve groups reduced below two members. */
 export function removeComponent(design: Design, id: string): Design {
   return {

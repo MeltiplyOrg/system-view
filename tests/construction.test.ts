@@ -5,6 +5,7 @@ import {
   canPlace,
   connectComponents,
   disconnectComponents,
+  insertComponent,
   pinWorld,
   placeComponent,
   removeComponent,
@@ -152,6 +153,109 @@ describe("world construction", () => {
       expect(() => disconnectComponents(original, index)).toThrow(
         "no longer exists",
       );
+  });
+
+  test("inserting a cache splits only the chosen wire and finds a free site without moving neighbours", () => {
+    const original: Design = {
+      ...world(),
+      instances: [
+        { id: "compute-1", placement: { x: -650, y: 0 } },
+        { id: "db-1", placement: { x: 650, y: 0 } },
+        { id: "compute-blocker", placement: { x: 0, y: 0 } },
+      ],
+      connections: [
+        { id: "read", from: "compute-1", to: "db-1", relation: "read" },
+      ],
+    };
+    const before = layoutDesign(original).instances;
+    const item = BUILD_TYPES.find((item) => item.type === "cache")!;
+    const inserted = insertComponent(original, 0, item);
+    expect(inserted.connections[0]).toEqual({
+      ...original.connections[0],
+      to: "cache-1",
+    });
+    expect(inserted.connections[1]).toMatchObject({
+      from: "cache-1",
+      to: "db-1",
+    });
+    expect(
+      layoutDesign(inserted)
+        .instances.slice(0, 3)
+        .map((node) => node.position),
+    ).toEqual(before.map((node) => node.position));
+    expect(canPlace(item, inserted.instances[3].placement!, before)).toBe(true);
+    expect(parseDesign(JSON.stringify(inserted))).toEqual(inserted);
+    expect(original.connections).toHaveLength(1);
+    expect(original.instances).toHaveLength(3);
+  });
+
+  test("inline insertion preserves explicit branch identity, metadata and parallel siblings", () => {
+    const original: Design = {
+      ...world(),
+      instances: [{ id: "branch-choice" }, { id: "db-1" }],
+      connections: [
+        {
+          id: "yes",
+          from: "branch-choice",
+          to: "db-1",
+          outlet: "true",
+          relation: "allowed",
+        },
+        { id: "no", from: "branch-choice", to: "db-1", outlet: "false" },
+      ],
+    };
+    const inserted = insertComponent(
+      original,
+      0,
+      BUILD_TYPES.find((item) => item.type === "cache")!,
+    );
+    expect(inserted.connections[0]).toEqual({
+      ...original.connections[0],
+      to: "cache-1",
+    });
+    expect(inserted.connections[1]).toEqual(original.connections[1]);
+    expect(inserted.connections[2]).toMatchObject({
+      from: "cache-1",
+      to: "db-1",
+    });
+    expect(parseDesign(JSON.stringify(inserted))).toEqual(inserted);
+  });
+
+  test("invalid inline insertion is atomic and respects both endpoint types and world limits", () => {
+    const original = world();
+    original.connections = [{ from: "compute-1", to: "db-1" }];
+    const before = structuredClone(original);
+    const cache = BUILD_TYPES.find((item) => item.type === "cache")!;
+    for (const index of [-1, 1, NaN])
+      expect(() => insertComponent(original, index, cache)).toThrow(/wire/i);
+    expect(() =>
+      insertComponent(
+        original,
+        0,
+        BUILD_TYPES.find((item) => item.type === "users")!,
+      ),
+    ).toThrow();
+    expect(() =>
+      insertComponent(
+        original,
+        0,
+        BUILD_TYPES.find((item) => item.type === "load-balancer")!,
+      ),
+    ).toThrow();
+    expect(() =>
+      insertComponent(
+        {
+          ...original,
+          connections: Array.from({ length: MAX_CONNECTIONS }, (_, i) => ({
+            ...original.connections[0],
+            id: `wire-${i}`,
+          })),
+        },
+        0,
+        cache,
+      ),
+    ).toThrow(/wires/);
+    expect(original).toEqual(before);
   });
 
   test("removing a machine prunes only incident wires and dissolves singleton groups", () => {

@@ -1291,37 +1291,6 @@ aside.detail.open {
 .connection:focus {
   outline: none;
 }
-.wire-cut {
-  position: fixed;
-  z-index: 24;
-  display: flex;
-  align-items: center;
-  gap: 5px;
-  height: 30px;
-  padding: 0 8px;
-  border: 1px solid var(--border);
-  border-radius: 5px;
-  background: var(--panel);
-  color: var(--fg);
-  font: 10px var(--mono);
-  cursor: pointer;
-  box-shadow: 0 3px 12px color-mix(in srgb, var(--page) 65%, transparent);
-}
-.wire-cut[hidden] {
-  display: none;
-}
-.wire-cut svg {
-  width: 15px;
-  height: 15px;
-  fill: none;
-  stroke: currentColor;
-  stroke-width: 1.4;
-  stroke-linecap: round;
-}
-.wire-cut:hover {
-  border-color: var(--accent);
-  color: var(--accent);
-}
 /*
  * Relation captions sit above neutral cables. A page-colored halo erases
  * crossing lines under the glyphs without hiding the drawing in a label box.
@@ -2498,7 +2467,8 @@ aside.detail.open {
   font-size: 8px;
 }
 #capacity-rps,
-#users-traffic-rps {
+#users-traffic-rps,
+#cache-hit-percent {
   width: 100%;
   min-width: 0;
   padding: 7px;
@@ -2599,10 +2569,10 @@ aside.detail.open {
   background: var(--recess);
   font: 10px var(--mono);
 }
-:is(#capacity-form, #source-traffic-form) .btn {
+:is(#capacity-form, #source-traffic-form, #cache-settings-form) .btn {
   margin-top: 10px;
 }
-:is(#capacity-form, #source-traffic-form) .detail-empty {
+:is(#capacity-form, #source-traffic-form, #cache-settings-form) .detail-empty {
   margin-top: 10px;
   line-height: 1.6;
 }

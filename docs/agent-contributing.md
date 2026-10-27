@@ -51,7 +51,7 @@ this guide adds the app's mechanics.
 | Individual requests and service capacity          | `src/traffic.ts`, `src/design.ts`                          | `tests/traffic.test.ts`, Users/source and capacity inspectors                    |
 | Ground-frame capacity meters                      | `src/node-status.ts`                                       | `src/scene.ts`, `src/style.css`                                                  |
 | Traffic controls and visibility-aware clock       | `src/traffic-controls.ts`                                  | `src/main.ts` applied-document synchronization                                   |
-| Wire hover/keyboard cut control                   | `src/wire-actions.ts`                                      | `src/construction.ts`, applied document commits                                  |
+| Wire context menus and inline insertion           | `src/world-builder.ts`, `src/construction.ts`              | applied document commits, shared component catalogue                             |
 
 ## Render pass
 
@@ -277,9 +277,19 @@ One pass explains where most edits belong:
   return lane. Their completed deliveries also count in the HUD; fan-out can
   therefore produce more deliveries than generated root requests.
 - Users, balancers and If/Else choose one output round-robin; other dependencies
-  fan out separate branches retaining the request ID. Predicates, merge
-  synchronization, cache hit logic and durable broker/backlog storage are not
-  executed.
+  fan out separate branches retaining the request ID. Caches first decide whether
+  a request hits locally; misses alone fan out to downstream dependencies.
+  Predicates, merge synchronization and durable broker/backlog storage are not executed.
+- Cache nodes persist `cacheHitPercent` (finite 0–100, fractional allowed;
+  omission defaults to 90). Only caches expose this field in the detail HUD,
+  with the same parser-backed save/reset and replica inheritance as capacity.
+  Each cache accumulates miss credit deterministically: 90% means the first nine
+  requests hit and the tenth misses; 0% always misses, 100% always hits. This is
+  coverage, not a cache-size/key/eviction model. Hits consume normal cache
+  processing/capacity and return on the incoming response lane without contacting
+  the origin. Misses await downstream responses; a miss without any downstream
+  dependency returns an error, never fake success. Each root still has one SLO
+  outcome. Counters reset with simulation; playback speed cannot change decisions.
 - A 32-hop TTL rejects cycles and unwinds waiting callers. At most 512 travelling,
   queued, processing or waiting calls are retained; excess admissions increment
   the limit-drop counter and fail the parent. Rendering pools circles by call
@@ -404,15 +414,22 @@ One pass explains where most edits belong:
   explicit Run animates the functional simulation in either theme.
   Lane offsets taper into unchanged logical sockets with short perpendicular
   leads; shared hit targets and Cut still act on one logical connection.
-- Hover the wide invisible cable hit lane to reveal one small Cut button beside
-  the pointer. Wires are keyboard-focusable; Enter/Space moves focus to Cut,
-  Enter activates it, Escape dismisses it. One transient hide timeout lets the
-  pointer cross to the button. Camera/world edits invalidate its anchor.
+- Right-click either cable lane for **Cut** or **Add node…** in the existing
+  World quick-actions menu; hover no longer displays a detached Cut control.
+  Focused wires support Enter/Space, Shift+F10 and ContextMenu. Existing arrows,
+  Home/End, Escape, outside-click and camera dismissal rules apply. Add opens a
+  catalogue submenu containing only products compatible with both endpoints.
 - `disconnectComponents` removes only the exact document-indexed wire, preserving
-  parallel links/outlets. The shell pins current world sites before committing;
-  cutting never repacks nodes or refits the camera. Export and traffic state use
-  the resulting graph; downstream disconnected services go idle. Cut controls
-  are HTML, outside the SVG pan/pointer-capture and artwork raster paths.
+  parallel links/outlets. WorldBuilder pins real sites before committing;
+  cutting never repacks nodes or refits the camera. Export and traffic use the
+  resulting graph. The shared HTML menu stays outside SVG pointer capture.
+- `insertComponent` atomically rewires A→B to A→new→B. The first edge keeps the
+  original ID, source outlet and relation; the second gets a unique ID. If/Else
+  inserted inline uses its TRUE outlet. Both edges use canonical compatibility
+  rules and respect node/wire limits. A bounded search chooses the nearest free
+  snapped site to the endpoint midpoint (within 64 build cells). Occupied ground
+  never moves an existing node; failure leaves the document unchanged. Existing
+  sites, group/replica membership and camera remain unchanged by insertion.
 
 ### Raster cache
 

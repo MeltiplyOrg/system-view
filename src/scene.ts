@@ -1489,7 +1489,7 @@ export class SystemScene {
       group.setAttribute("role", "group");
       group.setAttribute(
         "aria-label",
-        `${from.label} to ${to.label}. ${duplex ? "Request and response lanes." : "One-way delivery."} Press Enter for wire actions.`,
+        `${from.label} to ${to.label}. ${duplex ? "Request and response lanes." : "One-way delivery."} Right-click or press Enter for wire actions.`,
       );
       group.style.setProperty("--cable-color", from.color);
       group.innerHTML = `<path class="wire-under" d="${outbound.d}"/>${inbound ? `<path class="wire-under" d="${inbound.d}"/>` : ""}<path class="wire" d="${outbound.d}"/><path class="wire-core" d="${outbound.d}"/>${inbound ? `<path class="wire-response" d="${inbound.d}"/><path class="wire-core" d="${inbound.d}"/>` : ""}<circle class="wire-port" cx="${projected[0][0]}" cy="${projected[0][1]}" r="2.4"/><circle class="wire-port" cx="${projected.at(-1)![0]}" cy="${projected.at(-1)![1]}" r="2.4"/><path class="wire-hit" d="${d}"/>`;
