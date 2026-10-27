@@ -60,6 +60,44 @@ async function documentOf(page: Page): Promise<Design> {
   return JSON.parse(await page.locator("#source").inputValue()) as Design;
 }
 
+test("component shelf stays separate from contextual editors and switching cancels pending edits", async ({
+  page,
+}) => {
+  await world(page);
+  const before = await documentOf(page);
+  const shelf = page.getByRole("region", { name: "World builder" });
+  await expect(
+    shelf.getByRole("button", {
+      name: /^(Select|Wire|Remove|Groups|New world)$/,
+    }),
+  ).toHaveCount(0);
+  await page.locator("#build-toggle").click();
+  await expect(page.locator("#build-cards")).toBeVisible();
+  await context(page, "web-start");
+  await page.getByRole("menuitem", { name: "Wire from this node…" }).click();
+  await expect(page.locator("#build-body")).toBeHidden();
+  await expect(
+    page.getByRole("complementary", { name: "Connect nodes" }),
+  ).toBeVisible();
+  await page.locator("#build-toggle").click();
+  await expect(page.locator("#build-cards")).toBeVisible();
+  await expect(page.locator(".world-edit-panel")).toBeHidden();
+  await expect(page.locator(".build-wire-preview")).toHaveCount(0);
+  await page.locator("#build-toggle").click();
+  await page.mouse.click(20, 80, { button: "right" });
+  await page.getByRole("menuitem", { name: "Select nodes to group…" }).click();
+  await expect(
+    page.getByRole("complementary", { name: "Node groups" }),
+  ).toBeVisible();
+  await expect(page.locator("#build-body")).toBeHidden();
+  await page.locator('#group-members input[value="web-start"]').check();
+  await page.locator("#group-name").fill("Uncommitted group");
+  await page.keyboard.press("Escape");
+  await expect(page.locator(".world-edit-panel")).toBeHidden();
+  await expect(page.locator("#scene")).toBeFocused();
+  expect(await documentOf(page)).toEqual(before);
+});
+
 test("right-click wiring keeps the clicked source, explicit branch ports and relationship validation", async ({
   page,
 }) => {
@@ -83,8 +121,7 @@ test("right-click wiring keeps the clicked source, explicit branch ports and rel
     from: "web-start",
     to: "branch-route",
   });
-  await page.locator("#build-select").click();
-  await page.locator("#build-toggle").click();
+  await page.getByRole("button", { name: "Close action editor" }).click();
   await context(page, "branch-route");
   await page.getByRole("menuitem", { name: "Wire FALSE output…" }).click();
   await expect(page.locator("#build-from")).toHaveValue("branch-route");
@@ -117,7 +154,7 @@ test("context multi-selection creates a group and group actions ungroup or delet
   expect(grouped.groups![0].instances).toEqual(["web-start", "compute-api"]);
   await page.locator("#group-name").fill("App tier");
   await page.locator("#group-save").click();
-  await page.locator("#build-toggle").click();
+  await page.getByRole("button", { name: "Close action editor" }).click();
   await page.locator(".node-group-header-hit").click({ button: "right" });
   await page.getByRole("menuitem", { name: "Ungroup · keep nodes" }).click();
   const ungrouped = await documentOf(page);
@@ -150,7 +187,8 @@ test("single-node deletion ignores another multi-selection and menu dismissal pr
   page,
 }) => {
   await world(page);
-  await page.locator("#build-groups").click();
+  await page.mouse.click(20, 80, { button: "right" });
+  await page.getByRole("menuitem", { name: "Select nodes to group…" }).click();
   await page.locator('#group-members input[value="web-start"]').check();
   await page.locator('#group-members input[value="compute-api"]').check();
   await context(page, "web-start");
@@ -187,7 +225,9 @@ test("background menus clamp to the viewport and support keyboard navigation wit
   expect(b.x + b.width).toBeLessThanOrEqual(1440);
   expect(b.y + b.height).toBeLessThanOrEqual(1000);
   await page.keyboard.press("End");
-  await expect(page.getByRole("menuitem", { name: "Fit world" })).toBeFocused();
+  await expect(
+    page.getByRole("menuitem", { name: "New world…" }),
+  ).toBeFocused();
   await page.keyboard.press("Home");
   await expect(
     page.getByRole("menuitem", { name: "Select nodes to group…" }),

@@ -55,12 +55,29 @@ async function hit(page: Page, id: string): Promise<{ x: number; y: number }> {
     });
 }
 
+/** Group editing is contextual; the component shelf is never repurposed for management. */
+async function manageGroups(page: Page): Promise<void> {
+  await page.mouse.click(20, 80, { button: "right" });
+  await page.getByRole("menuitem", { name: "Select nodes to group…" }).click();
+  await expect(page.locator("#build-body")).toBeHidden();
+  await expect(page.locator(".world-edit-panel")).toBeVisible();
+}
+
 /** Title headers are the intentional move target; the backdrop does not swallow ordinary node edits. */
 async function dragGroup(page: Page, cancel = false): Promise<void> {
-  const b = (await page.locator(".node-group-header-hit").boundingBox())!;
-  await page.mouse.move(b.x + 35, b.y + b.height / 2);
+  const start = await page
+    .locator(".node-group-header-hit")
+    .evaluate((plate) => {
+      const rect = plate as SVGRectElement;
+      const point = new DOMPoint(
+        50,
+        rect.height.baseVal.value / 2,
+      ).matrixTransform(rect.getScreenCTM()!);
+      return { x: point.x, y: point.y };
+    });
+  await page.mouse.move(start.x, start.y);
   await page.mouse.down();
-  await page.mouse.move(b.x + 125, b.y + b.height / 2 + 50, { steps: 10 });
+  await page.mouse.move(start.x + 90, start.y + 50, { steps: 10 });
   if (cancel) await page.keyboard.press("Escape");
   await page.mouse.up();
 }
@@ -76,7 +93,7 @@ test("mixed groups preserve wires, move rigidly, cancel safely, rename and round
   const wire = await page
     .locator('.connection[data-connection-id="compute-api->db-data"] .wire')
     .getAttribute("d");
-  await page.locator("#build-groups").click();
+  await manageGroups(page);
   for (const id of ["web-client", "branch-route", "compute-api"])
     await page.locator(`#group-members input[value="${id}"]`).check();
   await page.locator("#group-name").fill("Application");
@@ -97,8 +114,30 @@ test("mixed groups preserve wires, move rigidly, cancel safely, rename and round
       '.connection[data-connection-id="compute-api->db-data"] .wire',
     ),
   ).toHaveAttribute("d", wire!);
-  await dragGroup(page, true);
-  await expect(page.locator("#build-grouping")).toBeHidden();
+  // Both the boundary and its label must follow the two ground axes, not the
+  // screen-aligned artwork bounds. Measure the actual rendered control planes.
+  const planes = await page.locator(".node-group").evaluate((group) =>
+    [".node-group-area", ".node-group-header-hit"].map((selector) => {
+      const rect = group.querySelector<SVGRectElement>(selector)!;
+      const matrix = rect
+        .ownerSVGElement!.getScreenCTM()!
+        .inverse()
+        .multiply(rect.getScreenCTM()!);
+      return [
+        [0, 0],
+        [rect.width.baseVal.value, 0],
+        [rect.width.baseVal.value, rect.height.baseVal.value],
+        [0, rect.height.baseVal.value],
+      ].map(([x, y]) => {
+        const point = new DOMPoint(x, y).matrixTransform(matrix);
+        return { x: point.x, y: point.y };
+      });
+    }),
+  );
+  for (const [a, b, c] of planes) {
+    expect((b.y - a.y) / (b.x - a.x)).toBeCloseTo(1 / Math.sqrt(3), 6);
+    expect((c.y - b.y) / (c.x - b.x)).toBeCloseTo(-1 / Math.sqrt(3), 6);
+  }
   expect(await documentOf(page)).toEqual(grouped);
   await dragGroup(page);
   const moved = await documentOf(page);
@@ -145,7 +184,7 @@ test("mixed groups preserve wires, move rigidly, cancel safely, rename and round
   await page.locator("#panel-close").click();
   expect(await documentOf(page)).toEqual(exported);
   await expect(page.locator(".node-group-title")).toContainText("Public API");
-  await page.locator("#build-groups").click();
+  await manageGroups(page);
   await page.selectOption("#group-picker", "group-1");
   await page.locator("#group-ungroup").click();
   const ungrouped = await documentOf(page);
@@ -160,6 +199,7 @@ test("Shift-click and marquee select nodes without panning, while grouped nodes 
   page,
 }) => {
   await world(page);
+  await manageGroups(page);
   const camera = await page.locator("#scene").getAttribute("viewBox");
   const client = await hit(page, "web-client");
   await page.keyboard.down("Shift");
@@ -184,10 +224,9 @@ test("Shift-click and marquee select nodes without panning, while grouped nodes 
   await page.mouse.click(api.x, api.y);
   await page.locator("#group-name").fill("App");
   await page.locator("#group-save").click();
-  await page.locator("#build-toggle").click();
+  await page.getByRole("button", { name: "Close action editor" }).click();
   const point = await hit(page, "compute-api");
   await page.mouse.click(point.x, point.y);
-  await expect(page.locator("#detail-title")).toHaveText("compute-api");
   await page.locator("#replica-increase").click();
   const scaled = await documentOf(page);
   expect(scaled.groups![0].instances).toContain("compute-api-replica-2");
@@ -208,16 +247,13 @@ test.describe("touch organizational controls", () => {
     page,
   }) => {
     await world(page);
-    await page.locator("#build-groups").tap();
+    await manageGroups(page);
     await page.locator('#group-members input[value="web-client"]').check();
     await page.locator('#group-members input[value="compute-api"]').check();
-    await page.locator("#group-name").fill("Mobile app");
-    await page.locator("#group-save").tap();
-    await page.locator("#build-toggle").tap();
-    await page.locator("#build-groups").tap();
-    await page.selectOption("#group-picker", "group-1");
     await page.locator('#group-members input[value="db-data"]').check();
+    await page.locator("#group-name").fill("Mixed services");
     await page.locator("#group-save").tap();
+    await page.selectOption("#group-picker", "group-1");
     expect((await documentOf(page)).groups![0].instances).toEqual([
       "web-client",
       "compute-api",

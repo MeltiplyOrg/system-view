@@ -181,7 +181,9 @@ test("edits junction routing rules and wires true/false routes without an execut
   expect(
     design.instances.find((node) => node.id === "merge-results")!.mergeMode,
   ).toBe("any");
-  await page.locator("#build-wire").click();
+  await page.locator("#detail-close").click();
+  await page.mouse.click(20, 80, { button: "right" });
+  await page.getByRole("menuitem", { name: "Connect nodes…" }).click();
   await page.selectOption("#build-from", "web-start");
   await expect(
     page.locator('#build-to option[value="db-data"]'),

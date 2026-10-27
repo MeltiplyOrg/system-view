@@ -1,4 +1,4 @@
-import { createDatabaseDefinitions, project } from "./database";
+import { createDatabaseDefinitions, project, top } from "./database";
 import { createProviderDatabaseDefinitions } from "./database-skins";
 import type {
   Connection,
@@ -11,7 +11,7 @@ import { MAX_WORLD_COORDINATE } from "./design";
 import type { BuildItem } from "./construction";
 import { instanceColor } from "./layout";
 import { instanceFootprint, isWireJunction, layoutDesign } from "./layout";
-import type { Layout, PlacedCluster } from "./layout";
+import type { Bounds, Layout, PlacedCluster } from "./layout";
 import { createPlatforms } from "./platform";
 import {
   componentEnvelope,
@@ -41,6 +41,9 @@ const CLUSTER_KEY = "cluster:";
 
 /** One screen-space point from `project`, mutated as [x, y] pairs. */
 type ScreenPoint = [number, number];
+
+/** Organizational floor regions; derived from member feet, never elevated artwork. */
+type PlacedNodeGroup = NodeGroup & { bounds: Bounds };
 
 /**
  * Cross product of OA × OB; its sign gives the turn direction at O.
@@ -272,7 +275,10 @@ const CABLE_LABEL_WIDTH = 180;
  * `getBBox()`: `<use>` instances can report stale geometry before the shared
  * definitions are laid out, which would shrink the fitted view to a stamp.
  */
-function contentExtent(layout: Layout): {
+function contentExtent(
+  layout: Layout,
+  groups: readonly PlacedNodeGroup[],
+): {
   minX: number;
   minY: number;
   maxX: number;
@@ -313,6 +319,9 @@ function contentExtent(layout: Layout): {
       ])
         add(cornerX, cornerY, 0);
   }
+  for (const { bounds } of groups)
+    for (const x of [bounds.x, bounds.x + bounds.width])
+      for (const y of [bounds.y, bounds.y + bounds.height]) add(x, y, 0);
 
   return Number.isFinite(minX)
     ? { minX, minY, maxX, maxY }
@@ -631,36 +640,77 @@ function createNodeFrames(frames: Iterable<PlacedCluster>): SVGGElement {
   return group;
 }
 
-/** Organizational backdrops use projected artwork bounds, not replica routing frames. */
-function createNodeGroups(
+/**
+ * Enclose member footprints in ground coordinates, independent of model height.
+ * The 192-unit near apron keeps the drag plate clear of projected raster hit
+ * boxes as well as the ordinary 36-unit frames; the other edges need only 64.
+ * Uses the already offset layout so individual and whole-group moves stay seated.
+ */
+function placeNodeGroups(
   groups: readonly NodeGroup[],
-  bounds: ReadonlyMap<
-    string,
-    { minX: number; minY: number; maxX: number; maxY: number }
-  >,
-): SVGGElement {
+  instances: ReadonlyMap<string, PlacedInstance>,
+): PlacedNodeGroup[] {
+  return groups.map((group) => {
+    let left = Infinity,
+      back = Infinity,
+      right = -Infinity,
+      front = -Infinity;
+    for (const id of group.instances) {
+      const instance = instances.get(id)!;
+      const { x, y } = instance.position;
+      const { halfWidth, halfDepth } = instanceFootprint(
+        instance.type,
+        instance.provider,
+      );
+      left = Math.min(left, x - halfWidth);
+      back = Math.min(back, y - halfDepth);
+      right = Math.max(right, x + halfWidth);
+      front = Math.max(front, y + halfDepth);
+    }
+    return {
+      ...group,
+      bounds: {
+        x: left - 64,
+        y: back - 64,
+        width: right - left + 128,
+        height: front - back + 256,
+      },
+    };
+  });
+}
+
+/**
+ * Paint floor regions and their near-edge drag plates in the shared z=0 plane.
+ * The body is pointer-transparent; only the compact plate handles group edits.
+ * Imported names stay plain text and the full name remains available to AT.
+ */
+function createNodeGroups(groups: readonly PlacedNodeGroup[]): SVGGElement {
   const layer = document.createElementNS(NS, "g");
   layer.classList.add("node-groups");
   for (const group of groups) {
-    let minX = Infinity,
-      minY = Infinity,
-      maxX = -Infinity,
-      maxY = -Infinity;
-    for (const id of group.instances) {
-      const box = bounds.get(`${INSTANCE_KEY}${id}`)!;
-      minX = Math.min(minX, box.minX);
-      minY = Math.min(minY, box.minY);
-      maxX = Math.max(maxX, box.maxX);
-      maxY = Math.max(maxY, box.maxY);
-    }
     const root = document.createElementNS(NS, "g");
     root.classList.add("node-group");
     root.dataset.nodeGroupId = group.id;
-    const x = minX - 26,
-      y = minY - 52,
-      width = maxX - minX + 52;
-    root.innerHTML = `<rect class="node-group-area" x="${x}" y="${y}" width="${width}" height="${maxY - y + 26}" rx="10"/><g class="node-group-header" role="button" tabindex="0"><rect class="node-group-header-hit" x="${x}" y="${y}" width="${width}" height="34" rx="8"/><path class="node-group-grip" d="M${x + 13} ${y + 12}h10m-10 5h10m-10 5h10"/><text class="node-group-title" x="${x + 34}" y="${y + 23}"></text></g>`;
-    const maxChars = Math.max(2, Math.floor((width - 62) / 7));
+    const { x, y, width, height } = group.bounds;
+    root.setAttribute("transform", top(x, y, 0));
+    const plateWidth = Math.min(
+        width - 32,
+        360,
+        Math.max(
+          160,
+          (group.label.length + String(group.instances.length).length + 3) *
+            9.6 +
+            64,
+        ),
+      ),
+      plateY = height - 56;
+    root.innerHTML = `<rect class="node-group-area" width="${width}" height="${height}" rx="6"/><g class="node-group-header" role="button" tabindex="0" transform="translate(16 ${plateY})"><rect class="node-group-header-hit" width="${plateWidth}" height="44" rx="4"/><path class="node-group-grip" d="M14 15h12m-12 7h12m-12 7h12"/><text class="node-group-title" x="38" y="28"></text></g>`;
+    const maxChars = Math.max(
+      2,
+      Math.floor((plateWidth - 64) / 9.6) -
+        String(group.instances.length).length -
+        3,
+    );
     const label =
       group.label.length > maxChars
         ? `${group.label.slice(0, maxChars - 1)}…`
@@ -1080,6 +1130,10 @@ export class SystemScene {
     const layout = layoutDesign(design);
     this.applyDragOffsets(layout);
     this.worldInstances = layout.instances;
+    const byId = new Map(
+      layout.instances.map((instance) => [instance.id, instance]),
+    );
+    const nodeGroups = placeNodeGroups(design.groups ?? [], byId);
     const junctionKeys = new Set(
       layout.instances
         .filter((instance) => isWireJunction(instance.type))
@@ -1180,7 +1234,7 @@ export class SystemScene {
 
     const layer = document.createElementNS(NS, "g");
     layer.append(
-      createNodeGroups(design.groups ?? [], this.targetBounds),
+      createNodeGroups(nodeGroups),
       createNodeFrames(
         [...this.borderFrames.values()].filter(
           (frame) => !junctionKeys.has(frame.id),
@@ -1190,9 +1244,6 @@ export class SystemScene {
       createClusterLabels(layout.clusters),
     );
 
-    const byId = new Map(
-      layout.instances.map((instance) => [instance.id, instance]),
-    );
     const linkPlans: LinkPlan[] = design.connections.map((link, index) => {
       const from = byId.get(link.from),
         to = byId.get(link.to),
@@ -1559,7 +1610,7 @@ export class SystemScene {
       }
       next = root;
     }
-    const extent = contentExtent(layout),
+    const extent = contentExtent(layout, nodeGroups),
       pad = 55,
       // The hover callout is screen-space and hangs above the topmost rack,
       // so the fitted view keeps extra headroom above the drawing. The bottom

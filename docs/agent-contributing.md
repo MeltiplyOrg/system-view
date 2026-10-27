@@ -100,14 +100,16 @@ One pass explains where most edits belong:
 
 ### Factory construction
 
-- `WorldBuilder` owns the collapsible bottom drawer, side category list and
-  Select/Place/Wire/Remove tools. Its catalogue derives provider skins from the
-  existing registry. Small catalogue glyphs are not copies of detailed models.
+- `WorldBuilder` owns the component-only bottom drawer and side category list.
+  **Components** opens only catalogue cards, never action tools or editors.
+  The catalogue derives provider skins from the existing registry. Small
+  catalogue glyphs are not copies of detailed models. Wiring, deletion, group
+  management and New world are contextual world actions, not drawer controls.
 - Drag a card to clear ground, or tap/click a card then tap/click the world.
   Keyboard activation seeds a preview; arrows move it and Enter places it.
   Escape, capture cancellation, blur, and backgrounding remove the preview.
-  Dropping onto another UI surface adds nothing. New world confirms before
-  clearing a populated document.
+  Dropping onto another UI surface adds nothing. Right-click empty ground →
+  **New world…** confirms before clearing a populated document.
 - Placement snaps to a 40-unit grid, using actual provider footprints with
   clearance. `placeComponent` rejects occupied sites, not just its UI caller.
   `parseDesign` validates finite ground coordinates within ±100,000 world
@@ -119,14 +121,16 @@ One pass explains where most edits belong:
 - Completed anchor moves persist the whole group's sites. A cancelled anchor
   gesture restores its prior offset; applying another document cancels capture.
   A no-movement handle click does not rewrite the document.
-- Wiring is directed source → destination, by drag, two clicks, or the native
-  endpoint form. `component-rules.ts` owns compatible types and output ports;
+- Right-click a node to start directed source → destination wiring, by drag,
+  two clicks, or the separate endpoint editor. Empty ground → **Connect nodes…**
+  offers native source/target controls without a pointer-only node gesture.
+  `component-rules.ts` owns compatible types and output ports;
   imports and construction use those same rules. Invalid destinations are
   disabled in the form and their world footprints are dimmed. Queue outputs
   deliver to workers; a browser cannot wire directly to a database.
 - Load balancers accept browser, CDN or compute ingress and route to compute
   backends, not directly to databases, caches, queues or buckets. Workflow
-  controls remain valid explicit routing points. Build → **Load balancer**
+  controls remain valid explicit routing points. Components → **Load balancer**
   adds a stepped crossbar appliance using the shared geometry and raster cache.
 - Branches require an explicit `true`/`false` outlet. Other nodes use `out`
   (omitted by default). Construction rejects duplicate source/destination/port
@@ -134,17 +138,19 @@ One pass explains where most edits belong:
   to the same target need explicit IDs. `relation` is annotation, not code.
   The rubber band is lightweight and orthogonal; committed wires use the
   existing obstacle-aware router and frame ports.
-- Remove deletes only the selected component and incident connections, updates
-  its affected group, and dissolves that group if fewer than two members
-  remain. Unrelated groups, including valid singleton groups, are unchanged.
+- Contextual deletion removes the clicked node or selected members and incident
+  connections, updating affected organizational groups and replica pools.
+  Unrelated nodes, groups and placements are unchanged.
 - The scene owns one construction overlay. Its real-model ghost reuses the
   ordinary raster cache, removes decorative activity, and moves only a parent
   transform. Wire preview uses one path. Pointer updates coalesce into one
   animation frame; there is no idle loop, separate encoder or raised cache
   budget. Empty worlds start at a useful multi-machine construction scale.
-- Opening construction freezes any inspector camera spring. Opening Design
-  cancels construction and collapses its drawer; controls remain keyboard
-  reachable, and collapsed content leaves the tab order.
+- The contextual wire/group editor is a separate, non-modal side panel, never
+  catalogue content. Entering an action collapses the component drawer; opening
+  Components cancels the action and its preview. Close/Escape returns to the
+  world. Native fields retain normal input behavior; hidden controls leave the
+  tab order. Opening Design cancels both surfaces without moving the camera.
 
 ### Organizational node groups
 
@@ -152,18 +158,22 @@ One pass explains where most edits belong:
   It organizes nodes without altering placement, ports, connections, provider
   choices or scaling semantics. Each node belongs to at most one organization
   group; replica pools stay wholly inside one group or remain ungrouped.
-- **Groups** shares the existing Build drawer. Click nodes, Shift-click from
-  Select, drag a marquee, or use the native member checkboxes. Ctrl/Cmd+G opens
-  grouping. Creation needs at least two selected nodes; existing groups may
-  retain one member. Empty containers disappear after their last node is removed.
+- Right-click empty ground → **Select nodes to group…** opens group management
+  in the contextual editor. Click nodes, Shift-click, drag a marquee, or use the
+  native member checkboxes. Ctrl/Cmd+G also opens grouping. Creation needs at
+  least two selected nodes; existing groups may retain one member. Empty
+  containers disappear after their last node is removed.
 - The group picker manages names and membership. Saving transfers selected
   nodes out of previous groups, never nests containers. Ungroup removes only
   the container. Scaling a grouped pool updates organizational membership;
   deleting nodes prunes it. All mutations preserve unrelated nodes and wires.
-- Backdrops wrap projected member artwork and do not become cable obstacles
-  or connection endpoints. The title bar drags the whole group; a click opens
-  management. A focused title supports arrow-key movement. Individual nodes
-  and replica handles remain independently editable inside the container.
+- Group regions wrap member ground footprints, not projected artwork bounds.
+  Both the boundary and compact drag plate use the shared `z=0` isometric
+  plane. A near-edge apron keeps the plate clear of model raster hit boxes;
+  camera fit includes the whole region. Regions are neither cable obstacles
+  nor connection endpoints. The plate drags the whole group; a click opens
+  management and focused arrow keys move it. Individual nodes and replica
+  handles remain independently editable inside the region.
 - Group drags pin the actual world once, preview one shared bounded delta
   through the normal keyed scene/raster cache, and commit on release. Escape,
   capture cancellation, blur, or applying another design restores the starting

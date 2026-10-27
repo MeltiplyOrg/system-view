@@ -18,7 +18,7 @@ import { connectionIssue, outputPorts } from "./component-rules";
 import { GroupControls } from "./group-controls";
 import { saveNodeGroup, ungroupNodes } from "./node-groups";
 
-type Tool = "select" | "place" | "wire" | "remove";
+type Tool = "select" | "place" | "wire";
 
 /** The shell remains the only owner of the applied/exported document. */
 interface BuilderOptions {
@@ -63,6 +63,7 @@ const KEY_STEPS: Readonly<Record<string, GroundPoint>> = {
 export class WorldBuilder {
   private readonly root = document.createElement("section");
   private readonly body: HTMLElement;
+  private readonly editor = document.createElement("aside");
   private readonly toggle: HTMLButtonElement;
   private readonly status: HTMLElement;
   private readonly counts: HTMLElement;
@@ -101,13 +102,7 @@ export class WorldBuilder {
     this.root.className = "build-dock";
     this.root.setAttribute("aria-label", "World builder");
     this.root.innerHTML = `<header class="build-toolbar">
-      <button id="build-toggle" class="build-toggle" type="button" aria-expanded="false" aria-controls="build-body"><svg viewBox="0 0 20 20" aria-hidden="true"><path d="m3 7 7-4 7 4-7 4ZM3 7v7l7 4 7-4V7M10 11v7"/></svg><span>Build</span><span class="build-chevron" aria-hidden="true">⌃</span></button>
-      <div class="build-tools" role="toolbar" aria-label="World tools">
-        <button id="build-select" type="button" aria-pressed="true" title="Inspect components and pan the world">Select</button>
-        <button id="build-wire" type="button" aria-pressed="false" title="Drag a wire between components, or click its two endpoints">Wire</button>
-        <button id="build-remove" type="button" aria-pressed="false" title="Remove a component and its connected wires">Remove</button>
-        <button id="build-groups" type="button" aria-pressed="false" title="Select, organize and move multiple nodes">Groups</button>
-      </div>
+      <button id="build-toggle" class="build-toggle" type="button" aria-expanded="false" aria-controls="build-body"><svg viewBox="0 0 20 20" aria-hidden="true"><path d="m3 7 7-4 7 4-7 4ZM3 7v7l7 4 7-4V7M10 11v7"/></svg><span>Components</span><span class="build-chevron" aria-hidden="true">⌃</span></button>
       <span id="build-status" class="build-status" role="status" aria-live="polite">Build your system, one component at a time.</span>
       <span id="build-counts" class="build-counts"></span>
     </header>
@@ -116,18 +111,23 @@ export class WorldBuilder {
         <nav class="build-categories" aria-label="Component categories"><button type="button" data-category="all" aria-pressed="true">All components <span>${BUILD_ITEMS.length}</span></button>${BUILD_TYPES.map((item) => `<button type="button" data-category="${item.type}" aria-pressed="false">${item.label}<span>${BUILD_ITEMS.filter((entry) => entry.type === item.type).length}</span></button>`).join("")}</nav>
         <div id="build-cards" class="build-cards" aria-label="Component catalogue"></div>
       </div>
+      <footer class="build-footer"><span>Drag a card into the world · or select, then click to place · Esc cancels</span><span id="build-coordinates" aria-hidden="true"></span></footer>
+    </div>`;
+    this.editor.className = "world-edit-panel";
+    this.editor.setAttribute("aria-labelledby", "world-edit-title");
+    this.editor.hidden = true;
+    this.editor.innerHTML = `<header class="world-edit-header"><h2 id="world-edit-title"></h2><button id="world-edit-close" class="btn" type="button" aria-label="Close action editor">✕</button></header>
       <form id="build-wiring" class="build-wiring" hidden>
-        <div class="build-wire-intro"><span class="eyebrow">Connection tool</span><h2>Connect your system</h2><p>Drag from a component to another, or click a source then a destination. You can also choose endpoints here.</p></div>
+        <div class="build-wire-intro"><p>Choose a destination in the world, or use the endpoints below. Esc cancels.</p></div>
         <label>From<select id="build-from"><option value="">Choose a source…</option></select></label>
         <label>Output<select id="build-outlet"><option value="out">OUT</option></select></label>
-        <span class="build-wire-arrow" aria-hidden="true">→</span>
         <label>To<select id="build-to"><option value="">Choose a destination…</option></select></label>
         <label>Traffic label<input id="build-relation" maxlength="100" placeholder="HTTPS, SQL, events…"/></label>
         <button id="build-connect" class="btn btn-primary" type="submit" disabled>Connect</button>
       </form>
-      <footer class="build-footer"><span>Drag a card into the world · or select, then click to place · Esc cancels</span><span id="build-coordinates" aria-hidden="true"></span><button id="build-new" type="button">New world</button></footer>
-    </div>`;
-    stage.append(this.root);
+      <p id="world-edit-status" class="world-edit-status" role="status" aria-live="polite"></p>`;
+    stage.append(this.root, this.editor);
+    svg.setAttribute("tabindex", "0");
     this.menu.className = "world-context-menu";
     this.menu.setAttribute("role", "menu");
     this.menu.setAttribute("aria-label", "World quick actions");
@@ -154,7 +154,7 @@ export class WorldBuilder {
     this.to = this.query("#build-to");
     this.relation = this.query("#build-relation");
     this.outlet = this.query("#build-outlet");
-    this.groups = new GroupControls(this.root, svg, scene, {
+    this.groups = new GroupControls(this.editor, svg, scene, {
       read: () => options.read(),
       commit: (design) => options.commit(design),
       selection: () => options.selection(),
@@ -163,9 +163,10 @@ export class WorldBuilder {
         this.options.enter();
       },
       reveal: () => {
-        this.setOpen(true);
-        this.query("#build-catalogue").hidden = true;
-        this.query("#build-wiring").hidden = true;
+        this.setOpen(false);
+        this.editor.hidden = false;
+        this.query("#world-edit-title").textContent = "Node groups";
+        this.query("#world-edit-status").hidden = true;
         this.say(
           "Groups: click nodes or drag a selection box · drag group titles to move together.",
         );
@@ -174,10 +175,9 @@ export class WorldBuilder {
     this.toggle.addEventListener("click", () =>
       this.setOpen(!!this.body.hidden),
     );
-    for (const tool of ["select", "wire", "remove"] as const)
-      this.query(`#build-${tool}`).addEventListener("click", () =>
-        this.setTool(tool),
-      );
+    this.query("#world-edit-close").addEventListener("click", () =>
+      this.dismissEditor(),
+    );
     for (const button of this.root.querySelectorAll<HTMLButtonElement>(
       "[data-category]",
     ))
@@ -199,25 +199,6 @@ export class WorldBuilder {
     });
     this.to.addEventListener("change", () => this.updateConnect());
     this.outlet.addEventListener("change", () => this.updateConnect());
-    this.query("#build-new").addEventListener("click", () => {
-      if (
-        this.options.read().instances.length &&
-        !window.confirm(
-          "Start an empty world? Export your current design first if you want to keep it.",
-        )
-      )
-        return;
-      this.reset();
-      this.options.commit({
-        version: 1,
-        name: "Untitled system",
-        instances: [],
-        connections: [],
-        clusters: [],
-      });
-      this.scene.fit();
-      this.say("Empty world ready. Drag in your first component.");
-    });
     svg.addEventListener("pointerdown", (event) => this.worldDown(event), true);
     document.addEventListener("pointermove", (event) => this.move(event), true);
     document.addEventListener("pointerup", (event) => this.up(event), true);
@@ -255,19 +236,23 @@ export class WorldBuilder {
 
   /** Required elements belong to this module's fixed template. */
   private query<T extends HTMLElement>(selector: string): T {
-    const element = this.root.querySelector<T>(selector);
+    const element =
+      this.root.querySelector<T>(selector) ??
+      this.editor.querySelector<T>(selector);
     if (!element) throw new Error(`Missing builder control: ${selector}`);
     return element;
   }
 
   /** Collapse without resizing or refitting the world; hidden controls leave the tab order. */
   private setOpen(open: boolean): void {
-    if (open) this.options.enter();
+    if (open) {
+      this.reset();
+      this.options.enter();
+    }
     this.body.hidden = !open;
     this.toggle.setAttribute("aria-expanded", String(open));
     this.root.classList.toggle("expanded", open);
     if (!open) {
-      if (this.groups.isOpen) this.reset();
       if (this.tool === "place") this.reset();
       this.toggle.focus({ preventScroll: true });
     }
@@ -356,28 +341,51 @@ export class WorldBuilder {
     this.reset();
     this.tool = tool;
     if (tool !== "select") this.options.enter();
-    if (tool === "wire") this.setOpen(true);
     this.svg.classList.toggle("tool-wire", tool === "wire");
-    this.svg.classList.toggle("tool-remove", tool === "remove");
-    for (const name of ["select", "wire", "remove"])
-      this.query(`#build-${name}`).setAttribute(
-        "aria-pressed",
-        String(tool === name),
-      );
-    this.query("#build-catalogue").hidden = tool === "wire";
-    this.query("#build-wiring").hidden = tool !== "wire";
-    if (tool === "wire")
-      this.say("Wire tool: choose a source component, then a destination.");
-    if (tool === "remove")
+    if (tool === "wire") {
+      this.setOpen(false);
+      this.editor.hidden = false;
+      this.query("#world-edit-title").textContent = "Connect nodes";
+      this.query("#world-edit-status").hidden = false;
+      this.query("#build-wiring").hidden = false;
       this.say(
-        "Remove tool: click a component to remove it and its wires. Esc cancels.",
+        "Choose a destination in the world or use the endpoint controls.",
       );
+    }
   }
 
   /** Opening the JSON editor closes construction without stealing either tool's state. */
   close(): void {
     this.reset();
     this.setOpen(false);
+  }
+
+  /** Explicit dismissal returns keyboard focus to the world, never a now-hidden field. */
+  private dismissEditor(): void {
+    this.reset();
+    this.svg.focus({ preventScroll: true });
+  }
+
+  /** Destructive world reset is a contextual action, not part of the component shelf. */
+  private newWorld(): void {
+    if (
+      this.options.read().instances.length &&
+      !window.confirm(
+        "Start an empty world? Export your current design first if you want to keep it.",
+      )
+    )
+      return;
+    this.reset();
+    this.options.enter();
+    this.options.commit({
+      version: 1,
+      name: "Untitled system",
+      instances: [],
+      connections: [],
+      clusters: [],
+    });
+    this.scene.fit();
+    this.say("Empty world ready. Drag in your first component.");
   }
 
   /** Restore ordinary scene controls; safe during pointer cancellation, Apply, blur and removal. */
@@ -397,22 +405,17 @@ export class WorldBuilder {
     this.wireFrom = null;
     this.scene.clearBuildPreview();
     this.previewShown = false;
-    this.svg.classList.remove("tool-place", "tool-wire", "tool-remove");
+    this.svg.classList.remove("tool-place", "tool-wire");
     this.svg.classList.remove("wire-invalid");
-    for (const name of ["select", "wire", "remove"])
-      this.query(`#build-${name}`).setAttribute(
-        "aria-pressed",
-        String(name === "select"),
-      );
     for (const card of this.cards.querySelectorAll(".selected"))
       card.classList.remove("selected");
-    this.query("#build-catalogue").hidden = false;
+    this.editor.hidden = true;
     this.query("#build-wiring").hidden = true;
     this.from.value = "";
     this.to.value = "";
     this.updateConnect();
     this.coordinates.textContent = "";
-    this.say("Select components to inspect · drag the ground to pan");
+    this.say("Drag in components · right-click the world for other actions");
   }
 
   /** Keep counts and keyboard-accessible wire endpoints synchronized with the same document. */
@@ -580,7 +583,6 @@ export class WorldBuilder {
   private schedule(): void {
     if (
       this.tool === "select" ||
-      this.tool === "remove" ||
       (this.tool === "wire" && !this.wireFrom) ||
       this.frame !== null
     )
@@ -675,12 +677,6 @@ export class WorldBuilder {
             ? "Source selected. Click or drag to a different component."
             : "Choose a component to start the wire.",
         );
-    } else if (this.tool === "remove" && inside) {
-      const target = this.hit(event.clientX, event.clientY);
-      if (target) {
-        this.options.commit(removeComponent(this.pinned(), target));
-        this.say(`Removed ${target} and its connected wires.`);
-      }
     } else this.reset();
   }
 
@@ -744,10 +740,10 @@ export class WorldBuilder {
       event.key === "Escape" &&
       !(event.target instanceof HTMLSelectElement)
     ) {
-      if (this.tool !== "select") {
+      if (this.tool !== "select" || this.groups.isOpen) {
         event.preventDefault();
         event.stopImmediatePropagation();
-        this.reset();
+        this.dismissEditor();
       } else if (!this.body.hidden) {
         event.preventDefault();
         event.stopImmediatePropagation();
@@ -783,8 +779,11 @@ export class WorldBuilder {
 
   /** State changes announce once; raw pointer coordinates never spam the live region. */
   private say(text: string, error = false): void {
-    if (this.status.textContent !== text) this.status.textContent = text;
-    this.status.classList.toggle("build-error", error);
+    const status = this.editor.hidden
+      ? this.status
+      : this.query("#world-edit-status");
+    if (status.textContent !== text) status.textContent = text;
+    status.classList.toggle("build-error", error);
   }
 
   /** Dismiss without losing a multi-selection; focus returns only on keyboard dismissal. */
@@ -792,7 +791,6 @@ export class WorldBuilder {
     if (this.menu.hidden) return;
     this.menu.hidden = true;
     if (restore && this.menuReturn?.isConnected) {
-      if (this.menuReturn === this.svg) this.svg.setAttribute("tabindex", "-1");
       (this.menuReturn as HTMLElement | SVGElement).focus({
         preventScroll: true,
       });
@@ -947,11 +945,20 @@ export class WorldBuilder {
         () => this.groups.manage(design.instances.map((item) => item.id)),
         { disabled: !design.instances.length },
       );
+      action(
+        "Connect nodes…",
+        () => {
+          this.setTool("wire");
+          this.from.focus({ preventScroll: true });
+        },
+        { disabled: design.instances.length < 2 },
+      );
       action("Add components…", () => {
         this.setTool("select");
         this.setOpen(true);
       });
       action("Fit world", () => this.scene.fit());
+      action("New world…", () => this.newWorld(), { danger: true });
     }
     this.menu.hidden = false;
     // One opening-time measurement; clamp both axes and allow internal scrolling
@@ -976,6 +983,7 @@ export class WorldBuilder {
     this.relation.value = port === "out" ? "" : port.toUpperCase();
     this.updateConnect();
     this.say("Choose a destination in the world or use the endpoint controls.");
+    this.to.focus({ preventScroll: true });
   }
 
   /** Standard menu keyboard navigation and native Shift+F10/ContextMenu entry. */

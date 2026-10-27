@@ -7,9 +7,10 @@ test.use({ viewport: { width: 1440, height: 1000 } });
 /** Start through the visible confirmation flow, never by mutating application globals. */
 async function emptyWorld(page: Page): Promise<void> {
   await page.goto("/");
-  await page.getByRole("button", { name: "Build", exact: true }).click();
+  await page.mouse.click(20, 80, { button: "right" });
   page.once("dialog", (dialog) => dialog.accept());
-  await page.getByRole("button", { name: "New world", exact: true }).click();
+  await page.getByRole("menuitem", { name: "New world…" }).click();
+  await page.getByRole("button", { name: "Components", exact: true }).click();
   await expect(page.locator(".scene-instance")).toHaveCount(0);
 }
 
@@ -53,6 +54,15 @@ async function hitPoint(
     });
 }
 
+/** Wiring starts from the clicked node's context menu, outside the component shelf. */
+async function wireFrom(page: Page, id: string): Promise<void> {
+  const point = await hitPoint(page, id);
+  await page.mouse.click(point.x, point.y, { button: "right" });
+  await page.getByRole("menuitem", { name: "Wire from this node…" }).click();
+  await expect(page.locator("#build-body")).toBeHidden();
+  await expect(page.locator(".world-edit-panel")).toBeVisible();
+}
+
 /** Project a saved ground site through the public SVG camera, independently of the builder. */
 async function groundClient(
   page: Page,
@@ -94,7 +104,7 @@ test("builds and wires products, then retains moved sites through real export an
   expect(built.instances[0].placement).toEqual(first);
   expect(built.instances[1].provider).toBe("postgresql");
   await expect(page.locator("#scene")).toHaveAttribute("viewBox", camera!);
-  await page.locator("#build-wire").click();
+  await wireFrom(page, "compute-1");
   await page.locator("#build-relation").fill("SQL");
   const from = await hitPoint(page, "compute-1"),
     to = await hitPoint(page, "db-1");
@@ -113,8 +123,7 @@ test("builds and wires products, then retains moved sites through real export an
   await expect(
     page.locator(".build-placement,.build-wire-preview"),
   ).toHaveCount(0);
-  await page.locator("#build-select").click();
-  await page.locator("#build-toggle").click();
+  await page.getByRole("button", { name: "Close action editor" }).click();
   await expect(page.locator("#build-body")).toBeHidden();
   await expect(page.locator("#scene")).toHaveAttribute("viewBox", camera!);
   const machine = await hitPoint(page, "compute-1");
@@ -185,11 +194,9 @@ test("rejects occupied and cancelled drops and removes incident wires without mo
   expect(await documentOf(page)).toEqual(original);
   await dragPreview(page, "web", { x: 940, y: 320 });
   await page.mouse.up();
-  await page.locator("#build-wire").click();
-  for (const id of ["web-1", "compute-1"]) {
-    const point = await hitPoint(page, id);
-    await page.mouse.click(point.x, point.y);
-  }
+  await wireFrom(page, "web-1");
+  const target = await hitPoint(page, "compute-1");
+  await page.mouse.click(target.x, target.y);
   await expect(page.locator(".connection")).toHaveCount(1);
   // Both the native form and pointer tool reject an already-connected output.
   const connected = await documentOf(page);
@@ -201,9 +208,11 @@ test("rejects occupied and cancelled drops and removes incident wires without mo
   const duplicate = await hitPoint(page, "compute-1");
   await page.mouse.click(duplicate.x, duplicate.y);
   expect(await documentOf(page)).toEqual(connected);
-  await page.locator("#build-remove").click();
   const remove = await hitPoint(page, "web-1");
-  await page.mouse.click(remove.x, remove.y);
+  await page.mouse.click(remove.x, remove.y, { button: "right" });
+  await page
+    .getByRole("menuitem", { name: "Delete node", exact: true })
+    .click();
   await expect(page.locator(".scene-instance")).toHaveCount(1);
   await expect(page.locator(".connection")).toHaveCount(0);
   expect((await documentOf(page)).instances[0].placement).toEqual(
@@ -230,7 +239,9 @@ test("supports pointer-free placement and native endpoint wiring", async ({
   for (let step = 0; step < 12; step++) await page.keyboard.press("ArrowRight");
   await page.keyboard.press("Enter");
   await expect(page.locator(".scene-instance")).toHaveCount(2);
-  await page.locator("#build-wire").focus();
+  await page.locator("#scene").focus();
+  await page.keyboard.press("Shift+F10");
+  await page.getByRole("menuitem", { name: "Connect nodes…" }).focus();
   await page.keyboard.press("Enter");
   await page.selectOption("#build-from", "web-1");
   await page.selectOption("#build-to", "compute-1");
@@ -274,8 +285,7 @@ test.describe("touch construction", () => {
     await expect(
       page.locator('.scene-instance [data-renderer-provider="cloudflare"]'),
     ).toHaveCount(1);
-    await page.locator("#build-wire").tap();
-    await page.selectOption("#build-from", "cdn-1");
+    await wireFrom(page, "cdn-1");
     await page.selectOption("#build-to", "cache-1");
     await page.locator("#build-connect").tap();
     await expect(page.locator(".connection")).toHaveCount(1);
@@ -288,7 +298,7 @@ test.describe("touch construction", () => {
         () => document.documentElement.scrollWidth === innerWidth,
       ),
     ).toBe(true);
-    await page.locator("#build-toggle").tap();
+    await page.getByRole("button", { name: "Close action editor" }).tap();
     await expect(page.locator("#build-body")).toBeHidden();
     await expect(page.locator("#build-toggle")).toHaveAttribute(
       "aria-expanded",

@@ -48,7 +48,6 @@ const GROUP_STEPS: Readonly<Record<string, GroundPoint>> = {
 export class GroupControls {
   private readonly panel = document.createElement("section");
   private readonly marquee = document.createElement("div");
-  private readonly button: HTMLButtonElement;
   private readonly picker: HTMLSelectElement;
   private readonly name: HTMLInputElement;
   private readonly members: HTMLElement;
@@ -59,32 +58,28 @@ export class GroupControls {
   private frame: number | null = null;
   private client: GroundPoint = { x: 0, y: 0 };
 
-  /** The builder uses this to cancel grouping when its drawer collapses. */
+  /** The builder uses this to arbitrate contextual editing, independent of the catalogue. */
   get isOpen(): boolean {
     return this.active;
   }
 
   constructor(
-    private readonly dock: HTMLElement,
+    host: HTMLElement,
     private readonly svg: SVGSVGElement,
     private readonly scene: SystemScene,
     private readonly options: GroupOptions,
   ) {
-    this.button = dock.querySelector<HTMLButtonElement>("#build-groups")!;
     this.panel.className = "group-controls";
     this.panel.id = "build-grouping";
     this.panel.hidden = true;
-    this.panel.innerHTML = `<div class="group-intro"><span class="eyebrow">Organize your system</span><h2>Node groups</h2><p>Click nodes or drag a selection box. Shift-click also starts a selection. Replica pools stay together; different component types can share a group.</p><label>Manage group<select id="group-picker"><option value="">New group…</option></select></label></div><form id="group-form"><label>Group name<input id="group-name" maxlength="100" required placeholder="Media processing"/></label><div class="group-actions"><button id="group-save" class="btn btn-primary" type="submit" disabled>Create group</button><button id="group-ungroup" class="btn" type="button" disabled>Ungroup</button><button id="group-clear" class="btn" type="button">Clear selection</button></div><p id="group-message" role="status">Select at least two nodes. Drag a group’s title bar to move it.</p></form><fieldset class="group-member-field"><legend id="group-count">Selected nodes · 0</legend><div id="group-members" class="group-members"></div></fieldset>`;
-    dock.querySelector(".build-footer")!.before(this.panel);
+    this.panel.innerHTML = `<div class="group-intro"><p>Click nodes or drag a selection box. Shift-click also starts a selection. Replica pools stay together; different component types can share a group.</p><label>Manage group<select id="group-picker"><option value="">New group…</option></select></label></div><form id="group-form"><label>Group name<input id="group-name" maxlength="100" required placeholder="Media processing"/></label><div class="group-actions"><button id="group-save" class="btn btn-primary" type="submit" disabled>Create group</button><button id="group-ungroup" class="btn" type="button" disabled>Ungroup</button><button id="group-clear" class="btn" type="button">Clear selection</button></div><p id="group-message" role="status">Select at least two nodes. Drag a group’s title bar to move it.</p></form><fieldset class="group-member-field"><legend id="group-count">Selected nodes · 0</legend><div id="group-members" class="group-members"></div></fieldset>`;
+    host.append(this.panel);
     this.marquee.className = "group-marquee";
     this.marquee.hidden = true;
-    dock.parentElement!.append(this.marquee);
+    host.parentElement!.append(this.marquee);
     this.picker = this.query("#group-picker");
     this.name = this.query("#group-name");
     this.members = this.query("#group-members");
-    this.button.addEventListener("click", () =>
-      this.active ? this.options.prepare() : this.open(),
-    );
     this.picker.addEventListener("change", () =>
       this.choose(this.picker.value || undefined),
     );
@@ -142,16 +137,12 @@ export class GroupControls {
     return node;
   }
 
-  /** Claim the existing builder drawer, keeping the camera fixed and ordinary inspectors closed. */
+  /** Claim the contextual editor, keeping the camera fixed and ordinary inspectors closed. */
   private open(initial = this.options.selection()): void {
     this.options.prepare();
     this.active = true;
     this.panel.hidden = false;
     this.name.value = "";
-    this.button.setAttribute("aria-pressed", "true");
-    this.dock
-      .querySelector("#build-select")!
-      .setAttribute("aria-pressed", "false");
     this.svg.classList.add("tool-group");
     this.options.reveal();
     this.sync(this.options.read());
@@ -188,7 +179,6 @@ export class GroupControls {
     this.groupId = undefined;
     this.selected.clear();
     this.panel.hidden = true;
-    this.button.setAttribute("aria-pressed", "false");
     this.svg.classList.remove("tool-group");
   }
 
@@ -442,6 +432,7 @@ export class GroupControls {
       event.preventDefault();
       event.stopImmediatePropagation();
       this.options.prepare();
+      this.svg.focus({ preventScroll: true });
       return true;
     }
     const header = target.closest<SVGGElement>(".node-group-header");
