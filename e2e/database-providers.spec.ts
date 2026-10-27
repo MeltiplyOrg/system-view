@@ -28,12 +28,7 @@ test("database providers render distinct cabinets with one exact mark", async ({
     { value: "mongodb", label: "MongoDB" },
   ]);
 
-  for (const [id, color] of [
-    ["postgresql", "#4169e1"],
-    ["mysql", "#00758f"],
-    ["sqlite", "#0f80cc"],
-    ["mongodb", "#00ed64"],
-  ] as const) {
+  for (const id of ["postgresql", "mysql", "sqlite", "mongodb"] as const) {
     // Change the provider in-page so the badge is inspected before the raster
     // cache replaces the static vectors with a shared image.
     const state = await page.evaluate((provider) => {
@@ -54,9 +49,6 @@ test("database providers render distinct cabinets with one exact mark", async ({
         front: rack
           ?.querySelector(".component-static-overlay use")
           ?.getAttribute("href"),
-        accent: rack
-          ? getComputedStyle(rack).getPropertyValue("--cable-color").trim()
-          : null,
         badges: instance.querySelectorAll(".rack-provider-badge").length,
         plates: instance.querySelectorAll(".brand-plate").length,
         logos: instance.querySelectorAll(".rack-provider-badge svg").length,
@@ -68,7 +60,6 @@ test("database providers render distinct cabinets with one exact mark", async ({
       provider: id,
       rear: `#db-${id}-rear`,
       front: `#db-${id}-front`,
-      accent: color,
       badges: 1,
       plates: 1,
       logos: 1,

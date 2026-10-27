@@ -229,9 +229,8 @@ function webpageFront(): string {
     <text class="label" x="142" y="16.5" font-size="4">app.local</text>
     <path class="led" d="${circle(210, 14.5, 1.3)}"/>`;
 
-  // Screen: a translucent accent wash over the recess keeps the page inside
-  // the same palette without competing with the content blocks.
-  svg += `<rect class="glass-pane" x="5" y="23" width="218" height="116" rx="1.5"/>`;
+  // A powered display carries the large accent area; the chassis stays neutral.
+  svg += `<rect class="screen-glass" x="5" y="23" width="218" height="116" rx="1.5"/>`;
 
   // Left navigation rail.
   svg += `<rect class="face" x="11" y="29" width="38" height="110" rx="2"/>
@@ -251,7 +250,7 @@ function webpageFront(): string {
     <path class="detail" d="M56 56h130M56 61h112M56 66h124"/>`;
 
   // Hero artwork: tinted media panel with horizon, hills, and an accent sun.
-  svg += `<rect class="internal-board" x="56" y="74" width="160" height="40" rx="2"/>
+  svg += `<rect class="screen-media" x="56" y="74" width="160" height="40" rx="2"/>
     <path class="detail" d="M62 108h148M62 78h148"/>
     <path class="face top" d="M62 108L92 84L110 98L132 80L158 108Z"/>
     <path class="face" d="M144 108L168 90L192 108Z"/>

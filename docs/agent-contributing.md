@@ -287,10 +287,18 @@ One pass explains where most edits belong:
 
 - CDN themes are rejected on every non-CDN renderer, just as Redis only applies
   to cache nodes and database products only apply to database racks.
-- The provider accent tints faces, glass, LEDs, and cables. `ProviderTheme.plate`
-  chooses a contrasting enamel tone for the one exact mark, never a white
-  backing. CDN77 uses yellow enamel so its official dark wordmark stays legible;
-  other products use dark enamel. SVG source URLs live in the mark module.
+- ISO-GLOW presentation in `style.css` keeps chassis, drawer handles, ports,
+  cooling hardware and platforms neutral. World nodes, rack roots and links
+  resolve `--cable-color` to the shared theme accent, overriding provider and
+  document paint without changing exported colors or provider identities.
+- LEDs, powered screen panels and travelling packet dashes carry the accent;
+  neutral wires preserve routing legibility. Wide translucent cable strokes
+  supply dark-theme signal glow without blur filters or additional renderers.
+  Light theme sets `--glow-opacity` to zero while retaining flat lit accents.
+- Static display and indicator paint goes through the existing raster cache;
+  activity and labels remain live. Do not add per-node clocks, extra canvases,
+  or glow filters. Fans are hardware, not light sources. Existing provider
+  marks remain on neutral enamel plates; the world includes the ISO-GLOW link.
 
 ### Wires
 

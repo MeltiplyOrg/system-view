@@ -86,7 +86,7 @@ function rows(
   return d;
 }
 
-/** Recessed fan: bezel, two guide rings, seven blades, and an accent hub. */
+/** Recessed fan: neutral bezel, guide ring and blades; a fan is not a lamp. */
 function fan(cx: number, cy: number, radius: number): string {
   const hub = radius * 0.24;
   let blades = circle(cx, cy, radius * 0.74);
@@ -102,7 +102,7 @@ function fan(cx: number, cy: number, radius: number): string {
       controlY = cy + Math.sin(middle) * radius * 0.5;
     blades += `M${fixed(x1)} ${fixed(y1)}Q${fixed(controlX)} ${fixed(controlY)} ${fixed(x2)} ${fixed(y2)}`;
   }
-  return `<path class="face recess" d="${circle(cx, cy, radius)}"/><path class="detail" d="${blades}"/><path class="led" d="${circle(cx, cy, Math.max(1, radius * 0.11))}"/>`;
+  return `<path class="face recess" d="${circle(cx, cy, radius)}"/><path class="detail" d="${blades}"/><path class="internal-chip" d="${circle(cx, cy, Math.max(1, radius * 0.11))}"/>`;
 }
 
 export { box, circle, endFace, fan, fixed, frontFace, rows, slits, topFace };

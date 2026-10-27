@@ -39,6 +39,7 @@ app.innerHTML = `
     <svg id="scene" xmlns="http://www.w3.org/2000/svg" role="img" aria-labelledby="scene-description" preserveAspectRatio="xMidYMid meet">
       <desc id="scene-description">Isometric system diagram with linked components. Pinch or scroll to zoom, drag to move, or open Design to edit JSON and load examples. Select a component to inspect its connections.</desc>
     </svg>
+    <a class="iso-credit" href="https://iso-glow.vercel.app" target="_blank" rel="noreferrer">Made with ISO-GLOW ↗</a>
     <div id="callout" class="callout" aria-hidden="true">
       <div class="callout-card">
         <span class="callout-provider" hidden></span>

@@ -12,17 +12,17 @@
   --border: #292e34;
   --fg: #e5e9ed;
   --muted: #89939e;
-  --body: #1b2025;
-  --deck: #252c32;
-  --line: #5e6c77;
-  --detail: #3a464f;
-  --recess: #101519;
-  --grid: #252e36;
+  --body: #14181c;
+  --deck: #1d2329;
+  --line: #83909b;
+  --detail: #46525d;
+  --recess: #0b0f13;
+  --grid: #1c242c;
   --mono: "DM Mono", ui-monospace, monospace;
-  --glow-opacity: 0.22;
-  --pulse: #fff4df;
+  --glow-opacity: 0.14;
+  --pulse: var(--accent);
   --accent: #ffac6b;
-  --cluster-hover: #facc15;
+  --cluster-hover: var(--fg);
   --brand-plate: #0f171c;
   --brand-mark: #f2f6f7;
 }
@@ -45,10 +45,10 @@
     --detail: #b1beba;
     --recess: #d6dfdb;
     --grid: #d8e1de;
-    --glow-opacity: 0.26;
-    --pulse: #fff8ea;
-    --accent: #985019;
-    --cluster-hover: #b47800;
+    --glow-opacity: 0;
+    --pulse: var(--accent);
+    --accent: #b55c23;
+    --cluster-hover: var(--fg);
   }
 }
 :root[data-theme="light"] {
@@ -65,10 +65,10 @@
   --detail: #b1beba;
   --recess: #d6dfdb;
   --grid: #d8e1de;
-  --glow-opacity: 0.26;
-  --pulse: #fff8ea;
-  --accent: #985019;
-  --cluster-hover: #b47800;
+  --glow-opacity: 0;
+  --pulse: var(--accent);
+  --accent: #b55c23;
+  --cluster-hover: var(--fg);
 }
 * {
   box-sizing: border-box;
@@ -837,10 +837,27 @@ aside.detail.open {
  * Faces must stay opaque: SVG has no depth buffer, so painter order is the
  * only occlusion. Non-scaling strokes keep the hairline look at every zoom.
  */
+/*
+ * ISO-GLOW keeps hardware monochrome and uses one signal accent throughout the
+ * world. Inline document/provider colors remain intact for export and UI keys;
+ * this paint-only override also reaches rack roots and construction previews.
+ * The raster cache snapshots the resolved cable color, including theme swaps.
+ */
+:is(.scene-instance, .connection, .database-rack) {
+  --cable-color: var(--accent) !important;
+}
+.face.platform-top {
+  fill: var(--body);
+  stroke: var(--detail);
+}
+.face.platform-wall {
+  fill: var(--recess);
+  stroke: var(--detail);
+}
 .face {
   fill: var(--body);
   stroke: var(--line);
-  stroke-width: 0.85;
+  stroke-width: 1;
   vector-effect: non-scaling-stroke;
   stroke-linejoin: round;
 }
@@ -851,32 +868,30 @@ aside.detail.open {
   fill: var(--recess);
 }
 /*
- * A provider skin tints the shared neutral chassis toward its accent. The
- * accent itself still comes from --cable-color, so the raster cache snapshots
- * a distinct palette per provider and reuses it across replicas.
+ * Provider silhouettes remain distinct, but their metal is neutral. Accent is
+ * reserved for powered displays, status lights and signal paths, never a wash
+ * over the whole cabinet.
  */
 .provider-skin .face {
-  stroke: color-mix(in srgb, var(--cable-color) 30%, var(--line));
+  stroke: var(--line);
 }
 .provider-skin .face.top {
-  fill: color-mix(in srgb, var(--deck) 84%, var(--cable-color));
+  fill: var(--deck);
 }
 .provider-skin .face.recess {
-  fill: color-mix(in srgb, var(--recess) 90%, var(--cable-color));
+  fill: var(--recess);
 }
-/* Drawer fascias carry the provider tint on database racks; the neutral rack
- * keeps the deck color. */
+/* Removable drawer fascias use the same metal across provider variants. */
 .provider-skin .face.drawer-front {
-  fill: color-mix(in srgb, var(--deck) 86%, var(--cable-color));
+  fill: var(--deck);
 }
 /*
- * Database badges. One enamel plate on the roof fascia prints the provider's
- * exact upstream mark; the accent line and plate border inherit the skin
- * color so the same markup serves every database provider.
+ * Existing provider badges remain legible on a neutral enamel plate; their
+ * borders and adjacent trim are printed structure rather than light sources.
  */
 .brand-plate {
-  fill: var(--provider-plate, var(--brand-plate));
-  stroke: color-mix(in srgb, var(--cable-color) 62%, var(--line));
+  fill: var(--brand-plate);
+  stroke: var(--line);
   stroke-width: 0.7;
   vector-effect: non-scaling-stroke;
 }
@@ -884,14 +899,12 @@ aside.detail.open {
   fill: var(--brand-mark);
 }
 .rack-accent-line {
-  fill: var(--cable-color);
-  opacity: 0.8;
+  fill: var(--line);
+  opacity: 0.7;
 }
 /*
- * Redis skin. The provider tint supplies the red anodized metal; these marks
- * add the appliance detail the shared cache language cannot: cartridge sleds,
- * an accent spine, key activity, and etched DIMM banks. Every fill resolves
- * through theme variables so the raster cache snapshots one palette per skin.
+ * Redis keeps its cartridge sleds, controller gauge and etched DIMM banks.
+ * Only the gauge's live segment and activity layer carry signal color.
  */
 .redis-sled {
   fill: color-mix(in srgb, var(--recess) 86%, var(--fg));
@@ -900,31 +913,31 @@ aside.detail.open {
   vector-effect: non-scaling-stroke;
 }
 .redis-bay {
-  fill: color-mix(in srgb, var(--recess) 92%, var(--cable-color));
+  fill: var(--recess);
   stroke: var(--detail);
   stroke-width: 0.55;
   vector-effect: non-scaling-stroke;
 }
 .redis-edge {
-  fill: var(--cable-color);
+  fill: var(--line);
   opacity: 0.72;
 }
 .redis-handle {
-  fill: color-mix(in srgb, var(--cable-color) 82%, var(--body));
-  stroke: color-mix(in srgb, var(--cable-color) 82%, var(--line));
+  fill: var(--deck);
+  stroke: var(--line);
   stroke-width: 0.6;
   vector-effect: non-scaling-stroke;
 }
 .redis-handle-line {
   fill: none;
-  stroke: color-mix(in srgb, var(--cable-color) 24%, var(--fg));
+  stroke: var(--muted);
   stroke-width: 0.7;
   stroke-linecap: round;
   vector-effect: non-scaling-stroke;
 }
 .redis-gauge {
   fill: none;
-  stroke: color-mix(in srgb, var(--cable-color) 62%, var(--detail));
+  stroke: var(--detail);
   stroke-width: 1.5;
   stroke-linecap: round;
   vector-effect: non-scaling-stroke;
@@ -933,19 +946,19 @@ aside.detail.open {
   stroke: var(--cable-color);
 }
 .redis-dimm {
-  fill: color-mix(in srgb, var(--deck) 90%, var(--cable-color));
+  fill: var(--deck);
   stroke: var(--line);
   stroke-width: 0.6;
   vector-effect: non-scaling-stroke;
 }
 .redis-spine {
-  fill: color-mix(in srgb, var(--cable-color) 80%, var(--body));
-  stroke: color-mix(in srgb, var(--cable-color) 42%, var(--line));
+  fill: var(--body);
+  stroke: var(--line);
   stroke-width: 0.6;
   vector-effect: non-scaling-stroke;
 }
 .redis-wordmark {
-  fill: var(--cable-color);
+  fill: var(--fg);
   font-weight: 700;
   letter-spacing: 0.16em;
 }
@@ -1061,13 +1074,13 @@ aside.detail.open {
   fill: var(--recess);
 }
 .internal-board {
-  fill: color-mix(in srgb, var(--deck) 88%, var(--cable-color));
+  fill: var(--deck);
 }
 .internal-chip {
   fill: var(--body);
 }
 .glass-pane {
-  fill: color-mix(in srgb, var(--cable-color) 6%, transparent);
+  fill: color-mix(in srgb, var(--fg) 3%, transparent);
   stroke: var(--line);
   stroke-width: 0.8;
   vector-effect: non-scaling-stroke;
@@ -1079,7 +1092,7 @@ aside.detail.open {
 .detail {
   fill: none;
   stroke: var(--detail);
-  stroke-width: 0.65;
+  stroke-width: 0.7;
   vector-effect: non-scaling-stroke;
 }
 .label {
@@ -1106,11 +1119,18 @@ aside.detail.open {
 }
 .led {
   fill: var(--cable-color);
-  opacity: 0.8;
+  stroke: var(--cable-color);
+  stroke-width: 1;
+  stroke-opacity: 0.9;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  vector-effect: non-scaling-stroke;
+  paint-order: stroke;
+  opacity: 1;
 }
 .port {
   fill: var(--recess);
-  stroke: var(--cable-color);
+  stroke: var(--line);
   stroke-width: 0.8;
   vector-effect: non-scaling-stroke;
 }
@@ -1194,8 +1214,8 @@ aside.detail.open {
   stroke-width: 3.5;
 }
 .wire {
-  stroke: var(--cable-color);
-  stroke-width: 1.1;
+  stroke: var(--line);
+  stroke-width: 1;
 }
 .wire-glow {
   stroke: var(--cable-color);
@@ -1210,28 +1230,24 @@ aside.detail.open {
  */
 .pulse {
   stroke: var(--pulse);
-  stroke-width: 1.5;
-  stroke-dasharray: 8 112;
+  stroke-width: 2;
+  stroke-dasharray: 3 117;
   animation: traffic var(--duration) linear infinite;
   animation-delay: var(--delay);
 }
 .connection .wire {
-  stroke-width: 1.5;
+  stroke-width: 1;
 }
 .connection .wire-glow {
-  stroke-width: 8;
+  stroke-width: 4;
 }
 /*
- * Relation captions sit just above their cable. The page-colored halo is drawn
- * behind the glyphs with `paint-order`, so the grid and any crossing wire are
- * erased under each letter without an opaque box hiding the drawing. Mono
- * uppercase matches the inspector's link badges. The fill is mostly body text
- * with a cable-color tint: full-strength accents do not meet small-text
- * contrast on the light theme's plinth. Pointer events stay off so a long
- * caption can never intercept a rack hover or selection.
+ * Relation captions sit above neutral cables. A page-colored halo erases
+ * crossing lines under the glyphs without hiding the drawing in a label box.
+ * Captions never intercept node selection.
  */
 .wire-label {
-  fill: color-mix(in srgb, var(--cable-color) 30%, var(--fg));
+  fill: var(--muted);
   stroke: var(--page);
   stroke-width: 2.6px;
   paint-order: stroke;
@@ -1331,19 +1347,45 @@ aside.detail.open {
 }
 /* CDN packet flow stays in the small live layer; the chassis shares cached pixels. */
 .cdn-panel {
-  fill: color-mix(in srgb, var(--deck) 92%, var(--cable-color));
+  fill: var(--deck);
   stroke: var(--line);
   stroke-width: 0.6;
   vector-effect: non-scaling-stroke;
 }
 .cdn-display {
-  fill: color-mix(in srgb, var(--recess) 92%, var(--cable-color));
-  stroke: var(--line);
-  stroke-width: 0.65;
+  fill: color-mix(in srgb, var(--cable-color) 20%, var(--recess));
+  stroke: var(--cable-color);
+  stroke-width: 1;
   vector-effect: non-scaling-stroke;
 }
+/* Large lit surfaces stay flat in light mode; the cache bakes these paints
+ * without blur filters, extra canvases, or a new animation clock. */
+.screen-glass {
+  fill: color-mix(in srgb, var(--cable-color) 12%, var(--recess));
+  stroke: var(--cable-color);
+  stroke-width: 1;
+  vector-effect: non-scaling-stroke;
+}
+.screen-media {
+  fill: color-mix(in srgb, var(--cable-color) 38%, var(--recess));
+  stroke: var(--cable-color);
+  stroke-width: 1;
+  vector-effect: non-scaling-stroke;
+}
+.iso-credit {
+  position: absolute;
+  top: 18px;
+  left: 18px;
+  color: var(--muted);
+  font: 9px var(--mono);
+  letter-spacing: 0.08em;
+  text-decoration: none;
+}
+.iso-credit:hover {
+  color: var(--fg);
+}
 .cdn-wordmark {
-  fill: var(--cable-color);
+  fill: var(--fg);
   font: 7px var(--mono);
   letter-spacing: 1.2px;
 }
@@ -1367,7 +1409,7 @@ aside.detail.open {
 }
 .cdn-link {
   stroke: var(--detail);
-  stroke-width: 2.4;
+  stroke-width: 1;
 }
 .cdn-packet {
   stroke: var(--cable-color);
@@ -1486,26 +1528,26 @@ aside.detail.open {
   vector-effect: non-scaling-stroke;
 }
 .db-pg-rail {
-  fill: var(--cable-color);
+  fill: var(--line);
   stroke: none;
   opacity: 0.72;
 }
 .db-pg-spine {
-  fill: color-mix(in srgb, var(--cable-color) 78%, var(--body));
-  stroke: color-mix(in srgb, var(--cable-color) 42%, var(--line));
+  fill: var(--body);
+  stroke: var(--line);
   stroke-width: 0.6;
 }
 .db-pg-fascia {
-  fill: color-mix(in srgb, var(--deck) 82%, var(--cable-color));
-  stroke: color-mix(in srgb, var(--cable-color) 48%, var(--line));
+  fill: var(--deck);
+  stroke: var(--line);
 }
 .db-pg-glass {
-  fill: color-mix(in srgb, var(--cable-color) 8%, transparent);
+  fill: color-mix(in srgb, var(--fg) 3%, transparent);
   stroke: var(--line);
 }
 .db-pg-pane {
-  fill: color-mix(in srgb, var(--cable-color) 6%, transparent);
-  stroke: color-mix(in srgb, var(--cable-color) 30%, var(--line));
+  fill: color-mix(in srgb, var(--fg) 3%, transparent);
+  stroke: var(--line);
 }
 .db-scan-line {
   fill: var(--cable-color);
@@ -1533,22 +1575,22 @@ aside.detail.open {
 }
 
 .db-mysql-fin {
-  fill: color-mix(in srgb, var(--cable-color) 74%, var(--body));
-  stroke: color-mix(in srgb, var(--cable-color) 45%, var(--line));
+  fill: var(--body);
+  stroke: var(--line);
 }
 .db-mysql-stripe {
-  fill: #f29111;
+  fill: var(--line);
   stroke: none;
 }
 .db-mysql-wave {
   fill: none;
-  stroke: color-mix(in srgb, var(--cable-color) 52%, var(--detail));
+  stroke: var(--detail);
   stroke-width: 0.9;
   vector-effect: non-scaling-stroke;
 }
 .db-wave-pulse path {
   fill: none;
-  stroke: #f29111;
+  stroke: var(--cable-color);
   stroke-width: 1.4;
   stroke-dasharray: 14 86;
   vector-effect: non-scaling-stroke;
@@ -1567,19 +1609,19 @@ aside.detail.open {
   vector-effect: non-scaling-stroke;
 }
 .db-sqlite-screen {
-  fill: color-mix(in srgb, var(--recess) 90%, var(--cable-color));
+  fill: color-mix(in srgb, var(--cable-color) 20%, var(--recess));
+  stroke: var(--cable-color);
+  stroke-width: 1;
+  vector-effect: non-scaling-stroke;
+}
+.db-sqlite-card {
+  fill: var(--deck);
   stroke: var(--line);
   stroke-width: 0.6;
   vector-effect: non-scaling-stroke;
 }
-.db-sqlite-card {
-  fill: color-mix(in srgb, var(--deck) 88%, var(--cable-color));
-  stroke: color-mix(in srgb, var(--cable-color) 28%, var(--line));
-  stroke-width: 0.6;
-  vector-effect: non-scaling-stroke;
-}
 .db-sqlite-bezel {
-  fill: var(--cable-color);
+  fill: var(--line);
   opacity: 0.65;
 }
 .db-sqlite-pulse rect {
@@ -1605,8 +1647,8 @@ aside.detail.open {
 }
 
 .db-mongo-blade {
-  fill: color-mix(in srgb, var(--deck) 86%, var(--cable-color));
-  stroke: color-mix(in srgb, var(--cable-color) 28%, var(--line));
+  fill: var(--deck);
+  stroke: var(--line);
   stroke-width: 0.65;
   vector-effect: non-scaling-stroke;
 }
@@ -1615,13 +1657,13 @@ aside.detail.open {
   opacity: 0.8;
 }
 .db-mongo-doc {
-  fill: color-mix(in srgb, var(--deck) 80%, var(--cable-color));
-  stroke: color-mix(in srgb, var(--cable-color) 35%, var(--line));
+  fill: var(--deck);
+  stroke: var(--line);
   stroke-width: 0.6;
   vector-effect: non-scaling-stroke;
 }
 .db-mongo-bezel {
-  fill: var(--cable-color);
+  fill: var(--line);
   opacity: 0.7;
 }
 .db-mongo-pulse {
