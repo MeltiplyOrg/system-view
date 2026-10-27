@@ -2353,3 +2353,107 @@ aside.detail.open {
 .stage:has(.world-context-menu:not([hidden])) :is(#callout, .drag-anchor) {
   visibility: hidden;
 }
+
+/* Capacity health is semantic color, independent of the decorative signal accent. */
+.node-status-layer {
+  --status-good: light-dark(#248246, #63df91);
+  --status-bad: light-dark(#c43737, #ff6969);
+}
+.node-status-track,
+.node-status-fill {
+  fill: none;
+  vector-effect: non-scaling-stroke;
+  stroke-linecap: round;
+}
+.node-status-track {
+  stroke: var(--page);
+  stroke-width: 9;
+}
+.node-status-fill {
+  stroke: color-mix(
+    in oklch shorter hue,
+    var(--status-good) var(--node-health, 100%),
+    var(--status-bad)
+  );
+  stroke-width: 4;
+}
+.node-status-label {
+  fill: var(--fg);
+  stroke: var(--page);
+  stroke-width: 3;
+  paint-order: stroke;
+  stroke-linejoin: round;
+  font: 11px var(--mono);
+}
+.traffic-controls {
+  position: absolute;
+  z-index: 9;
+  top: 44px;
+  left: 18px;
+  width: 316px;
+  padding: 12px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--panel);
+  color: var(--fg);
+  font: 10px/1.6 var(--mono);
+}
+.traffic-form {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 80px auto auto;
+  align-items: center;
+  gap: 8px;
+}
+.traffic-form label {
+  font-size: 11px;
+}
+.traffic-form label span {
+  display: block;
+  color: var(--muted);
+  font-size: 8px;
+}
+.traffic-controls input,
+#capacity-rps {
+  width: 100%;
+  min-width: 0;
+  padding: 7px;
+  background: var(--recess);
+  color: var(--fg);
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  font: 11px var(--mono);
+}
+.traffic-controls .btn {
+  height: 30px;
+  padding: 0 8px;
+}
+.traffic-controls output {
+  display: block;
+  margin-top: 8px;
+  color: var(--muted);
+}
+.traffic-controls details {
+  margin-top: 6px;
+  color: var(--muted);
+  font-size: 9px;
+}
+.traffic-controls summary {
+  cursor: pointer;
+}
+.traffic-controls p {
+  margin: 8px 0 0;
+}
+#capacity-form .btn {
+  margin-top: 10px;
+}
+#capacity-form .detail-empty {
+  margin-top: 10px;
+  line-height: 1.6;
+}
+@media (max-width: 620px) {
+  .traffic-controls {
+    left: 12px;
+    top: 46px;
+    width: min(316px, calc(100vw - 24px));
+  }
+}

@@ -48,6 +48,9 @@ this guide adds the app's mechanics.
 | Queue/storage/worker and workflow models          | `src/media-models.ts`                                      | `src/media-provider-marks.ts`, `src/components.ts`, `src/providers.ts`           |
 | Junction conditions and merge mode                | `src/flow-node-editor.ts`                                  | parser-backed design annotations; `src/main.ts` inspector                        |
 | Orthogonal cable routing                          | `src/routing.ts`                                           | `src/scene.ts` obstacles and ports                                               |
+| Request-rate model and service budgets            | `src/traffic.ts`, `src/design.ts`                          | `tests/traffic.test.ts`, inspector capacity input                                |
+| Ground-frame capacity meters                      | `src/node-status.ts`                                       | `src/scene.ts`, `src/style.css`                                                  |
+| Traffic controls and visibility-aware clock       | `src/traffic-controls.ts`                                  | `src/main.ts` applied-document synchronization                                   |
 
 ## Render pass
 
@@ -209,11 +212,11 @@ One pass explains where most edits belong:
 
 ### Visual routing workflows
 
-- This is a visual system-design sandbox, not an integration platform. Provider
-  skins never connect to external apps. No real uploads, transcoding, queues,
-  databases or cloud APIs run. The request simulator, its clock, JSON injection,
-  trace viewer and input/output panel have been removed; cable pulses are
-  decorative traffic, not execution results.
+- This is an educational system-design sandbox, not an integration platform.
+  Provider skins never connect to external apps. No real uploads, transcoding,
+  databases or cloud APIs run. `TrafficModel` now models routed request rates
+  and service saturation; cable pulses remain illustrative direction markers,
+  not individual request actors. There is no payload injection or trace viewer.
 - The editable media-app reference remains in Design → Reference design. It
   illustrates video/image routing, parallel original/processing paths, a
   queue/worker topology, publication and CDN playback.
@@ -231,10 +234,39 @@ One pass explains where most edits belong:
   TRUE/FALSE wire outlets. Merge persists `mergeMode: \"all\" | \"any\"` to express
   synchronization or independent convergence. These describe design intent;
   no request data or expressions are executed.
-- Ordinary machines do not show a simulation-behavior form. Existing imported
-  `latencyMs` annotations still validate and round-trip without being executed
-  or changed by routing-rule edits. Typed connection and replica restrictions
-  remain enforced by the shared parser and builder.
+- Capacity-limited machines expose a requests/s budget in the inspector.
+  `capacityRps` is optional, persisted through import/export and inherited by
+  replicas. The parser accepts finite budgets from 1 to 1,000,000 and rejects
+  budgets on clients, If/Else and Merge. Omission uses illustrative type defaults,
+  never a vendor performance claim. Existing `latencyMs` annotations remain
+  passive; typed connection and replica restrictions are unchanged.
+
+### Traffic capacity and ground status
+
+- Traffic controls start paused. Run/Pause preserves the current pipeline;
+  Reset clears all demand. Ingress is one total requests/s budget shared across
+  client nodes, or zero-indegree nodes if no client exists. Nodes disconnected
+  from these sources stay idle. Rootless cycles receive no generated traffic.
+- A single 250 ms interval advances one hop per sample. Hidden pages stop it
+  without catch-up. Capacity clamps accepted throughput before forwarding;
+  excess is reported as rejected requests/s. This is a rate exercise, not a
+  latency, cache-hit, byte-storage, or persistent queue-backlog simulation.
+- Load balancers and If/Else split evenly across wired outputs. Other nodes
+  fan out to dependencies, Merge sums incoming rates. Predicates and merge
+  synchronization are not executed. Rate cohorts expire after 32 hops so
+  cyclic topologies drain after ingress stops and work stays bounded.
+- Every eligible standalone frame gets one horizontal bar anchored to its
+  lower-right grid border. The ground anchor follows the node; the bar stays
+  sideways rather than following the diagonal isometric edge.
+  Replica frames show the worst member's demand/capacity ratio, never an average
+  that could hide a failed member. Clients and routing fittings have no bars.
+  Green means headroom; red means saturation. Percentages may exceed 100%;
+  accessible meter text includes each member's capacity and rejected rate.
+- `NodeStatusLayer` stays outside the artwork raster cache. It uses expanded
+  frame bounds from the same scene margin helper as routing; world moves rebuild
+  positions, while traffic samples only update status attributes and text.
+  Camera movement does not rebuild meters. Applied graph/capacity edits reset
+  the pipeline while preserving the selected rate and run/pause choice.
 
 ### Geometry and artwork
 

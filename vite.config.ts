@@ -59,6 +59,8 @@ export default defineConfig({
         "src/world-builder.ts",
         "src/group-controls.ts",
         "src/flow-node-editor.ts",
+        "src/traffic-controls.ts",
+        "src/node-status.ts",
         "src/scene.ts",
         "src/component-raster.ts",
         "src/transformer.ts",

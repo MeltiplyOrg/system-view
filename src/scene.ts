@@ -24,6 +24,8 @@ import type { RoutePoint, RouteRect } from "./routing";
 import { TransformerTransitions } from "./transformer-transitions";
 import type { TransformerSource } from "./transformer-transitions";
 import type { TransformerEnvelope } from "./transformer-model";
+import { NodeStatusLayer } from "./node-status";
+import { capacityRps, type NodeLoad } from "./traffic";
 
 const NS = "http://www.w3.org/2000/svg";
 
@@ -846,6 +848,10 @@ export class SystemScene {
    */
   private readonly borderFrames = new Map<string, PlacedCluster>();
 
+  /** Live capacity meters share frame geometry but never enter cached machine pixels. */
+  private readonly nodeStatus = new NodeStatusLayer();
+  private nodeLoads: readonly NodeLoad[] = [];
+
   /**
    * Last design passed to `render`.
    *
@@ -1114,9 +1120,9 @@ export class SystemScene {
    */
   render(design: Design, animate = false): void {
     this.currentDesign = design;
-    // An image role hides interactive descendants from assistive technology.
-    // Grouped worlds expose their keyboard-operable titles as real controls.
-    this.svg.setAttribute("role", design.groups?.length ? "group" : "img");
+    // A group role exposes live meter values and keyboard-operable group titles;
+    // an image role would hide their descendants from assistive technology.
+    this.svg.setAttribute("role", "group");
     this.hoveredFrameId = null;
     const previousCluster = new Map(this.instanceCluster);
     this.instanceCluster.clear();
@@ -1488,6 +1494,38 @@ export class SystemScene {
       layer.append(group);
     }
 
+    const previousLoads = new Map(
+      this.nodeLoads.map((load) => [load.id, load]),
+    );
+    const loads = design.instances.flatMap((instance): NodeLoad[] => {
+      const capacity = capacityRps(instance);
+      if (capacity === null) return [];
+      return [
+        previousLoads.get(instance.id) ?? {
+          id: instance.id,
+          capacityRps: capacity,
+          incomingRps: 0,
+          acceptedRps: 0,
+          rejectedRps: 0,
+          utilization: 0,
+        },
+      ];
+    });
+    this.nodeStatus.render(
+      [...this.borderFrames.values()].map((frame) => ({
+        id: frame.id,
+        label: frame.label,
+        bounds: clusterFrameRect(frame),
+        members: frame.id.startsWith(INSTANCE_KEY)
+          ? [frame.id.slice(INSTANCE_KEY.length)]
+          : layout.instances
+              .filter((node) => this.instanceCluster.get(node.id) === frame.id)
+              .map((node) => node.id),
+      })),
+      loads,
+    );
+    layer.append(this.nodeStatus.element);
+
     if (!animate) {
       this.transformers.cancelAll();
       this.renderedInstances.clear();
@@ -1612,11 +1650,10 @@ export class SystemScene {
     }
     const extent = contentExtent(layout, nodeGroups),
       pad = 55,
-      // The hover callout is screen-space and hangs above the topmost rack,
-      // so the fitted view keeps extra headroom above the drawing. The bottom
-      // pad clears the projected cluster caption.
+      // Leave room above the drawing for callouts and below for ground meters
+      // and the fixed construction dock; status must not disappear under it.
       topPad = pad + 90,
-      bottomPad = pad + 40;
+      bottomPad = pad + 100;
 
     // Empty worlds need room for several machines at construction scale, not
     // a tight camera fit around absent geometry. Populated diagrams still fit.
@@ -1671,6 +1708,12 @@ export class SystemScene {
     // replica edit); let screen-space overlays re-anchor to the new bounds.
     // Non-animated renders fit the camera and already notify view listeners.
     if (animate) for (const listener of this.layoutListeners) listener();
+  }
+
+  /** Update ground meters without rebuilding paths, moving the camera or invalidating artwork. */
+  setNodeLoads(loads: readonly NodeLoad[]): void {
+    this.nodeLoads = loads;
+    this.nodeStatus.update(loads);
   }
 
   /**

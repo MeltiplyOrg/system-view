@@ -10,6 +10,8 @@ import { pinWorld, BUILD_TYPES } from "./construction";
 import { replicaIssue } from "./component-rules";
 import { FlowNodeEditor } from "./flow-node-editor";
 import { placeCallout, type CalloutRect } from "./callout-layout";
+import { TrafficControls } from "./traffic-controls";
+import { capacityRps } from "./traffic";
 
 /**
  * Resolve a required descendant or fail immediately.
@@ -36,8 +38,8 @@ const app = mustQuery<HTMLDivElement>("#app");
  */
 app.innerHTML = `
   <main class="stage">
-    <svg id="scene" xmlns="http://www.w3.org/2000/svg" role="img" aria-labelledby="scene-description" preserveAspectRatio="xMidYMid meet">
-      <desc id="scene-description">Isometric system diagram with linked components. Pinch or scroll to zoom, drag to move, or open Design to edit JSON and load examples. Select a component to inspect its connections.</desc>
+    <svg id="scene" xmlns="http://www.w3.org/2000/svg" role="group" aria-labelledby="scene-description" preserveAspectRatio="xMidYMid meet">
+      <desc id="scene-description">Isometric system diagram with linked components and ground-border capacity meters. Pinch or scroll to zoom, drag to move, or open Design to edit JSON and load examples. Select a service to set its capacity. Use Traffic to run simulated request load.</desc>
     </svg>
     <a class="iso-credit" href="https://iso-glow.vercel.app" target="_blank" rel="noreferrer">Made with ISO-GLOW ↗</a>
     <div id="callout" class="callout" aria-hidden="true">
@@ -62,6 +64,14 @@ app.innerHTML = `
         <section id="detail-provider-section" class="detail-section">
           <label class="detail-label" for="detail-provider"><span>Provider</span></label>
           <select id="detail-provider" class="detail-provider-select"></select>
+        </section>
+        <section id="detail-capacity" class="detail-section" hidden>
+          <form id="capacity-form">
+            <label class="detail-label" for="capacity-rps">Per-node capacity · requests/s</label>
+            <input id="capacity-rps" type="number" min="1" max="1000000" step="any" required>
+            <button class="btn" type="submit">Set capacity</button>
+            <p id="capacity-message" class="detail-empty" role="status">Illustrative throughput budget, not a provider benchmark.</p>
+          </form>
         </section>
         <section id="detail-scaling" class="detail-section">
           <div class="detail-label"><span id="detail-scaling-label">Scaling</span><span class="replica-stepper"><button id="replica-decrease" type="button" aria-label="Decrease replicas"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="m10 4-4 4 4 4"/></svg></button><span id="detail-count" aria-live="polite"></span><button id="replica-increase" type="button" aria-label="Increase replicas"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="m6 4 4 4-4 4"/></svg></button></span></div>
@@ -135,7 +145,7 @@ app.innerHTML = `
 
         <section class="section schema-note">
           <div class="section-label">Dynamic design</div>
-          <code>instances: [{ id, label?, provider?, placement?, condition?, mergeMode?, latencyMs? }]<br>connections: [{ id?, from, to, outlet?, relation? }]<br>clusters: [{ label?, instances }]<br>groups: [{ id, label, instances }]</code>
+          <code>instances: [{ id, label?, provider?, placement?, capacityRps?, condition?, mergeMode?, latencyMs? }]<br>connections: [{ id?, from, to, outlet?, relation? }]<br>clusters: [{ label?, instances }]<br>groups: [{ id, label, instances }]</code>
           <p>Open Components at the bottom to add to your system. The drawer contains only component categories and cards. Drag a component into the world, or select a card and click clear ground. Placements snap to the build grid and are saved in placement. Arrow keys move a keyboard-selected preview; Enter places it and Escape cancels. Right-click nodes to wire or delete them. Wiring opens a separate endpoint editor; choose a destination in the world or use its controls. A machine's anchor handle moves an existing node or replica group; completed moves are saved with the design. Right-click empty ground for New world.</p>
           <p>Groups organize any mix of nodes without changing their connections or replica pools. Right-click empty ground and choose Select nodes to group, then click nodes or drag a selection box, name the selection and create a group. Group management opens separately from the component drawer. Shift-click starts multi-selection; Ctrl/Cmd+G opens grouping. Click a group's title or use its right-click menu to rename it or change membership. Drag its ground-plane title plate to move every member together; focused titles also support arrow keys. Ungroup removes only the container, never its nodes or wires. Groups and their positions round-trip through JSON.</p>
           <p>Right-click a node, group title or empty ground for quick actions: inspect, start a wire, add/remove selection, group, ungroup or delete. Multi-node actions apply to the selection only when you right-click one of its members; right-clicking another node targets just that node. If/Else exposes separate TRUE/FALSE wiring actions. Shift+F10 or the Context Menu key opens quick actions from the world; arrows navigate, Enter activates, and Escape closes without losing selection.</p>
@@ -147,8 +157,9 @@ app.innerHTML = `
               ", ",
             )}. Select an independent edge and choose its provider in the inspector, or set provider in JSON. Repeated products share cached artwork, not replica controls.</p>
           <p>Only supported machines scale: API/compute and worker instances, database/cache replicas, never SQLite server replicas. Clients, CDNs, queues, buckets, If/Else and Merge nodes are logical components, not replicable machines. Replica groups require the same component type and provider. Scale from 1 to 10 within the world limit; new members inherit behavior, not an occupied placement.</p>
-          <p>Each renderer has a default palette: databases cyan, backend servers orange, frontend pages violet, caches green, and CDN edges blue. A provider may supply its own accent, artwork, and live detail layer; only static artwork is cached, so activity LEDs and packets keep moving. Every node shares cached artwork by type and provider, so replicas and repeated designs reuse the same images. Visible nodes are prewarmed while idle, and removing a replica keeps shared images available for re-addition. Zoom reuses the previous image until a sharper tier is ready; labels remain live. Internal cable pulses pause during navigation and resume at rest. Offscreen nodes are culled and return when panned into view. Links between components remain visible.</p>
+          <p>ISO-GLOW keeps hardware neutral and uses a shared accent for displays, LEDs and illustrative cable pulses. Each node shares static cached artwork by type and provider; labels and activity remain live. Zoom reuses the previous image until a sharper tier is ready. Internal pulses pause during navigation; offscreen nodes are culled and return when panned into view.</p>
           <p>This is a visual system-design sandbox: no external integrations, cloud calls, real uploads or transcoding. The editable media-app example is available in the Examples menu.</p>
+          <p>Use Traffic → Run to send a requests/s budget through the design. Capacity bars sit on the lower-right grid border of services, not clients or routing fittings. Green means headroom, red means saturation; the number is demand divided by capacity and can exceed 100%. Select a service to edit its per-node capacity. Excess work is rejected before forwarding. This is an illustrative rate model, not a vendor benchmark or a payload/latency simulation.</p>
           <p>If/Else and Merge are compact junctions directly on the wires, not machines. Choose TRUE/FALSE in Wire, and select a junction to edit its condition or merge mode. Invalid connection types are rejected in both the builder and JSON imports.</p>
         </section>
       </div>
@@ -166,6 +177,7 @@ const sceneSvg = mustQuery<SVGSVGElement>("#scene");
 const scene = new SystemScene(sceneSvg);
 let builder: WorldBuilder | undefined;
 let nodeEditor: FlowNodeEditor | undefined;
+let traffic: TrafficControls | undefined;
 const sceneTitle = mustQuery<HTMLElement>("#scene-title");
 const sceneCount = mustQuery<HTMLElement>("#scene-count");
 const applyButton = mustQuery<HTMLButtonElement>("#apply");
@@ -657,6 +669,21 @@ function openDetail(ids: TargetIds): void {
 
   detailKind.textContent = ids.clusterId ? "Cluster" : "Instance";
   syncDetailProvider(memberIds);
+  const capacities = current.instances
+    .filter((node) => memberSet.has(node.id))
+    .map(capacityRps);
+  const capacitySection = mustQuery<HTMLElement>("#detail-capacity");
+  capacitySection.hidden =
+    capacities.length === 0 || capacities.some((value) => value === null);
+  const capacityInput = mustQuery<HTMLInputElement>("#capacity-rps");
+  const commonCapacity = capacities.every((value) => value === capacities[0]);
+  capacityInput.value =
+    commonCapacity && capacities[0] !== null ? String(capacities[0]) : "";
+  capacityInput.placeholder = commonCapacity ? "" : "Mixed budgets";
+  mustQuery<HTMLElement>("#capacity-message").textContent =
+    memberIds.length > 1
+      ? "Applies this requests/s budget to each member, not the whole pool."
+      : "Illustrative throughput budget, not a provider benchmark.";
   detailTitle.textContent = ids.clusterId
     ? (cluster?.label ?? ids.clusterId)
     : ((ids.instanceId &&
@@ -949,6 +976,7 @@ function syncDesign(): void {
   message.classList.remove("error");
   message.textContent = "Canvas is up to date.";
   builder?.sync(design);
+  traffic?.sync(design);
 }
 
 /**
@@ -1162,6 +1190,11 @@ document.addEventListener("visibilitychange", () =>
   document.documentElement.classList.toggle("paused", document.hidden),
 );
 
+traffic = new TrafficControls(
+  stage,
+  () => current,
+  (loads) => scene.setNodeLoads(loads),
+);
 apply(webAppExample);
 
 /**
@@ -1211,6 +1244,39 @@ nodeEditor = new FlowNodeEditor(
   commitWorld,
 );
 
+/** Capacity edits share parser validation, document persistence and keyed-world rendering. */
+mustQuery<HTMLFormElement>("#capacity-form").addEventListener(
+  "submit",
+  (event) => {
+    event.preventDefault();
+    const ids = targetIds(selectedAnchor);
+    if (!ids || !selectedAnchor) return;
+    const members = new Set(
+      targetMembers(ids, selectedAnchor).map(
+        (node) => node.dataset.instanceId!,
+      ),
+    );
+    const capacity = mustQuery<HTMLInputElement>("#capacity-rps").valueAsNumber;
+    try {
+      const design = parseDesign(
+        JSON.stringify({
+          ...current,
+          instances: current.instances.map((node) =>
+            members.has(node.id) ? { ...node, capacityRps: capacity } : node,
+          ),
+        }),
+      );
+      commitWorld(design);
+      openDetail(ids);
+      mustQuery<HTMLElement>("#capacity-message").textContent =
+        "Capacity saved · traffic restarted on the updated graph.";
+    } catch (error) {
+      mustQuery<HTMLElement>("#capacity-message").textContent =
+        error instanceof Error ? error.message : "Could not save capacity.";
+    }
+  },
+);
+
 /**
  * HTML overlays, not SVG animation, invalidate the cached exclusion rectangles.
  * Measure only on overlay resize/state changes. Aside offsets represent their
@@ -1223,6 +1289,7 @@ const calloutOverlays = [
   toggle,
   sidebar,
   detail,
+  mustQuery<HTMLElement>(".traffic-controls"),
 ];
 let calloutMeasureFrame: number | null = null;
 /** Coalesce overlay mutations without doing DOM measurements on pointer frames. */

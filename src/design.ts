@@ -93,6 +93,8 @@ export interface DesignInstance {
   mergeMode?: "all" | "any";
   /** Simulated service time, in milliseconds; never a real network timeout. */
   latencyMs?: number;
+  /** Educational throughput budget in requests/second; omitted uses the node type default. */
+  capacityRps?: number;
 }
 
 /**
@@ -580,6 +582,25 @@ function groundPlacement(value: unknown, path: string): GroundPoint {
   return { x: point.x as number, y: point.y as number };
 }
 
+/** Validate authored capacity only on services; never silently attach a budget to a client or fitting. */
+function serviceCapacity(value: unknown, id: string, path: string): number {
+  const type = inferInstanceType(id);
+  if (type === "webpage" || type === "branch" || type === "merge")
+    throw new Error(
+      `${path}.capacityRps applies only to capacity-limited services.`,
+    );
+  if (
+    typeof value !== "number" ||
+    !Number.isFinite(value) ||
+    value < 1 ||
+    value > 1_000_000
+  )
+    throw new Error(
+      `${path}.capacityRps must be between 1 and 1000000 requests/s.`,
+    );
+  return value;
+}
+
 /** Validate authored workflow behavior independently of renderer/provider presentation. */
 function flowSettings(
   instance: Record<string, unknown>,
@@ -704,6 +725,9 @@ export function parseDesign(source: string): Design {
         : {
             placement: groundPlacement(instance.placement, `${path}.placement`),
           }),
+      ...(instance.capacityRps === undefined
+        ? {}
+        : { capacityRps: serviceCapacity(instance.capacityRps, id, path) }),
       ...flowSettings(instance, path),
     };
   });
