@@ -255,9 +255,9 @@ One pass explains where most edits belong:
   fan out to dependencies, Merge sums incoming rates. Predicates and merge
   synchronization are not executed. Rate cohorts expire after 32 hops so
   cyclic topologies drain after ingress stops and work stays bounded.
-- Every eligible standalone frame gets one horizontal bar anchored to its
-  lower-right grid border. The ground anchor follows the node; the bar stays
-  sideways rather than following the diagonal isometric edge.
+- Every eligible standalone frame gets one bar lying along its lower-right
+  grid-border side. Both endpoints are projected on the ground plane, so the
+  bar follows the border's isometric angle rather than screen-horizontal space.
   Replica frames show the worst member's demand/capacity ratio, never an average
   that could hide a failed member. Clients and routing fittings have no bars.
   Green means headroom; red means saturation. Percentages may exceed 100%;

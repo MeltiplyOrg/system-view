@@ -35,10 +35,10 @@ export class NodeStatusLayer {
       if (!frame.members.some((id) => eligible.has(id))) continue;
       const { x, y, width, height } = frame.bounds;
       const length = Math.min(112, height * 0.42);
-      // Project only the ground anchor; the meter itself stays horizontal.
-      const anchor = project(x + width, y + height - 12, 0);
-      const start = [anchor[0] + 8, anchor[1] + 8];
-      const end = [start[0] + length, start[1]];
+      // Both endpoints lie on the same ground-frame side, so the meter follows
+      // the border's isometric direction instead of screen-horizontal HUD space.
+      const start = project(x + width, y + height - 12, 0);
+      const end = project(x + width, y + height - 12 - length, 0);
       const root = document.createElementNS(NS, "g");
       root.dataset.statusFrame = frame.id;
       root.setAttribute("role", "meter");
@@ -56,7 +56,7 @@ export class NodeStatusLayer {
       const label = document.createElementNS(NS, "text");
       label.classList.add("node-status-label");
       label.setAttribute("x", String(end[0] + 8));
-      label.setAttribute("y", String(end[1] + 4));
+      label.setAttribute("y", String(end[1] + 10));
       root.append(title, label);
       this.element.append(root);
       this.meters.push({ frame, root, title, label });
