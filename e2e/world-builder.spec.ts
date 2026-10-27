@@ -1,13 +1,15 @@
 import { readFileSync } from "node:fs";
 import { expect, test, type Page } from "@playwright/test";
 import type { Design, GroundPoint } from "../src/design";
+import { groundPoint } from "./ground-point";
 
 test.use({ viewport: { width: 1440, height: 1000 } });
 
 /** Start through the visible confirmation flow, never by mutating application globals. */
 async function emptyWorld(page: Page): Promise<void> {
   await page.goto("/");
-  await page.mouse.click(20, 80, { button: "right" });
+  const point = await groundPoint(page);
+  await page.mouse.click(point.x, point.y, { button: "right" });
   page.once("dialog", (dialog) => dialog.accept());
   await page.getByRole("menuitem", { name: "New world…" }).click();
   await page.getByRole("button", { name: "Components", exact: true }).click();

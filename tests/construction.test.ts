@@ -4,6 +4,7 @@ import {
   BUILD_TYPES,
   canPlace,
   connectComponents,
+  disconnectComponents,
   pinWorld,
   placeComponent,
   removeComponent,
@@ -34,7 +35,11 @@ describe("world construction", () => {
     const original = world();
     const before = layoutDesign(original).instances;
     const pinned = pinWorld(original, before);
-    const placed = placeComponent(pinned, BUILD_TYPES[0], { x: -501, y: 111 });
+    const placed = placeComponent(
+      pinned,
+      BUILD_TYPES.find((item) => item.type === "compute-server")!,
+      { x: -501, y: 111 },
+    );
     const added = placed.instances.at(-1)!;
     expect(added.id).toBe("compute-2");
     expect(added.placement).toEqual({ x: -520, y: 120 });
@@ -124,6 +129,29 @@ describe("world construction", () => {
     expect(design.connections).toEqual([
       { id: "wire-1", from: "compute-3", to: "db-1" },
     ]);
+  });
+
+  test("cutting one parallel branch outlet preserves its sibling and every node", () => {
+    const original: Design = {
+      ...world(),
+      instances: [
+        { id: "branch-choice" },
+        { id: "compute-1", placement: { x: 400, y: 120 } },
+      ],
+      connections: [
+        { id: "yes", from: "branch-choice", to: "compute-1", outlet: "true" },
+        { id: "no", from: "branch-choice", to: "compute-1", outlet: "false" },
+      ],
+    };
+    const cut = disconnectComponents(original, 0);
+    expect(cut.connections).toEqual([original.connections[1]]);
+    expect(cut.instances).toEqual(original.instances);
+    expect(parseDesign(JSON.stringify(cut))).toEqual(cut);
+    expect(original.connections).toHaveLength(2);
+    for (const index of [-1, 2, 0.5, NaN])
+      expect(() => disconnectComponents(original, index)).toThrow(
+        "no longer exists",
+      );
   });
 
   test("removing a machine prunes only incident wires and dissolves singleton groups", () => {

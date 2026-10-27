@@ -767,6 +767,7 @@ const COMPONENT_GEOMETRY = {
 
 /** Human-readable renderer names for accessible labels. */
 const TYPE_LABELS: Readonly<Record<PlacedInstance["type"], string>> = {
+  users: "Users",
   "database-rack": "Database Rack",
   "compute-server": "Compute Server",
   webpage: "Webpage",

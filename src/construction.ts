@@ -20,6 +20,14 @@ export interface BuildItem {
 /** Base products and every compatible registered skin share the normal renderer. */
 export const BUILD_TYPES: readonly BuildItem[] = [
   {
+    id: "users",
+    prefix: "users",
+    type: "users",
+    label: "Users",
+    description:
+      "Generate individual requests. Set traffic in the Users detail HUD and wire to a frontend.",
+  },
+  {
     id: "compute",
     prefix: "compute",
     type: "compute-server",
@@ -242,6 +250,20 @@ export function connectComponents(
             : {}),
       },
     ],
+  };
+}
+
+/** Cut exactly one document wire, preserving parallel outlets, nodes, groups and their sites. */
+export function disconnectComponents(design: Design, index: number): Design {
+  if (
+    !Number.isInteger(index) ||
+    index < 0 ||
+    index >= design.connections.length
+  )
+    throw new Error("This wire no longer exists.");
+  return {
+    ...design,
+    connections: design.connections.filter((_, position) => position !== index),
   };
 }
 

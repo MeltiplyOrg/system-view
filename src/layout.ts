@@ -50,6 +50,8 @@ export function instanceColor(
   const theme = findProvider(provider, type);
   if (theme) return theme.color;
   switch (type) {
+    case "users":
+      return "#b49aff";
     case "database-rack":
       return "#42d9e8";
     case "compute-server":
@@ -77,6 +79,8 @@ export function instanceColor(
 
 /** Renderer prefixes; unknown IDs retain the original database visual. */
 const INSTANCE_TYPES: Readonly<Record<string, PlacedInstance["type"]>> = {
+  user: "users",
+  users: "users",
   db: "database-rack",
   database: "database-rack",
   rack: "database-rack",

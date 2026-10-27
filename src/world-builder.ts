@@ -31,6 +31,8 @@ interface BuilderOptions {
 
 /** Small catalogue glyphs, not clones of the world's detailed vector models. */
 const GLYPHS: Readonly<Record<string, string>> = {
+  users:
+    "M21 20a7 7 0 1 0 0-14 7 7 0 0 0 0 14ZM9 46V34a12 12 0 0 1 24 0v12M60 20a7 7 0 1 0 0-14 7 7 0 0 0 0 14ZM48 46V34a12 12 0 0 1 24 0v12M41 31a7 7 0 1 0 0-14 7 7 0 0 0 0 14ZM29 57V45a12 12 0 0 1 24 0v12",
   "compute-server":
     "M12 12 40 2 68 12 40 23Z M12 12v12l28 12 28-12V12M12 29v12l28 12 28-12V29M20 23l10 4m-10 12 10 4M45 29l15-6m-15 22 15-6",
   webpage:

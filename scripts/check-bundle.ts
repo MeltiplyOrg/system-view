@@ -13,21 +13,20 @@ import { gzipSync } from "node:zlib";
 /**
  * Maximum gzipped bytes per emitted asset type.
  *
- * The JS budget includes provider artwork, bounded assembly, factory building
- * and the local request-flow interpreter/inspector. The complete visual
- * simulator measures about 72 KiB JS gzip; 76 KiB leaves modest transfer
- * headroom. Simulation never loads SDKs, codecs or per-request model copies.
- * Pixel limits, encoder concurrency and animation limits are separate runtime
- * invariants and do not increase with the transfer budget.
+ * Includes artwork, assembly controls, Users, paired request/response lanes,
+ * FIFO admission and the rolling SLO/crash HUD. The complete build measures
+ * 79.60 KiB JS gzip / 88.24 KiB total; 80 / 89 KiB retains bounded headroom.
+ * No SDKs, codecs or model copies are loaded. The 512-call runtime ceiling,
+ * shared raster pixel budget and single-encoder limit remain independent.
  */
 const budgets = {
-  ".js": 76 * 1024,
+  ".js": 80 * 1024,
   ".css": 10 * 1024,
   ".html": 2 * 1024,
 } as const;
 
 /** Maximum gzipped bytes for the whole build. */
-const totalBudget = 86 * 1024;
+const totalBudget = 89 * 1024;
 
 // Dist is flat today, but recursive discovery keeps the gate valid if assets
 // move into nested chunks. Unknown file types are intentionally ignored.

@@ -40,6 +40,7 @@ export const MAX_WORLD_COORDINATE = 100_000;
 export interface PlacedInstance {
   id: string;
   type:
+    | "users"
     | "database-rack"
     | "compute-server"
     | "webpage"
@@ -95,6 +96,8 @@ export interface DesignInstance {
   latencyMs?: number;
   /** Educational throughput budget in requests/second; omitted uses the node type default. */
   capacityRps?: number;
+  /** Requests emitted per second by a Users source, 0–20; omitted defaults to one. */
+  trafficRps?: number;
 }
 
 /**
@@ -183,48 +186,50 @@ export const example: Design = {
   ],
 };
 
-/**
- * Editable three-tier application: a browser frontend calls an API server,
- * which reads and writes through a cache server. On a cache miss the cache
- * server loads from the database itself, so the backend never talks to the
- * database directly. Prefixes select visuals; connections describe requests,
- * not replica membership. The cache names the Redis provider, which also makes
- * this the boot scene: a mixed application, all inside the initial fit.
- */
+/** Explicit source-to-storage journey; one visible marker is one real simulated request. */
 export const webAppExample: Design = {
   version: 1,
   name: "Simple web app",
   instances: [
     {
+      id: "users-source",
+      label: "Users",
+      trafficRps: 1,
+      placement: { x: 0, y: 0 },
+      description:
+        "Generates individual requests. Select Users to set requests per second.",
+    },
+    {
       id: "web-frontend",
       label: "Web frontend",
+      latencyMs: 100,
+      placement: { x: 650, y: 0 },
       description:
-        "Renders the application interface and sends HTTPS / JSON requests to the backend API.",
+        "Receives user requests and forwards them to the backend API.",
     },
     {
       id: "compute-api",
       label: "Backend API",
+      capacityRps: 8,
+      latencyMs: 100,
+      placement: { x: 1300, y: 0 },
       description:
-        "Handles application requests and business logic. Every read and write goes through the cache server.",
-    },
-    {
-      id: "cache-server",
-      label: "Cache server",
-      provider: "redis",
-      description:
-        "Keeps frequently requested data in memory. On a cache miss it queries the database itself and stores the result.",
+        "Processes each incoming request, then queries the application database.",
     },
     {
       id: "db-app",
       label: "Application database",
+      capacityRps: 4,
+      latencyMs: 100,
+      placement: { x: 1950, y: 0 },
       description:
-        "Persists application data. Only the cache server connects to it; the backend never queries it directly.",
+        "Stores application data. Requests finish here after database processing.",
     },
   ],
   connections: [
+    { from: "users-source", to: "web-frontend", relation: "USER REQUEST" },
     { from: "web-frontend", to: "compute-api", relation: "HTTPS / JSON" },
-    { from: "compute-api", to: "cache-server", relation: "GET / SET" },
-    { from: "cache-server", to: "db-app", relation: "SQL on miss" },
+    { from: "compute-api", to: "db-app", relation: "SQL" },
   ],
   clusters: [],
 };
@@ -500,7 +505,7 @@ export const examples: readonly DesignExample[] = [
   {
     id: "web-app",
     summary:
-      "Follow one request from the browser through the API to the cache and database.",
+      "Follow an individual request from Users to the frontend, backend API and database.",
     design: webAppExample,
   },
   {
@@ -585,7 +590,12 @@ function groundPlacement(value: unknown, path: string): GroundPoint {
 /** Validate authored capacity only on services; never silently attach a budget to a client or fitting. */
 function serviceCapacity(value: unknown, id: string, path: string): number {
   const type = inferInstanceType(id);
-  if (type === "webpage" || type === "branch" || type === "merge")
+  if (
+    type === "users" ||
+    type === "webpage" ||
+    type === "branch" ||
+    type === "merge"
+  )
     throw new Error(
       `${path}.capacityRps applies only to capacity-limited services.`,
     );
@@ -598,6 +608,20 @@ function serviceCapacity(value: unknown, id: string, path: string): number {
     throw new Error(
       `${path}.capacityRps must be between 1 and 1000000 requests/s.`,
     );
+  return value;
+}
+
+/** Only explicit Users generate traffic; zero pauses this source without deleting its wire. */
+function sourceTraffic(value: unknown, id: string, path: string): number {
+  if (inferInstanceType(id) !== "users")
+    throw new Error(`${path}.trafficRps applies only to Users.`);
+  if (
+    typeof value !== "number" ||
+    !Number.isFinite(value) ||
+    value < 0 ||
+    value > 20
+  )
+    throw new Error(`${path}.trafficRps must be between 0 and 20 requests/s.`);
   return value;
 }
 
@@ -728,6 +752,9 @@ export function parseDesign(source: string): Design {
       ...(instance.capacityRps === undefined
         ? {}
         : { capacityRps: serviceCapacity(instance.capacityRps, id, path) }),
+      ...(instance.trafficRps === undefined
+        ? {}
+        : { trafficRps: sourceTraffic(instance.trafficRps, id, path) }),
       ...flowSettings(instance, path),
     };
   });

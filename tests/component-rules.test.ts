@@ -15,6 +15,40 @@ function world(...ids: string[]): Design {
 }
 
 describe("component relationships", () => {
+  test("Users wire only to frontend clients and cannot receive traffic or replicate", () => {
+    const design = world(
+      "users-source",
+      "web-client",
+      "compute-api",
+      "db-data",
+      "branch-choice",
+    );
+    expect(
+      parseDesign(
+        JSON.stringify(connectComponents(design, "users-source", "web-client")),
+      ).connections,
+    ).toHaveLength(1);
+    for (const target of ["compute-api", "db-data", "branch-choice"])
+      expect(() => connectComponents(design, "users-source", target)).toThrow(
+        /cannot connect/,
+      );
+    for (const source of [
+      "web-client",
+      "compute-api",
+      "db-data",
+      "branch-choice",
+    ])
+      expect(() =>
+        connectComponents(
+          design,
+          source,
+          "users-source",
+          "",
+          source === "branch-choice" ? "true" : "out",
+        ),
+      ).toThrow(/cannot connect/);
+    expect(() => resizeReplicas(design, "users-source", 2)).toThrow(/replica/);
+  });
   test("rejects direct browser database access in construction and imports", () => {
     const design = world("web-client", "db-metadata");
     expect(() =>

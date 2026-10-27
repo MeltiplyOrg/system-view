@@ -75,7 +75,7 @@ export class NodeStatusLayer {
         if (!load) continue;
         utilization = Math.max(utilization, load.utilization);
         descriptions.push(
-          `${id}: ${Math.round(load.incomingRps)} / ${load.capacityRps} requests/s; ${Math.round(load.rejectedRps)} rejected/s`,
+          `${id}: ${load.acceptedRps} / ${load.capacityRps} admitted requests/s; ${load.incomingRps} incoming/s; ${load.queued} queued`,
         );
       }
       const percent = Math.round(utilization * 100);
@@ -87,10 +87,10 @@ export class NodeStatusLayer {
       meter.root.setAttribute("aria-valuenow", String(Math.min(100, percent)));
       meter.root.setAttribute(
         "aria-valuetext",
-        `${percent}% demand${utilization >= 1 ? ", saturated" : ", available capacity"}. ${descriptions.join(". ")}`,
+        `${percent}% load${utilization >= 1 ? ", saturated" : ", available capacity"}. ${descriptions.join(". ")}`,
       );
       meter.label.textContent = `${percent}%`;
-      meter.title.textContent = `${meter.frame.label} · ${percent}% demand\n${descriptions.join("\n")}`;
+      meter.title.textContent = `${meter.frame.label} · ${percent}% load\n${descriptions.join("\n")}`;
     }
   }
 }

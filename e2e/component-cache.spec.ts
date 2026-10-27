@@ -124,11 +124,16 @@ test("non-database nodes remain visible and selectable when raster decoding fail
     id: "cdn-edge",
     description: "Delivers cached content from the edge.",
   });
+  fallback.instances.push({
+    id: "cache-data",
+    description: "A cache fixture independent of the request walkthrough.",
+    placement: { x: 1300, y: 450 },
+  });
   await page.locator("#source").fill(JSON.stringify(fallback));
   await page.getByRole("button", { name: "Apply", exact: true }).click();
   await page.locator("#panel-close").click();
   await expect(page.locator("#sidebar")).toBeHidden();
-  for (const type of ["compute-server", "webpage", "cache", "cdn"]) {
+  for (const type of ["users", "compute-server", "webpage", "cache", "cdn"]) {
     const visual = page.locator(`[data-renderer-type="${type}"]`);
     await expect(visual.locator(".component-static-base")).toBeVisible();
     await expect(visual.locator(".component-raster")).toHaveCount(0);

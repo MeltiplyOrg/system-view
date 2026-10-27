@@ -1,234 +1,445 @@
 import { describe, expect, test } from "vite-plus/test";
 import { parseDesign, type Design } from "../src/design";
 import { TrafficModel, capacityRps } from "../src/traffic";
+import { hasResponse } from "../src/component-rules";
 
-/** Model designs use explicit budgets so examples test throughput, not incidental default values. */
-function design(
-  instances: Design["instances"],
-  connections: Design["connections"],
-): Design {
+/** Explicit source and service settings make a single request's journey observable. */
+function chain(rate = 1): Design {
   return {
     version: 1,
-    name: "Capacity exercise",
-    instances,
-    connections,
+    name: "Request journey",
+    instances: [
+      { id: "users-source", trafficRps: rate },
+      { id: "web-client", latencyMs: 100 },
+      { id: "compute-api", capacityRps: 8, latencyMs: 100 },
+      { id: "db-data", capacityRps: 4, latencyMs: 100 },
+    ],
+    connections: [
+      { from: "users-source", to: "web-client" },
+      { from: "web-client", to: "compute-api" },
+      { from: "compute-api", to: "db-data" },
+    ],
     clusters: [],
   };
 }
 
-/** Settle a small graph's pipeline without depending on browser clocks. */
-function settle(model: TrafficModel, rate: number, steps = 8) {
-  for (let tick = 0; tick < steps; tick++) model.step(rate);
-  return model.snapshot();
+/** Advance in bounded frames, as the app does, and return an immutable observation. */
+function advance(model: TrafficModel, seconds: number) {
+  for (let time = 0; time < seconds - 1e-8; time += 0.05)
+    model.step(Math.min(0.05, seconds - time));
+  return structuredClone(model.snapshot());
 }
 
-describe("request capacity", () => {
-  test("rejects overload before forwarding and recovers when demand drops", () => {
-    const model = new TrafficModel(
-      design(
-        [
-          { id: "web-entry" },
-          { id: "compute-api", capacityRps: 100 },
-          { id: "db-data", capacityRps: 200 },
-        ],
-        [
-          { from: "web-entry", to: "compute-api" },
-          { from: "compute-api", to: "db-data" },
-        ],
-      ),
-    );
-    settle(model, 150);
-    expect(
-      model.snapshot().find((node) => node.id === "compute-api"),
-    ).toMatchObject({
-      incomingRps: 150,
-      acceptedRps: 100,
-      rejectedRps: 50,
-      utilization: 1.5,
+describe("individual requests", () => {
+  test("one request travels Users → Frontend → Backend → Database in order", () => {
+    const model = new TrafficModel(chain());
+    const emitted = advance(model, 1.02);
+    expect(emitted.generated).toBe(1);
+    expect(emitted.requests).toHaveLength(1);
+    expect(emitted.requests[0]).toMatchObject({
+      requestId: 1,
+      connectionIndex: 0,
     });
+    expect(emitted.requests[0].progress).toBeGreaterThan(0);
+    expect(emitted.requests[0].progress).toBeLessThan(1);
+    const next = advance(model, 0.15);
     expect(
-      model.snapshot().find((node) => node.id === "db-data"),
-    ).toMatchObject({
-      incomingRps: 100,
-      acceptedRps: 100,
-      rejectedRps: 0,
-      utilization: 0.5,
+      next.requests.find((packet) => packet.requestId === 1)?.connectionIndex,
+    ).toBe(1);
+    expect(next.loads.find((load) => load.id === "db-data")?.incomingRps).toBe(
+      0,
+    );
+    const backend = advance(model, 0.15);
+    expect(
+      backend.requests.find((packet) => packet.requestId === 1)
+        ?.connectionIndex,
+    ).toBe(2);
+    const databaseReply = advance(model, 0.15);
+    expect(
+      databaseReply.requests.find((packet) => packet.requestId === 1),
+    ).toMatchObject({ connectionIndex: 2, direction: "response" });
+    expect(databaseReply.completed).toBe(0);
+    const backendReply = advance(model, 0.05);
+    expect(
+      backendReply.requests.find((packet) => packet.requestId === 1),
+    ).toMatchObject({ connectionIndex: 1, direction: "response" });
+    const frontendReply = advance(model, 0.05);
+    expect(
+      frontendReply.requests.find((packet) => packet.requestId === 1),
+    ).toMatchObject({ connectionIndex: 0, direction: "response" });
+    const delivered = advance(model, 0.05);
+    expect(delivered.requests.some((packet) => packet.requestId === 1)).toBe(
+      false,
+    );
+    expect(delivered.completed).toBe(1);
+    expect(delivered.metrics.p95Ms).toBeCloseTo(600, 6);
+  });
+
+  test("traffic comes only from Users and zero-rate sources stay silent", () => {
+    const silent = new TrafficModel(chain(0));
+    expect(advance(silent, 5).generated).toBe(0);
+    const sourceFree = chain();
+    sourceFree.instances.shift();
+    sourceFree.connections.shift();
+    expect(advance(new TrafficModel(sourceFree), 5).requests).toEqual([]);
+  });
+
+  test("each source retains its own traffic setting independent of frame size", () => {
+    const design = chain(2);
+    design.instances.push({ id: "users-second", trafficRps: 1 });
+    design.connections.push({ from: "users-second", to: "web-client" });
+    const small = new TrafficModel(design),
+      large = new TrafficModel(design);
+    const a = advance(small, 3.25);
+    for (let i = 0; i < 13; i++) large.step(0.25);
+    const b = large.snapshot();
+    expect(a.generated).toBe(9);
+    expect(b.generated).toBe(a.generated);
+    expect(
+      b.requests.map((packet) => [packet.requestId, packet.connectionIndex]),
+    ).toEqual(
+      a.requests.map((packet) => [packet.requestId, packet.connectionIndex]),
+    );
+    for (let i = 0; i < b.requests.length; i++)
+      expect(b.requests[i].progress).toBeCloseTo(a.requests[i].progress, 7);
+  });
+
+  test("saturated nodes stay at 100% and queue excess arrivals instead of rejecting them", () => {
+    const design = chain(10);
+    design.instances[2].capacityRps = 1;
+    const model = new TrafficModel(design);
+    const loaded = advance(model, 4);
+    expect(loaded.rejected).toBe(0);
+    const backend = loaded.loads.find((load) => load.id === "compute-api")!;
+    expect(backend.queued).toBeGreaterThan(0);
+    expect(backend.utilization).toBe(1);
+    expect(
+      loaded.loads.every(
+        (load) => load.utilization >= 0 && load.utilization <= 1,
+      ),
+    ).toBe(true);
+    expect(loaded.flows[2].rateRps).toBeLessThanOrEqual(2);
+    expect(
+      loaded.requests.every(
+        (packet) => packet.progress >= 0 && packet.progress <= 1,
+      ),
+    ).toBe(true);
+    const paused = structuredClone(model.snapshot());
+    expect(model.snapshot()).toEqual(paused);
+    const reset = new TrafficModel(design).snapshot();
+    expect(reset.generated).toBe(0);
+    expect(reset.requests).toEqual([]);
+  });
+
+  test("FIFO waiting requests resume in arrival order when processing budget becomes available", () => {
+    const design = chain(4);
+    design.instances[2].capacityRps = 1;
+    const model = new TrafficModel(design, {
+      p95Ms: 60_000,
+      p99Ms: 60_000,
+      errorRate: 1,
     });
-    settle(model, 20);
+    const waiting = advance(model, 0.8);
     expect(
-      model.snapshot().find((node) => node.id === "compute-api"),
-    ).toMatchObject({
-      incomingRps: 20,
-      rejectedRps: 0,
-      utilization: 0.2,
+      waiting.loads.find((load) => load.id === "compute-api")?.queued,
+    ).toBe(1);
+    expect(
+      waiting.requests.find((packet) => packet.requestId === 2),
+    ).toMatchObject({ phase: "queued", progress: 1 });
+    const resumed = advance(model, 0.77);
+    expect(
+      resumed.requests.find((packet) => packet.requestId === 2),
+    ).toMatchObject({ connectionIndex: 2, direction: "request" });
+    expect(
+      resumed.requests.some(
+        (packet) => packet.requestId === 3 && packet.connectionIndex === 2,
+      ),
+    ).toBe(false);
+    const next = advance(model, 1);
+    expect(
+      next.requests.find((packet) => packet.requestId === 3),
+    ).toMatchObject({ connectionIndex: 2, direction: "request" });
+    expect(next.rejected).toBe(0);
+  });
+
+  test("a load balancer sends each request to one backend, not both", () => {
+    const design = chain(2);
+    design.instances = [
+      { id: "users-source", trafficRps: 2 },
+      { id: "web-client" },
+      { id: "lb-router" },
+      { id: "compute-a" },
+      { id: "compute-b" },
+    ];
+    design.connections = [
+      { from: "users-source", to: "web-client" },
+      { from: "web-client", to: "lb-router" },
+      { from: "lb-router", to: "compute-a" },
+      { from: "lb-router", to: "compute-b" },
+    ];
+    const loaded = advance(new TrafficModel(design), 4);
+    const ids = loaded.requests.map((packet) => packet.requestId);
+    expect(new Set(ids).size).toBe(ids.length);
+    expect(loaded.flows[2].rateRps).toBe(1);
+    expect(loaded.flows[3].rateRps).toBe(1);
+  });
+
+  test("request lifetime and actor limits bound cyclic or exploding designs", () => {
+    const design = chain(0.05);
+    design.connections.push({ from: "db-data", to: "compute-api" });
+    const state = advance(new TrafficModel(design), 60);
+    expect(state.rejected).toBeGreaterThan(0);
+    expect(state.requests.length).toBeLessThanOrEqual(512);
+    const many = chain(20);
+    many.instances = [
+      { id: "users-source", trafficRps: 20 },
+      { id: "web-client" },
+      ...Array.from({ length: 160 }, (_, i) => ({ id: `compute-${i}` })),
+    ];
+    many.connections = [
+      { from: "users-source", to: "web-client" },
+      ...many.instances
+        .slice(2)
+        .map((node) => ({ from: "web-client", to: node.id })),
+    ];
+    const bounded = advance(new TrafficModel(many), 4);
+    expect(bounded.limited).toBeGreaterThan(0);
+    expect(bounded.requests.length).toBeLessThanOrEqual(512);
+  });
+
+  test("newly placed Users emit real requests, while invalid time cannot advance them", () => {
+    const design = chain();
+    delete design.instances[0].trafficRps;
+    const model = new TrafficModel(design);
+    expect(advance(model, 1.02).requests[0]).toMatchObject({
+      requestId: 1,
+      connectionIndex: 0,
     });
-    settle(model, 0);
-    expect(model.snapshot().every((node) => node.incomingRps === 0)).toBe(true);
+    const before = structuredClone(model.snapshot());
+    for (const dt of [-1, NaN, Infinity, 2])
+      expect(() => model.step(dt)).toThrow(/Simulation step/);
+    expect(model.snapshot()).toEqual(before);
+    model.step(0);
+    expect(model.snapshot()).toEqual(before);
   });
 
-  test("load balancing spreads demand while downstream dependencies receive accepted work", () => {
-    const model = new TrafficModel(
-      design(
-        [
-          { id: "web-entry" },
-          { id: "lb-entry", capacityRps: 1000 },
-          { id: "compute-one", capacityRps: 100 },
-          { id: "compute-two", capacityRps: 100 },
-          { id: "db-shared", capacityRps: 1000 },
-          { id: "cache-disconnected", capacityRps: 100 },
-        ],
-        [
-          { from: "web-entry", to: "lb-entry" },
-          { from: "lb-entry", to: "compute-one" },
-          { from: "lb-entry", to: "compute-two" },
-          { from: "compute-one", to: "db-shared" },
-          { from: "compute-two", to: "db-shared" },
-        ],
+  test("Run begins with real traffic immediately and processing stays visible without changing simulated latency", () => {
+    const model = new TrafficModel(chain());
+    expect(model.begin().requests[0]).toMatchObject({
+      requestId: 1,
+      progress: 0,
+      phase: "request",
+    });
+    expect(model.snapshot().time).toBe(1);
+    expect(advance(model, 0.1).requests[0]).toMatchObject({
+      requestId: 1,
+      progress: 1,
+      phase: "processing",
+    });
+    const completed = advance(model, 0.51);
+    expect(completed.generated).toBe(1);
+    expect(completed.completed).toBe(1);
+    expect(completed.metrics.p95Ms).toBeCloseTo(600, 6);
+    expect(advance(model, 0.4).generated).toBe(2);
+    expect(new TrafficModel(chain(0)).begin().generated).toBe(0);
+  });
+
+  test("an error-rate breach crashes the system and freezes it until reset", () => {
+    const design = chain(2);
+    design.connections = [];
+    const model = new TrafficModel(design);
+    const state = advance(model, 2);
+    expect(state.generated).toBe(1);
+    expect(state.completed).toBe(0);
+    expect(state.rejected).toBe(1);
+    expect(state.metrics).toMatchObject({ samples: 1, errorRate: 1 });
+    expect(state.crash).toEqual({ at: 0.5, breaches: ["errorRate"] });
+    model.step(1);
+    expect(model.snapshot()).toEqual(state);
+    const reset = new TrafficModel(design).snapshot();
+    expect(reset.crash).toBeNull();
+    expect(reset.metrics.samples).toBe(0);
+  });
+
+  test("one-way queue deliveries never invent return traffic and do not hold the HTTP response", () => {
+    const design = chain();
+    design.instances[3] = { id: "queue-jobs" };
+    design.instances.push({ id: "worker-job" });
+    design.connections[2] = { from: "compute-api", to: "queue-jobs" };
+    design.connections.push({ from: "queue-jobs", to: "worker-job" });
+    const model = new TrafficModel(design);
+    let sawDelivery = false,
+      sawHttpResponse = false;
+    for (let i = 0; i < 120; i++) {
+      const state = model.step(0.1);
+      for (const packet of state.requests) {
+        if (packet.connectionIndex >= 2) {
+          sawDelivery = true;
+          expect(packet.direction).toBe("request");
+        }
+        if (
+          packet.requestId === 1 &&
+          packet.connectionIndex === 1 &&
+          packet.direction === "response"
+        )
+          sawHttpResponse = true;
+      }
+    }
+    expect(sawDelivery).toBe(true);
+    expect(sawHttpResponse).toBe(true);
+    expect(model.snapshot().flows[2].responseRps).toBe(0);
+    expect(model.snapshot().flows[3].responseRps).toBe(0);
+  });
+
+  test("fan-out waits for every dependency response before replying upstream", () => {
+    const design = chain();
+    design.instances[3].latencyMs = 500;
+    design.instances.push({ id: "cache-fast", latencyMs: 100 });
+    design.connections.push({ from: "compute-api", to: "cache-fast" });
+    const model = new TrafficModel(design);
+    const waiting = advance(model, 1.8);
+    expect(
+      waiting.requests.filter(
+        (packet) =>
+          packet.requestId === 1 &&
+          packet.direction === "response" &&
+          packet.connectionIndex === 1,
       ),
-    );
-    settle(model, 160);
+    ).toHaveLength(0);
+    const replied = advance(model, 0.12);
     expect(
-      model.snapshot().find((node) => node.id === "compute-one")?.incomingRps,
-    ).toBe(80);
-    expect(
-      model.snapshot().find((node) => node.id === "compute-two")?.incomingRps,
-    ).toBe(80);
-    expect(
-      model.snapshot().find((node) => node.id === "db-shared")?.incomingRps,
-    ).toBe(160);
-    expect(
-      model.snapshot().find((node) => node.id === "cache-disconnected")
-        ?.incomingRps,
-    ).toBe(0);
+      replied.requests.find((packet) => packet.requestId === 1),
+    ).toMatchObject({ connectionIndex: 1, direction: "response" });
   });
 
-  test("a single total ingress budget is shared by clients, not multiplied per client", () => {
-    const model = new TrafficModel(
-      design(
-        [
-          { id: "web-one" },
-          { id: "web-two" },
-          { id: "compute-api", capacityRps: 1000 },
-        ],
-        [
-          { from: "web-one", to: "compute-api" },
-          { from: "web-two", to: "compute-api" },
-        ],
-      ),
-    );
-    settle(model, 120);
-    expect(model.snapshot()[0].incomingRps).toBe(120);
+  test("latency percentiles include real FIFO waiting and count root responses once", () => {
+    const design = chain(2);
+    design.instances[2].capacityRps = 1;
+    const model = new TrafficModel(design, {
+      p95Ms: 60_000,
+      p99Ms: 60_000,
+      errorRate: 1,
+    });
+    const state = advance(model, 22);
+    expect(state.metrics.samples).toBe(21);
+    expect(state.metrics.p95Ms).toBeCloseTo(10_100, 5);
+    expect(state.metrics.p99Ms).toBeCloseTo(10_600, 5);
+    expect(state.metrics.errorRate).toBe(0);
   });
 
-  test("cycles have finite lifetimes and cannot retain stopped traffic forever", () => {
-    const model = new TrafficModel(
-      design(
-        [
-          { id: "web-entry" },
-          { id: "compute-a", capacityRps: 1000 },
-          { id: "compute-b", capacityRps: 1000 },
-        ],
-        [
-          { from: "web-entry", to: "compute-a" },
-          { from: "compute-a", to: "compute-b" },
-          { from: "compute-b", to: "compute-a" },
-        ],
-      ),
+  test.each(["p95Ms", "p99Ms"] as const)(
+    "%s independently crashes only after a completed call exceeds its limit",
+    (key) => {
+      const limits = {
+        p95Ms: 60_000,
+        p99Ms: 60_000,
+        errorRate: 1,
+        [key]: 599,
+      };
+      const model = new TrafficModel(chain(), limits);
+      expect(advance(model, 1.5).crash).toBeNull();
+      const crashed = advance(model, 0.2);
+      expect(crashed.crash?.breaches).toEqual([key]);
+      expect(crashed.crash?.at).toBeCloseTo(1.6, 8);
+      expect(model.step(0.5)).toEqual(crashed);
+      const boundary = advance(
+        new TrafficModel(chain(), { p95Ms: 600, p99Ms: 600, errorRate: 0 }),
+        1.7,
+      );
+      expect(boundary.crash).toBeNull();
+    },
+  );
+
+  test("error rate counts root outcomes, not dependency branches or generated calls still pending", () => {
+    const design = chain();
+    design.instances.push({ id: "users-unwired", trafficRps: 1 });
+    const state = advance(
+      new TrafficModel(design, { p95Ms: 60_000, p99Ms: 60_000, errorRate: 1 }),
+      2.1,
     );
-    settle(model, 10, 40);
-    expect(
-      model.snapshot().find((node) => node.id === "compute-a")!.incomingRps,
-    ).toBeGreaterThan(10);
-    settle(model, 0, 40);
-    expect(model.snapshot().every((node) => node.incomingRps === 0)).toBe(true);
+    expect(state.metrics.samples).toBe(3);
+    expect(state.metrics.errorRate).toBe(2 / 3);
+    expect(state.metrics.p95Ms).toBeCloseTo(600, 6);
   });
 
-  test("without clients ingress enters graph roots while rootless cycles stay idle", () => {
-    const model = new TrafficModel(
-      design(
-        [
-          { id: "compute-root", capacityRps: 100 },
-          { id: "db-next", capacityRps: 100 },
-          { id: "compute-cycle-a", capacityRps: 100 },
-          { id: "compute-cycle-b", capacityRps: 100 },
-        ],
-        [
-          { from: "compute-root", to: "db-next" },
-          { from: "compute-cycle-a", to: "compute-cycle-b" },
-          { from: "compute-cycle-b", to: "compute-cycle-a" },
-        ],
-      ),
-    );
-    settle(model, 40);
-    expect(
-      model.snapshot().find((node) => node.id === "compute-root")?.incomingRps,
-    ).toBe(40);
-    expect(
-      model.snapshot().find((node) => node.id === "db-next")?.incomingRps,
-    ).toBe(40);
-    expect(
-      model.snapshot().find((node) => node.id === "compute-cycle-a")
-        ?.incomingRps,
-    ).toBe(0);
-    for (const rate of [-1, NaN, Infinity])
-      expect(() => model.step(rate)).toThrow(/nonnegative/);
-    expect(
-      model.snapshot().find((node) => node.id === "db-next")?.incomingRps,
-    ).toBe(40);
+  test("rolling metrics expire old outcomes and report unknown until a response completes", () => {
+    const model = new TrafficModel(chain(0.01));
+    expect(model.snapshot().metrics).toEqual({
+      p95Ms: null,
+      p99Ms: null,
+      errorRate: null,
+      samples: 0,
+    });
+    expect(advance(model, 107).metrics.samples).toBe(1);
+    expect(advance(model, 31).metrics).toEqual({
+      p95Ms: null,
+      p99Ms: null,
+      errorRate: null,
+      samples: 0,
+    });
   });
 
-  test("conditional rate splits converge without multiplying the original ingress", () => {
-    const model = new TrafficModel(
-      design(
-        [
-          { id: "web-entry" },
-          { id: "branch-route" },
-          { id: "compute-a", capacityRps: 100 },
-          { id: "compute-b", capacityRps: 100 },
-          { id: "merge-results" },
-          { id: "db-final", capacityRps: 1000 },
-        ],
-        [
-          { from: "web-entry", to: "branch-route" },
-          { from: "branch-route", to: "compute-a", outlet: "true" },
-          { from: "branch-route", to: "compute-b", outlet: "false" },
-          { from: "compute-a", to: "merge-results" },
-          { from: "compute-b", to: "merge-results" },
-          { from: "merge-results", to: "db-final" },
-        ],
-      ),
-    );
-    settle(model, 80);
-    expect(
-      model.snapshot().find((node) => node.id === "compute-a")?.incomingRps,
-    ).toBe(40);
-    expect(
-      model.snapshot().find((node) => node.id === "compute-b")?.incomingRps,
-    ).toBe(40);
-    expect(
-      model.snapshot().find((node) => node.id === "db-final")?.incomingRps,
-    ).toBe(80);
+  test("invalid crash limits cannot silently disable threshold detection", () => {
+    for (const limits of [
+      { p95Ms: 0, p99Ms: 1, errorRate: 0 },
+      { p95Ms: 1, p99Ms: Infinity, errorRate: 0 },
+      { p95Ms: 1, p99Ms: 1, errorRate: NaN },
+      { p95Ms: 1, p99Ms: 1, errorRate: -0.1 },
+      { p95Ms: 1, p99Ms: 1, errorRate: 1.1 },
+    ])
+      expect(() => new TrafficModel(chain(), limits)).toThrow(/Crash limits/);
   });
 
-  test("capacity budgets round-trip and cannot be attached to non-service nodes", () => {
-    const valid = design([{ id: "compute-api", capacityRps: 250 }], []);
-    expect(parseDesign(JSON.stringify(valid)).instances[0].capacityRps).toBe(
-      250,
+  test("source rate round-trips only on Users, capacity stays on services", () => {
+    expect(parseDesign(JSON.stringify(chain(3))).instances[0].trafficRps).toBe(
+      3,
     );
-    for (const value of [0, -1, 1_000_001, "100"]) {
+    expect(capacityRps({ id: "users-source" })).toBeNull();
+    for (const value of [-1, 21, "3"])
       expect(() =>
         parseDesign(
-          JSON.stringify(
-            design([{ id: "compute-api", capacityRps: value as number }], []),
-          ),
+          JSON.stringify({
+            ...chain(),
+            instances: [{ id: "users-source", trafficRps: value }],
+          }),
+        ),
+      ).toThrow(/trafficRps/);
+    expect(() =>
+      parseDesign(
+        JSON.stringify({
+          ...chain(),
+          instances: [{ id: "web-client", trafficRps: 1 }],
+        }),
+      ),
+    ).toThrow(/trafficRps/);
+    expect(() =>
+      parseDesign(
+        JSON.stringify({
+          ...chain(),
+          instances: [{ id: "users-source", capacityRps: 1 }],
+        }),
+      ),
+    ).toThrow(/capacityRps/);
+    for (const capacityRps of [0, -1, 1_000_001, "100"])
+      expect(() =>
+        parseDesign(
+          JSON.stringify({
+            ...chain(),
+            instances: [{ id: "compute-api", capacityRps }],
+          }),
         ),
       ).toThrow(/capacityRps/);
-    }
-    for (const id of ["web-entry", "branch-check", "merge-result"]) {
-      expect(capacityRps({ id })).toBeNull();
-      expect(() =>
-        parseDesign(JSON.stringify(design([{ id, capacityRps: 100 }], []))),
-      ).toThrow(/capacityRps/);
-    }
+  });
+  test("same-store replication is one-way but database/cache queries return responses", () => {
+    expect(hasResponse({ id: "db-primary" }, { id: "db-replica" })).toBe(false);
+    expect(hasResponse({ id: "cache-primary" }, { id: "cache-replica" })).toBe(
+      false,
+    );
+    expect(hasResponse({ id: "db-primary" }, { id: "cache-primary" })).toBe(
+      true,
+    );
+    expect(hasResponse({ id: "cache-primary" }, { id: "db-primary" })).toBe(
+      true,
+    );
   });
 });

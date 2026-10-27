@@ -1,6 +1,7 @@
 import { readFileSync } from "node:fs";
 import { expect, test, type Page } from "@playwright/test";
 import type { Design } from "../src/design";
+import { groundPoint } from "./ground-point";
 
 test.use({ viewport: { width: 1440, height: 1000 } });
 
@@ -57,7 +58,8 @@ async function hit(page: Page, id: string): Promise<{ x: number; y: number }> {
 
 /** Group editing is contextual; the component shelf is never repurposed for management. */
 async function manageGroups(page: Page): Promise<void> {
-  await page.mouse.click(20, 80, { button: "right" });
+  const point = await groundPoint(page);
+  await page.mouse.click(point.x, point.y, { button: "right" });
   await page.getByRole("menuitem", { name: "Select nodes to group…" }).click();
   await expect(page.locator("#build-body")).toBeHidden();
   await expect(page.locator(".world-edit-panel")).toBeVisible();

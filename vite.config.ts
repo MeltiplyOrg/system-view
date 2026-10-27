@@ -61,6 +61,7 @@ export default defineConfig({
         "src/flow-node-editor.ts",
         "src/traffic-controls.ts",
         "src/node-status.ts",
+        "src/wire-actions.ts",
         "src/scene.ts",
         "src/component-raster.ts",
         "src/transformer.ts",

@@ -48,9 +48,10 @@ this guide adds the app's mechanics.
 | Queue/storage/worker and workflow models          | `src/media-models.ts`                                      | `src/media-provider-marks.ts`, `src/components.ts`, `src/providers.ts`           |
 | Junction conditions and merge mode                | `src/flow-node-editor.ts`                                  | parser-backed design annotations; `src/main.ts` inspector                        |
 | Orthogonal cable routing                          | `src/routing.ts`                                           | `src/scene.ts` obstacles and ports                                               |
-| Request-rate model and service budgets            | `src/traffic.ts`, `src/design.ts`                          | `tests/traffic.test.ts`, inspector capacity input                                |
+| Individual requests and service capacity          | `src/traffic.ts`, `src/design.ts`                          | `tests/traffic.test.ts`, Users/source and capacity inspectors                    |
 | Ground-frame capacity meters                      | `src/node-status.ts`                                       | `src/scene.ts`, `src/style.css`                                                  |
 | Traffic controls and visibility-aware clock       | `src/traffic-controls.ts`                                  | `src/main.ts` applied-document synchronization                                   |
+| Wire hover/keyboard cut control                   | `src/wire-actions.ts`                                      | `src/construction.ts`, applied document commits                                  |
 
 ## Render pass
 
@@ -87,6 +88,9 @@ One pass explains where most edits belong:
   `storage`/`bucket` → object storage, `worker`/`encoder` → media worker,
   `lb`/`balancer`/`loadbalancer` → load balancer,
   `branch`/`condition` → If/Else, `merge`/`join` → Merge; unknown → database.
+- `user`/`users` selects the Users crowd renderer. Users is an explicit source,
+  wires only to frontend clients, accepts no incoming wire and has no replica
+  stepper or capacity bar. Its static artwork uses the normal shared raster cache.
 - `layoutDesign` is deterministic from the document alone. Explicit sites
   override automatic slots; a pinned first replica anchors the default slots
   of newly added members. Existing explicit sites never silently repack.
@@ -214,9 +218,9 @@ One pass explains where most edits belong:
 
 - This is an educational system-design sandbox, not an integration platform.
   Provider skins never connect to external apps. No real uploads, transcoding,
-  databases or cloud APIs run. `TrafficModel` now models routed request rates
-  and service saturation; cable pulses remain illustrative direction markers,
-  not individual request actors. There is no payload injection or trace viewer.
+  databases or cloud APIs run. `TrafficModel` models individual request journeys
+  and service saturation. A rendered circle is one request branch with a stable
+  request ID, not a rate sample, repeated dash or colored copy of a wire.
 - The editable media-app reference remains in Design → Reference design. It
   illustrates video/image routing, parallel original/processing paths, a
   queue/worker topology, publication and CDN playback.
@@ -237,36 +241,86 @@ One pass explains where most edits belong:
 - Capacity-limited machines expose a requests/s budget in the inspector.
   `capacityRps` is optional, persisted through import/export and inherited by
   replicas. The parser accepts finite budgets from 1 to 1,000,000 and rejects
-  budgets on clients, If/Else and Merge. Omission uses illustrative type defaults,
-  never a vendor performance claim. Existing `latencyMs` annotations remain
-  passive; typed connection and replica restrictions are unchanged.
+  budgets on Users, clients, If/Else and Merge. Omission uses illustrative type
+  defaults, never a vendor performance claim. `latencyMs` now controls service
+  processing time; typed connection and replica restrictions are unchanged.
 
 ### Traffic capacity and ground status
 
-- Traffic controls start paused. Run/Pause preserves the current pipeline;
-  Reset clears all demand. Ingress is one total requests/s budget shared across
-  client nodes, or zero-indegree nodes if no client exists. Nodes disconnected
-  from these sources stay idle. Rootless cycles receive no generated traffic.
-- A single 250 ms interval advances one hop per sample. Hidden pages stop it
-  without catch-up. Capacity clamps accepted throughput before forwarding;
-  excess is reported as rejected requests/s. This is a rate exercise, not a
-  latency, cache-hit, byte-storage, or persistent queue-backlog simulation.
-- Load balancers and If/Else split evenly across wired outputs. Other nodes
-  fan out to dependencies, Merge sums incoming rates. Predicates and merge
-  synchronization are not executed. Rate cohorts expire after 32 hops so
-  cyclic topologies drain after ingress stops and work stays bounded.
+- The boot walkthrough is Users → Frontend → Backend → Database. Only Users
+  emit requests; neither clients nor zero-indegree services implicitly generate
+  traffic. Other structural examples remain idle until a Users source is wired.
+- Select Users to edit persisted `trafficRps` in its detail HUD. Each source is
+  independent: finite 0–20 requests/s, default 1; zero disables that source.
+  The small cap makes every request visible without weighted/sampled markers.
+- All engine timing is simulated seconds, independent of wall-clock playback.
+  Run defaults to 0.1× slow motion; 1× and 10× change only the rate of clock
+  advancement. Step always advances 10 simulated milliseconds. Initial Run skips
+  the empty interval before the first real source emission, not processing work.
+  Reset clears requests/counters. The sole RAF samples at most 30Hz, stops while
+  paused/hidden/crashed, and never catches up a stalled page. Source/graph edits
+  reset obsolete work.
+- Each network leg takes 50 simulated milliseconds, not its animation duration.
+  Request arrivals wait FIFO for
+  target capacity tokens, then process for `latencyMs` (default 100ms). Queue
+  waiting adds to end-to-end latency; saturation alone never rejects a request.
+  Only the queue head wakes for the next token, so arrivals cannot jump the line.
+  Responses bypass capacity and do not trigger downstream calls again. Simulated
+  one-second arrival/admission windows drive meters and directional wire counts.
+- Interactive connections have two neutral lanes: solid request dots travel
+  downstream, hollow response rings travel upstream with the same request ID.
+  A node waits for every synchronous dependency response before replying on its
+  incoming connection. TTL/admission-limit errors unwind as red response rings,
+  never successful deliveries. Root success counts only upon response arrival.
+- Queue-incident edges and database→database/cache→cache replication are one-way.
+  These handoffs detach at dispatch, never hold their caller open and have no
+  return lane. Their completed deliveries also count in the HUD; fan-out can
+  therefore produce more deliveries than generated root requests.
+- Users, balancers and If/Else choose one output round-robin; other dependencies
+  fan out separate branches retaining the request ID. Predicates, merge
+  synchronization, cache hit logic and durable broker/backlog storage are not
+  executed.
+- A 32-hop TTL rejects cycles and unwinds waiting callers. At most 512 travelling,
+  queued, processing or waiting calls are retained; excess admissions increment
+  the limit-drop counter and fail the parent. Rendering pools circles by call
+  identity and interpolates precomputed lane arc lengths without geometry reads.
 - Every eligible standalone frame gets one bar lying along its front
   (y=max) grid-border side. Both endpoints are projected on the ground plane, so the
   bar follows the border's isometric angle rather than screen-horizontal space.
-  Replica frames show the worst member's demand/capacity ratio, never an average
-  that could hide a failed member. Clients and routing fittings have no bars.
-  Green means headroom; red means saturation. Percentages may exceed 100%;
-  accessible meter text includes each member's capacity and rejected rate.
+  Replica frames show the worst member's admitted-rate/capacity ratio, never an
+  average that could hide saturation. Load is clamped to 0–100%; pending FIFO
+  work keeps it at 100%. Users, clients and routing fittings have no bars.
+  Green means headroom; red means saturation. Accessible text includes admitted
+  and incoming rates, capacity and queued count. The HUD also totals node queues.
 - `NodeStatusLayer` stays outside the artwork raster cache. It uses expanded
-  frame bounds from the same scene margin helper as routing; world moves rebuild
-  positions, while traffic samples only update status attributes and text.
-  Camera movement does not rebuild meters. Applied graph/capacity edits reset
-  the pipeline while preserving the selected rate and run/pause choice.
+  frame bounds from the scene margin helper; world moves rebuild positions,
+  while request frames update circles and sample ground status every 20 simulated
+  milliseconds (5Hz at default playback). A crash forces the final status sample.
+  Camera movement never restarts simulated time. Applied document edits reset
+  requests while preserving Run/Pause; source rates live in the document.
+- Root-call p95/p99 use nearest-rank percentiles over outcomes completed in the
+  last 30 simulated seconds, including wire travel, processing and FIFO waiting.
+  Pending calls are excluded; no samples is unknown (`—`), not zero latency or
+  zero errors. Metrics recompute only when an outcome arrives or expires.
+- Error rate is failed root outcomes / all completed root outcomes, not failures
+  per dependency branch or failures / generated traffic. Unwired sources,
+  admission-limit drops and TTL failures are real simulated errors; no random
+  errors or invented weighted samples are added. Detached async deliveries do
+  not bias caller-response SLOs, although they still count as deliveries.
+- Crash limits are editable session settings in simulated milliseconds: defaults
+  p95 1000ms, p99 2000ms, errors 5%. The boot round trip is 600ms simulated
+  (six 50ms legs plus three 100ms processing delays), even when its slow-motion
+  presentation takes seconds. A measured value strictly
+  above any limit latches a crash with its causes and simulated time; Run and
+  Step disable, the RAF stops, and queued/travelling calls freeze. There is no
+  automatic recovery when old samples expire. Reset/graph edits start a fresh
+  simulation; applying limits explicitly resets it. Limits survive these resets
+  but are not exported as graph data. Reload restores the default limits.
+- Each request remains visible at its arrival socket during queued/processing
+  phases; logical callers waiting on dependencies do not create duplicate dots.
+  Markers stay 10 CSS pixels across through overview zoom and resize, using the
+  cached viewport scale rather than per-frame geometry reads. On mobile during
+  placement, supplementary HUD rows collapse to keep build ground reachable.
 
 ### Geometry and artwork
 
@@ -342,6 +396,23 @@ One pass explains where most edits belong:
 - Ports leave and enter on a fixed outward stub. The router avoids frame
   rectangles, and the final leg meets the border perpendicular. Internal
   same-cluster links stay rack-to-rack and have no border port.
+- External wires keep a neutral jacket/core and endpoint sockets. Only separate
+  `.request-marker` circles carry the traffic accent; no animated wire paths,
+  dash patterns, broad glow or active-wire recoloring remain. More emitted
+  requests create more markers, not a denser repeating CSS texture. Pause holds
+  their exact positions. Reduced-motion users can inspect manually with Step;
+  explicit Run animates the functional simulation in either theme.
+  Lane offsets taper into unchanged logical sockets with short perpendicular
+  leads; shared hit targets and Cut still act on one logical connection.
+- Hover the wide invisible cable hit lane to reveal one small Cut button beside
+  the pointer. Wires are keyboard-focusable; Enter/Space moves focus to Cut,
+  Enter activates it, Escape dismisses it. One transient hide timeout lets the
+  pointer cross to the button. Camera/world edits invalidate its anchor.
+- `disconnectComponents` removes only the exact document-indexed wire, preserving
+  parallel links/outlets. The shell pins current world sites before committing;
+  cutting never repacks nodes or refits the camera. Export and traffic state use
+  the resulting graph; downstream disconnected services go idle. Cut controls
+  are HTML, outside the SVG pan/pointer-capture and artwork raster paths.
 
 ### Raster cache
 

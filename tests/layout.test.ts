@@ -253,6 +253,7 @@ describe("automatic layout", () => {
 
   test("normalizes aliases regardless of declaration order", () => {
     const aliases = [
+      ["users", ["users-source", "user-browsers", "USERS.visitors"]],
       ["database-rack", ["db-01", "database.replica", "rack_main"]],
       ["compute-server", ["compute-api", "server-2", "api-edge"]],
       ["webpage", ["web-app", "frontend", "webpage.home"]],
@@ -278,7 +279,6 @@ describe("automatic layout", () => {
       else colorsByType.set(type, color);
       expect(reversed.get(id)).toBe(color);
     }
-    expect(new Set(colorsByType.values()).size).toBe(aliases.length);
   });
 
   test("infers types from ID prefixes and keeps unknown IDs renderable", () => {

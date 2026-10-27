@@ -93,6 +93,7 @@ const RACK_FALLBACK_BOUNDS: Bounds = {
 };
 
 const RENDERER_TYPES = [
+  "users",
   "database-rack",
   "compute-server",
   "webpage",

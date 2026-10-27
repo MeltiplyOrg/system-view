@@ -8,6 +8,7 @@ import type { PlacedInstance } from "../src/design";
 import { providersFor } from "../src/providers";
 
 const types: PlacedInstance["type"][] = [
+  "users",
   "database-rack",
   "compute-server",
   "webpage",
@@ -85,6 +86,7 @@ describe("component provider boundaries", () => {
 
   test("bounds supported cabinets without losing rooftop geometry from fitting", () => {
     for (const [type, providers] of [
+      ["users", [undefined]],
       [
         "database-rack",
         [undefined, "postgresql", "mysql", "sqlite", "mongodb"],

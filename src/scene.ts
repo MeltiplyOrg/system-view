@@ -25,7 +25,9 @@ import { TransformerTransitions } from "./transformer-transitions";
 import type { TransformerSource } from "./transformer-transitions";
 import type { TransformerEnvelope } from "./transformer-model";
 import { NodeStatusLayer } from "./node-status";
-import { capacityRps, type NodeLoad } from "./traffic";
+import { capacityRps, type NodeLoad, type SimulationSnapshot } from "./traffic";
+import { hasResponse } from "./component-rules";
+import { cableLane, type CableLane } from "./wire-lanes";
 
 const NS = "http://www.w3.org/2000/svg";
 
@@ -851,6 +853,22 @@ export class SystemScene {
   /** Live capacity meters share frame geometry but never enter cached machine pixels. */
   private readonly nodeStatus = new NodeStatusLayer();
   private nodeLoads: readonly NodeLoad[] = [];
+  private trafficState: SimulationSnapshot | null = null;
+  private readonly requestLayer = document.createElementNS(NS, "g");
+  private readonly requestMarkers = new Map<number, SVGCircleElement>();
+  /** Five CSS pixels, converted through the cached viewport so requests remain legible at overview zoom. */
+  private requestRadius = 5;
+  private statusUpdatedAt = -1;
+  private readonly renderedWires = new Map<
+    number,
+    {
+      root: SVGGElement;
+      title: SVGTitleElement;
+      name: string;
+      outbound: CableLane;
+      inbound: CableLane | null;
+    }
+  >();
 
   /**
    * Last design passed to `render`.
@@ -983,7 +1001,16 @@ export class SystemScene {
     this.buildLayer.classList.add("construction-layer");
     this.buildLayer.setAttribute("pointer-events", "none");
     this.buildLayer.setAttribute("aria-hidden", "true");
-    svg.append(databaseDefs, this.grid, this.content, this.buildLayer);
+    this.requestLayer.classList.add("request-layer");
+    this.requestLayer.setAttribute("aria-hidden", "true");
+    this.requestLayer.setAttribute("pointer-events", "none");
+    svg.append(
+      databaseDefs,
+      this.grid,
+      this.content,
+      this.requestLayer,
+      this.buildLayer,
+    );
     this.componentRaster = new ComponentRasterCache(svg);
     this.transformers = new TransformerTransitions(
       this.content,
@@ -1352,6 +1379,7 @@ export class SystemScene {
 
     // Caption lanes still stack links whose drawn route coincides.
     const labelLanes = new Map<string, number>();
+    this.renderedWires.clear();
     for (const plan of linkPlans) {
       const {
         link,
@@ -1447,16 +1475,35 @@ export class SystemScene {
         to: link.to,
         points: projected.map((point) => [point[0], point[1]]),
       });
-      const d = `M${projected[0].join(" ")}${projected
-        .slice(1)
-        .map((point) => `L${point.join(" ")}`)
-        .join("")}`;
+      const duplex = hasResponse(from, to);
+      const outbound = cableLane(projected, duplex ? 7 : 0);
+      const inbound = duplex ? cableLane(projected, -7) : null;
+      const d = cableLane(projected).d;
 
       const group = document.createElementNS(NS, "g");
       group.classList.add("connection");
+      group.classList.toggle("duplex", duplex);
       group.dataset.connectionId = connectionId;
+      group.dataset.connectionIndex = String(index);
+      group.setAttribute("tabindex", "0");
+      group.setAttribute("role", "group");
+      group.setAttribute(
+        "aria-label",
+        `${from.label} to ${to.label}. ${duplex ? "Request and response lanes." : "One-way delivery."} Press Enter for wire actions.`,
+      );
       group.style.setProperty("--cable-color", from.color);
-      group.innerHTML = `<path class="wire-glow" d="${d}"/><path class="wire" d="${d}"/><path class="pulse" pathLength="100" style="--duration:3s;--delay:${-index * 0.6}s" d="${d}"/>`;
+      group.innerHTML = `<path class="wire-under" d="${outbound.d}"/>${inbound ? `<path class="wire-under" d="${inbound.d}"/>` : ""}<path class="wire" d="${outbound.d}"/><path class="wire-core" d="${outbound.d}"/>${inbound ? `<path class="wire-response" d="${inbound.d}"/><path class="wire-core" d="${inbound.d}"/>` : ""}<circle class="wire-port" cx="${projected[0][0]}" cy="${projected[0][1]}" r="2.4"/><circle class="wire-port" cx="${projected.at(-1)![0]}" cy="${projected.at(-1)![1]}" r="2.4"/><path class="wire-hit" d="${d}"/>`;
+      const title = document.createElementNS(NS, "title");
+      const name = `${from.label} → ${to.label}`;
+      title.textContent = name;
+      group.append(title);
+      this.renderedWires.set(index, {
+        root: group,
+        title,
+        name,
+        outbound,
+        inbound,
+      });
       const relation = link.relation ?? link.outlet?.toUpperCase();
       if (relation) {
         const lane = labelLanes.get(d) ?? 0;
@@ -1506,7 +1553,7 @@ export class SystemScene {
           capacityRps: capacity,
           incomingRps: 0,
           acceptedRps: 0,
-          rejectedRps: 0,
+          queued: 0,
           utilization: 0,
         },
       ];
@@ -1707,13 +1754,78 @@ export class SystemScene {
     // An animated render moves geometry without a camera write (node drag,
     // replica edit); let screen-space overlays re-anchor to the new bounds.
     // Non-animated renders fit the camera and already notify view listeners.
+    if (this.trafficState) this.setTraffic(this.trafficState, true);
     if (animate) for (const listener of this.layoutListeners) listener();
   }
 
-  /** Update ground meters without rebuilding paths, moving the camera or invalidating artwork. */
-  setNodeLoads(loads: readonly NodeLoad[]): void {
-    this.nodeLoads = loads;
-    this.nodeStatus.update(loads);
+  /** Draw individual request circles at their actual progress; never recolor or animate a whole cable. */
+  setTraffic(state: SimulationSnapshot, forceStatus = false): void {
+    this.trafficState = state;
+    const visible = new Set<number>();
+    for (const request of state.requests) {
+      const cable = this.renderedWires.get(request.connectionIndex);
+      const wire =
+        request.direction === "response" ? cable?.inbound : cable?.outbound;
+      if (!wire || !wire.total) continue;
+      visible.add(request.id);
+      let marker = this.requestMarkers.get(request.id);
+      if (!marker) {
+        marker = document.createElementNS(NS, "circle");
+        marker.classList.add("request-marker");
+        marker.setAttribute("r", String(this.requestRadius));
+        marker.dataset.requestId = String(request.requestId);
+        const title = document.createElementNS(NS, "title");
+        title.textContent = `Request #${request.requestId}`;
+        marker.append(title);
+        this.requestLayer.append(marker);
+        this.requestMarkers.set(request.id, marker);
+      }
+      marker.dataset.connectionIndex = String(request.connectionIndex);
+      marker.dataset.progress = String(request.progress);
+      marker.dataset.direction = request.direction;
+      marker.dataset.phase = request.phase;
+      marker.classList.toggle("response", request.direction === "response");
+      marker.classList.toggle("failed", request.failed);
+      marker.firstElementChild!.textContent = `${request.direction === "response" ? (request.failed ? "Error response" : "Response") : request.phase === "queued" ? "Queued request" : request.phase === "processing" ? "Processing request" : "Request"} #${request.requestId}`;
+      let distance =
+          (request.direction === "response"
+            ? 1 - request.progress
+            : request.progress) * wire.total,
+        segment = 0;
+      while (
+        segment < wire.lengths.length - 1 &&
+        distance > wire.lengths[segment]
+      ) {
+        distance -= wire.lengths[segment++];
+      }
+      const a = wire.points[segment],
+        b = wire.points[segment + 1];
+      const t = wire.lengths[segment] ? distance / wire.lengths[segment] : 0;
+      marker.setAttribute("cx", String(a[0] + (b[0] - a[0]) * t));
+      marker.setAttribute("cy", String(a[1] + (b[1] - a[1]) * t));
+    }
+    for (const [id, marker] of this.requestMarkers)
+      if (!visible.has(id)) {
+        marker.remove();
+        this.requestMarkers.delete(id);
+      }
+    if (
+      !forceStatus &&
+      !state.crash &&
+      state.time >= this.statusUpdatedAt &&
+      state.time < this.statusUpdatedAt + 0.02
+    )
+      return;
+    this.statusUpdatedAt = state.time;
+    this.nodeLoads = state.loads;
+    this.nodeStatus.update(state.loads);
+    for (const flow of state.flows) {
+      const wire = this.renderedWires.get(flow.index);
+      if (!wire) continue;
+      wire.root.dataset.rateRps = String(flow.rateRps);
+      wire.root.dataset.responseRps = String(flow.responseRps);
+      wire.title.textContent = `${wire.name} · ${flow.rateRps} requests · ${flow.responseRps} responses in the last second`;
+    }
   }
 
   /**
@@ -2817,6 +2929,9 @@ export class SystemScene {
       x = this.center[0] - width / 2,
       y = this.center[1] - height / 2;
     this.svg.setAttribute("viewBox", `${x} ${y} ${width} ${height}`);
+    this.requestRadius = (5 * width) / Math.max(1, this.viewport.width);
+    for (const marker of this.requestMarkers.values())
+      marker.setAttribute("r", String(this.requestRadius));
     // Hysteresis avoids detail flicker while zoom hovers near the cutoff.
     const rackPixels =
       (componentHeight("database-rack") * this.viewport.width) / width;

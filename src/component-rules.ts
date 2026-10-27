@@ -5,6 +5,7 @@ import { inferInstanceType } from "./layout";
 const TARGETS: Readonly<
   Record<PlacedInstance["type"], readonly PlacedInstance["type"][]>
 > = {
+  users: ["webpage"],
   webpage: ["compute-server", "cdn", "object-storage", "load-balancer"],
   "compute-server": [
     "compute-server",
@@ -79,7 +80,9 @@ export function connectionIssue(
   if (!outputPorts(from).includes(outlet))
     return `${source} requires a valid ${outputPorts(from).join(" / ")} output port.`;
   const workflowTarget =
-    (target === "branch" || target === "merge") && source !== "message-queue";
+    (target === "branch" || target === "merge") &&
+    source !== "message-queue" &&
+    source !== "users";
   if (!workflowTarget && !TARGETS[source].includes(target))
     return `${source} cannot connect to ${target}. Choose a compatible destination.`;
   if (source === "database-rack" && target === source) {
@@ -89,6 +92,17 @@ export function connectionIssue(
       return "Different database products cannot connect as replicas.";
   }
   return null;
+}
+
+/** Queue handoffs and same-store replication are one-way; interactive service calls return responses. */
+export function hasResponse(from: DesignInstance, to: DesignInstance): boolean {
+  const source = inferInstanceType(from.id),
+    target = inferInstanceType(to.id);
+  return (
+    source !== "message-queue" &&
+    target !== "message-queue" &&
+    !(source === target && (source === "database-rack" || source === "cache"))
+  );
 }
 
 /** Only machines with a meaningful scaling mechanism expose the replica stepper. Queues and buckets name logical services. */

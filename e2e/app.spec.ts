@@ -65,6 +65,24 @@ async function useDatabaseCluster(page: Page) {
   await expect(page.locator("#sidebar")).toBeHidden();
 }
 
+/** Provider safety scenarios own their cache fixture rather than depending on the boot walkthrough. */
+async function useCacheWorld(page: Page): Promise<void> {
+  await openSidebar(page);
+  await page.locator("#source").fill(
+    JSON.stringify({
+      version: 1,
+      name: "Cache artwork",
+      instances: [
+        { id: "cache-server", label: "Cache server", provider: "redis" },
+      ],
+      connections: [],
+      clusters: [],
+    }),
+  );
+  await page.locator("#apply").click();
+  await page.locator("#panel-close").click();
+}
+
 /**
  * Find a client point that hit-tests inside a rack.
  *
@@ -93,7 +111,7 @@ async function rackPoint(page: Page) {
 }
 
 test.describe("minimal isometric canvas", () => {
-  test("renders the all-renderer boot scene until Design is expanded", async ({
+  test("renders the Users-to-database walkthrough until Design is expanded", async ({
     page,
   }) => {
     await page.goto("/");
@@ -102,18 +120,12 @@ test.describe("minimal isometric canvas", () => {
     await expect(page.locator(".database-rack")).toHaveCount(1);
     await expect(page.locator(".connection")).toHaveCount(3);
     await expect(page.locator(".wire-label")).toHaveText([
+      "USER REQUEST",
       "HTTPS / JSON",
-      "GET / SET",
-      "SQL on miss",
+      "SQL",
     ]);
     await expect(page.locator(".cluster-label")).toHaveCount(0);
     await expect(page.locator(".cluster-frame")).toHaveCount(0);
-    // The boot scene carries the provider skin so the default view exercises
-    // provider artwork alongside all four renderer types.
-    await expect(page.locator('[data-renderer-type="cache"]')).toHaveAttribute(
-      "data-renderer-provider",
-      "redis",
-    );
     await expect(page.locator(".space-grid")).toHaveAttribute("d", /M/);
     await expect(page.locator("#sidebar")).toBeHidden();
     await expect(page.getByRole("button", { name: "Design" })).toBeVisible();
@@ -175,7 +187,7 @@ test.describe("minimal isometric canvas", () => {
     await expect(page.locator("#detail-count")).toHaveText("3");
     await expect(page.locator(".scene-instance")).toHaveCount(6);
     await expect(
-      page.locator('.connection[data-connection-id="cache-server->db-app"]'),
+      page.locator('.connection[data-connection-id="compute-api->db-app"]'),
     ).toHaveAttribute("data-to-cluster", /.+/);
 
     // The promoted cluster must stay to the right of every node declared
@@ -189,12 +201,10 @@ test.describe("minimal isometric canvas", () => {
         cluster: center(".cluster-frame"),
         web: center('[data-instance-id="web-frontend"]'),
         api: center('[data-instance-id="compute-api"]'),
-        cache: center('[data-instance-id="cache-server"]'),
       };
     });
     expect(centers.cluster).toBeGreaterThan(centers.web);
     expect(centers.cluster).toBeGreaterThan(centers.api);
-    expect(centers.cluster).toBeGreaterThan(centers.cache);
   });
 
   test("hovering a cluster reports its summary and follows the pointer", async ({
@@ -667,10 +677,6 @@ test.describe("instance selection", () => {
     await expect(page.locator(".scene-instance")).toHaveCount(10);
     const rackTraffic = page.locator(".database-rack .pulse").first();
     await expect(rackTraffic).toHaveCSS("display", "none");
-    await expect(page.locator(".connection .pulse").first()).not.toHaveCSS(
-      "display",
-      "none",
-    );
     await page.mouse.move(400, 400);
     await page.mouse.wheel(0, -1400);
     await expect(rackTraffic).not.toHaveCSS("display", "none");
@@ -912,6 +918,7 @@ test.describe("provider switching safety", () => {
     }) => {
       await page.emulateMedia({ reducedMotion });
       await page.goto("/");
+      await useCacheWorld(page);
       const cache = page.locator(
         '.scene-instance[data-instance-id="cache-server"]',
       );
@@ -993,6 +1000,7 @@ test.describe("provider switching safety", () => {
   }) => {
     await page.emulateMedia({ reducedMotion: "no-preference" });
     await page.goto("/");
+    await useCacheWorld(page);
     const cache = page.locator(
       '.scene-instance[data-instance-id="cache-server"]',
     );

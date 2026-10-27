@@ -116,6 +116,24 @@ function loadBalancer(): string {
   return art;
 }
 
+/** A seated crowd makes an explicit request source distinct from service hardware. */
+function users(): string {
+  let art = plinth();
+  for (const [x, y, z] of [
+    [-90, -30, 18],
+    [40, -30, 18],
+    [-25, 20, 18],
+  ]) {
+    art += box(x - 4, y - 4, z, 54, 42, 5, 3);
+    art += box(x + 7, y + 7, z + 5, 11, 20, 20, 2);
+    art += box(x + 28, y + 7, z + 5, 11, 20, 20, 2);
+    art += box(x + 1, y + 2, z + 25, 44, 28, 42, 5);
+    art += box(x + 10, y + 3, z + 71, 26, 26, 26, 6);
+    art += `<g transform="${frontFace(x + 1, y + 30, z + 67)}"><path class="detail" d="M10 9v25m24-25v25M18 14h8"/><text class="label" x="17" y="29" font-size="7">U</text></g>`;
+  }
+  return art;
+}
+
 /** Freeze artwork once; every world node and placement ghost shares the normal raster cache. */
 function model(
   markup: string,
@@ -156,12 +174,14 @@ const FFMPEG = model(worker(true), 91, "ffmpeg", topFace(-126, -43, 91));
 const BRANCH = junction(false);
 const MERGE = junction(true);
 const LOAD_BALANCER = model(loadBalancer(), 86);
+const USERS = model(users(), 115);
 
 /** Resolve a media renderer's actual body, height and nameplate as one contract. */
 export function mediaModel(
   type: string,
   provider?: string,
 ): MediaModel | undefined {
+  if (type === "users") return USERS;
   if (type === "load-balancer") return LOAD_BALANCER;
   if (type === "message-queue")
     return provider === "amazon-sqs"
