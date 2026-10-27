@@ -34,11 +34,11 @@ export class NodeStatusLayer {
     for (const frame of frames) {
       if (!frame.members.some((id) => eligible.has(id))) continue;
       const { x, y, width, height } = frame.bounds;
-      const length = Math.min(112, height * 0.42);
-      // Both endpoints lie on the same ground-frame side, so the meter follows
-      // the border's isometric direction instead of screen-horizontal HUD space.
-      const start = project(x + width, y + height - 12, 0);
-      const end = project(x + width, y + height - 12 - length, 0);
+      const length = Math.min(112, width * 0.42);
+      // Follow the front (y=max) border, the other visible side of the footprint.
+      // Both endpoints stay on the ground plane and clear the corner.
+      const start = project(x + width - 12 - length, y + height, 0);
+      const end = project(x + width - 12, y + height, 0);
       const root = document.createElementNS(NS, "g");
       root.dataset.statusFrame = frame.id;
       root.setAttribute("role", "meter");
