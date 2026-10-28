@@ -29,6 +29,7 @@ test("individual request identity travels through the boot journey without light
   page,
 }) => {
   await page.goto("/");
+  await page.locator("#panel-toggle").click();
   const paintOrder = await page.evaluate(() => {
     const requests = document.querySelector(".request-layer");
     const cable = document.querySelector(".connection");
@@ -158,6 +159,7 @@ test("editable p99 crash limits survive reset and can restart a healthy simulati
   page,
 }) => {
   await page.goto("/");
+  await page.locator("#panel-toggle").click();
   await page.getByText("Crash limits", { exact: true }).click();
   await page.locator("#traffic-p95-limit").fill("60000");
   await page.locator("#traffic-p99-limit").fill("2000");
@@ -201,6 +203,10 @@ test("Run advances the fixed simulation clock without a playback control", async
 }) => {
   await page.goto("/");
   await expect(page.locator("#traffic-speed")).toHaveCount(0);
+  await expect(page.locator("#traffic-toggle")).toBeHidden();
+  await expect(page.locator("#simulation-section")).toBeHidden();
+  await page.locator("#panel-toggle").click();
+  await expect(page.locator("#simulation-section")).toContainText("Simulation");
   await page.locator("#traffic-toggle").click();
   await expect(page.locator("#traffic-summary")).toContainText("1 delivered");
   await page.locator("#traffic-toggle").click();

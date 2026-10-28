@@ -348,13 +348,18 @@ a {
   }
 }
 
-/* ---------- floating panel trigger ---------- */
-/* The only persistent chrome: a compact control that expands the overlay. */
-.panel-toggle {
+/* --- floating panel triggers --- */
+/* Persistent stage controls: compact View and Design actions. */
+.top-actions {
   position: fixed;
   top: 18px;
   right: 18px;
   z-index: 20;
+  display: flex;
+  gap: 8px;
+}
+.panel-toggle,
+.view-toggle {
   display: inline-flex;
   align-items: center;
   gap: 9px;
@@ -370,7 +375,8 @@ a {
     transform 0.18s ease,
     border-color 0.18s ease;
 }
-.panel-toggle:hover {
+.panel-toggle:hover,
+.view-toggle:hover {
   border-color: var(--muted);
 }
 .panel-toggle svg {
@@ -385,6 +391,88 @@ a {
   opacity: 0;
   transform: translateY(-4px);
   pointer-events: none;
+}
+.view-toggle[aria-pressed="true"] {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+/* Architecture overview: every node label at once, no editing chrome. */
+.architecture-labels {
+  position: absolute;
+  inset: 0;
+  z-index: 12;
+  display: none;
+  pointer-events: none;
+}
+body.view-mode .architecture-labels {
+  display: block;
+}
+.architecture-label {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 0;
+  height: 0;
+}
+.architecture-label[hidden] {
+  display: none;
+}
+.architecture-label::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: var(--label-line-length, 0px);
+  height: 1px;
+  transform: rotate(var(--label-line-angle, 0deg));
+  transform-origin: left center;
+  background: var(--muted);
+  opacity: 0.45;
+}
+.architecture-label-card {
+  position: absolute;
+  top: var(--label-y, 0px);
+  left: var(--label-x, 0px);
+  display: grid;
+  gap: 1px;
+  width: max-content;
+  max-width: 210px;
+  padding: 5px 8px 6px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: color-mix(in srgb, var(--panel) 94%, transparent);
+  box-shadow: 0 3px 12px color-mix(in srgb, var(--page) 55%, transparent);
+}
+.architecture-kind {
+  color: var(--muted);
+  font: 8px var(--mono);
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+.architecture-name {
+  color: var(--fg);
+  font: 10px/1.35 var(--mono);
+  overflow-wrap: anywhere;
+}
+.architecture-meta {
+  color: var(--muted);
+  font: 8px var(--mono);
+  overflow-wrap: anywhere;
+}
+body.view-mode .panel-toggle,
+body.view-mode .build-dock,
+body.view-mode .world-edit-panel,
+body.view-mode .world-context-menu,
+body.view-mode .iso-credit,
+body.view-mode #detail,
+body.view-mode #sidebar,
+body.view-mode .callout,
+body.view-mode .node-group-header,
+body.view-mode .drag-anchor,
+body.view-mode .request-layer,
+body.view-mode .construction-layer {
+  display: none !important;
 }
 
 /* ---------- sidebar overlay ---------- */
@@ -1529,9 +1617,12 @@ aside.detail.open {
 }
 /* On phones the overlay uses almost the full viewport but keeps an inset frame. */
 @media (max-width: 620px) {
-  .panel-toggle {
+  .top-actions {
     top: 12px;
     right: 12px;
+  }
+  .panel-toggle,
+  .view-toggle {
     height: 36px;
     padding: 0 12px;
   }
@@ -2436,21 +2527,8 @@ aside.detail.open {
   font: 11px var(--mono);
 }
 .traffic-controls {
-  position: absolute;
-  z-index: 9;
-  top: 18px;
-  left: 50%;
-  transform: translateX(-50%);
-  width: 316px;
-  padding: 12px;
-  border: 1px solid var(--border);
-  border-radius: 6px;
-  background: var(--panel);
   color: var(--fg);
   font: 10px/1.6 var(--mono);
-  max-height: calc(100dvh - 170px);
-  overflow-y: auto;
-  overscroll-behavior: contain;
 }
 .traffic-form {
   display: grid;
@@ -2535,9 +2613,6 @@ aside.detail.open {
   color: var(--muted);
   flex-shrink: 0;
 }
-.traffic-controls[data-crashed="true"] {
-  border-color: light-dark(#bf3b3b, #f17a70);
-}
 .traffic-controls[data-crashed="true"] #traffic-health {
   color: light-dark(#bf3b3b, #f17a70);
 }
@@ -2569,16 +2644,7 @@ aside.detail.open {
   line-height: 1.6;
 }
 @media (max-width: 620px) {
-  .traffic-controls {
-    left: 12px;
-    top: 46px;
-    transform: none;
-    width: min(316px, calc(100vw - 24px));
-  }
-  /* Leave touch placement ground reachable while the expanded catalogue owns the bottom half. */
-  body:has(.tool-place)
-    .traffic-controls
-    :is(.traffic-clock, .traffic-metrics, .traffic-health-row, details) {
-    display: none;
+  .traffic-form {
+    gap: 6px;
   }
 }

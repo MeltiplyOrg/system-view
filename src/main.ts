@@ -45,7 +45,7 @@ const app = mustQuery<HTMLDivElement>("#app");
 app.innerHTML = `
   <main class="stage">
     <svg id="scene" xmlns="http://www.w3.org/2000/svg" role="group" aria-labelledby="scene-description" preserveAspectRatio="xMidYMid meet">
-      <desc id="scene-description">Isometric system diagram with linked components and ground-border capacity meters. Pinch or scroll to zoom, drag to move, or open Design to edit JSON and load examples. Select a service to set its capacity. Use Traffic to run simulated request load.</desc>
+      <desc id="scene-description">Isometric system diagram with linked components and ground-border capacity meters. Pinch or scroll to zoom, drag to move, or open Design to edit JSON and load examples. Select a service to set its capacity. Run the simulation from Design.</desc>
     </svg>
     <a class="iso-credit" href="https://iso-glow.vercel.app" target="_blank" rel="noreferrer">Made with ISO-GLOW ↗</a>
     <div id="callout" class="callout" aria-hidden="true">
@@ -106,10 +106,14 @@ app.innerHTML = `
         </section>
       </div>
     </aside>
-    <button id="panel-toggle" class="panel-toggle" type="button" aria-expanded="false" aria-controls="sidebar">
-      <svg viewBox="0 0 14 14" aria-hidden="true"><path d="M2 4h10M2 7h10M2 10h10"/></svg>
-      <span>Design</span>
-    </button>
+    <div class="top-actions">
+      <button id="view-toggle" class="view-toggle" type="button" aria-pressed="false">View</button>
+      <button id="panel-toggle" class="panel-toggle" type="button" aria-expanded="false" aria-controls="sidebar">
+        <svg viewBox="0 0 14 14" aria-hidden="true"><path d="M2 4h10M2 7h10M2 10h10"/></svg>
+        <span>Design</span>
+      </button>
+    </div>
+    <div id="architecture-labels" class="architecture-labels" role="list" aria-label="Architecture labels"></div>
     <aside id="sidebar" class="sidebar" aria-labelledby="editor-title" aria-hidden="true" inert>
       <header class="sidebar-header">
         <div>
@@ -154,6 +158,10 @@ app.innerHTML = `
           <p id="example-hint" class="view-hint" aria-live="polite"></p>
         </section>
 
+        <section id="simulation-section" class="section">
+          <div class="section-label">Simulation</div>
+        </section>
+
         <section class="section">
           <div class="section-label"><span>JSON design</span><span class="hint">⌘↵ apply</span></div>
           <label class="sr-only" for="source">System design JSON</label>
@@ -181,7 +189,7 @@ app.innerHTML = `
           <p>Only supported machines scale: API/compute and worker instances, database/cache replicas, never SQLite server replicas. Clients, CDNs, queues, buckets, If/Else and Merge nodes are logical components, not replicable machines. Replica groups require the same component type and provider. Scale from 1 to 10 within the world limit; new members inherit behavior, not an occupied placement.</p>
           <p>Wires stay neutral; individual requests go out and response rings return. Right-click a wire for Cut or Add node. Add inserts a compatible component between endpoints without moving existing nodes. Select a cache to set hit coverage: 90% serves nine requests locally and sends every tenth downstream. Hits return immediately after cache processing; misses wait for the origin. Focus a wire and press Enter for the same menu.</p>
           <p>This is a visual system-design sandbox: no external integrations, cloud calls, real uploads or transcoding. The editable media-app example is available in the Examples menu.</p>
-          <p>Add Users and wire it to a frontend. Select Users to set traffic (0–20 requests/s), then Run. Each source has its own persisted rate. Every hop between nodes takes a fixed 300ms simulated; Run advances that clock in real time. Step advances 10ms. Load stops at 100% and excess requests wait FIFO. The HUD tracks root-call p95, p99 and errors over 30 simulated seconds; crossing a crash limit freezes the system until Reset. This is an educational model, not a provider benchmark.</p>
+          <p>Add Users and wire it to a frontend. Select Users to set traffic (0–20 requests/s), then Run. Each source has its own persisted rate. Every hop between nodes takes a fixed 300ms simulated; Run advances that clock in real time. Step advances 10ms. Load stops at 100% and excess requests wait FIFO. The Design sidebar tracks root-call p95, p99 and errors over 30 simulated seconds; crossing a crash limit freezes the system until Reset. This is an educational model, not a provider benchmark.</p>
           <p>If/Else and Merge are compact junctions directly on the wires, not machines. Choose TRUE/FALSE in Wire, and select a junction to edit its condition or merge mode. Invalid connection types are rejected in both the builder and JSON imports.</p>
         </section>
       </div>
@@ -220,6 +228,9 @@ const calloutDescription = mustQuery<HTMLElement>(
   "#callout .callout-description",
 );
 const calloutProvider = mustQuery<HTMLElement>("#callout .callout-provider");
+const viewToggle = mustQuery<HTMLButtonElement>("#view-toggle");
+const architectureLabels = mustQuery<HTMLElement>("#architecture-labels");
+let viewMode = false;
 
 const detail = mustQuery<HTMLElement>("#detail");
 const detailProvider = mustQuery<HTMLSelectElement>("#detail-provider");
@@ -931,12 +942,14 @@ detailProvider.addEventListener("change", () => {
   changeProvider(value === "" ? undefined : value);
 });
 
-sceneSvg.addEventListener("pointerover", (event) =>
-  showCallout(event.target, event),
-);
-sceneSvg.addEventListener("pointermove", (event) =>
-  showCallout(event.target, event),
-);
+sceneSvg.addEventListener("pointerover", (event) => {
+  if (viewMode) return;
+  showCallout(event.target, event);
+});
+sceneSvg.addEventListener("pointermove", (event) => {
+  if (viewMode) return;
+  showCallout(event.target, event);
+});
 sceneSvg.addEventListener("pointerleave", () => {
   if (!selectedKey) hideCallout();
 });
@@ -974,6 +987,7 @@ sceneSvg.addEventListener("pointerup", (event) => {
     target = press.target;
   press = null;
   if (moved > 5) return;
+  if (viewMode) return;
   if (sidebar.classList.contains("open")) setPanelOpen(false);
   selectTarget(target);
 });
@@ -1026,7 +1040,215 @@ function syncDesign(): void {
   message.textContent = "Canvas is up to date.";
   builder?.sync(design);
   traffic?.sync(design);
+  if (viewMode) rebuildArchitectureLabels();
 }
+
+/** One measured label in the architecture overview, keyed to a scene target. */
+interface ArchitectureEntry {
+  key: string;
+  element: HTMLDivElement;
+  card: HTMLDivElement;
+  width: number;
+  height: number;
+}
+
+let architectureEntries: ArchitectureEntry[] = [];
+let architectureFrame: number | null = null;
+
+/** Label every logical target once: clusters as pools, everything else individually. */
+function architectureTargets(): {
+  key: string;
+  kind: string;
+  name: string;
+  meta: string;
+}[] {
+  const groupOf = new Map<string, string>();
+  for (const group of current.groups ?? [])
+    for (const id of group.instances) groupOf.set(id, group.label);
+  const clustered = new Set(
+    current.clusters.flatMap((cluster) => cluster.instances),
+  );
+  const targets: { key: string; kind: string; name: string; meta: string }[] =
+    [];
+  for (const [index, cluster] of current.clusters.entries()) {
+    const id = cluster.id ?? `cluster-${index + 1}`,
+      first = current.instances.find(
+        (instance) => instance.id === cluster.instances[0],
+      ),
+      kind =
+        BUILD_TYPES.find(
+          (item) => item.type === inferInstanceType(first?.id ?? ""),
+        )?.label ?? "Cluster";
+    targets.push({
+      key: `cluster:${id}`,
+      kind: groupOf.get(cluster.instances[0])
+        ? `${groupOf.get(cluster.instances[0])} · Cluster`
+        : "Cluster",
+      name: cluster.label ?? id,
+      meta: `${cluster.instances.length} × ${kind}`,
+    });
+  }
+  for (const instance of current.instances) {
+    if (clustered.has(instance.id)) continue;
+    const type = inferInstanceType(instance.id),
+      kind =
+        BUILD_TYPES.find((item) => item.type === type)?.label ??
+        type.replaceAll("-", " "),
+      provider = findProvider(instance.provider, type),
+      group = groupOf.get(instance.id);
+    targets.push({
+      key: `instance:${instance.id}`,
+      kind: group ? `${group} · ${kind}` : kind,
+      name: instance.label ?? instance.id,
+      meta: provider?.label ?? instance.id,
+    });
+  }
+  return targets;
+}
+
+/** Recreate overview labels after design/layout changes and measure them once. */
+function rebuildArchitectureLabels(): void {
+  if (!viewMode) return;
+  architectureEntries = [];
+  architectureLabels.replaceChildren();
+  for (const target of architectureTargets()) {
+    const element = document.createElement("div");
+    element.className = "architecture-label";
+    element.dataset.target = target.key;
+    element.setAttribute("role", "listitem");
+    const card = document.createElement("div");
+    card.className = "architecture-label-card";
+    const kind = document.createElement("span");
+    kind.className = "architecture-kind";
+    kind.textContent = target.kind;
+    const name = document.createElement("strong");
+    name.className = "architecture-name";
+    name.textContent = target.name;
+    const meta = document.createElement("span");
+    meta.className = "architecture-meta";
+    meta.textContent = target.meta;
+    card.append(kind, name, meta);
+    element.append(card);
+    architectureLabels.append(element);
+    architectureEntries.push({
+      key: target.key,
+      element,
+      card,
+      width: card.offsetWidth,
+      height: card.offsetHeight,
+    });
+  }
+  positionArchitectureLabels();
+}
+
+/** Place labels around their anchors, avoiding prior labels and the top actions. */
+function positionArchitectureLabels(): void {
+  if (!viewMode) return;
+  const stage = stageBounds,
+    actions = document.querySelector(".top-actions")?.getBoundingClientRect(),
+    blockers: CalloutRect[] = actions
+      ? [
+          {
+            x: actions.left - stage.left,
+            y: actions.top - stage.top,
+            width: actions.width,
+            height: actions.height,
+          },
+        ]
+      : [];
+  for (const entry of architectureEntries) {
+    const point = scene.targetTopPoint(entry.key);
+    if (!point) {
+      entry.element.hidden = true;
+      continue;
+    }
+    entry.element.hidden = false;
+    const anchor = { x: point.x - stage.left, y: point.y - stage.top },
+      placement = placeCallout(
+        anchor,
+        { width: entry.width, height: entry.height },
+        stage,
+        blockers,
+      ),
+      cardX = placement.x - anchor.x,
+      cardY = placement.y - anchor.y,
+      corners = [
+        [cardX, cardY],
+        [cardX + entry.width, cardY],
+        [cardX, cardY + entry.height],
+        [cardX + entry.width, cardY + entry.height],
+      ],
+      [cornerX, cornerY] = corners.reduce((best, corner) =>
+        Math.hypot(corner[0], corner[1]) < Math.hypot(best[0], best[1])
+          ? corner
+          : best,
+      ),
+      length = Math.hypot(cornerX, cornerY),
+      angle = (Math.atan2(cornerY, cornerX) * 180) / Math.PI;
+    entry.element.style.transform = `translate3d(${anchor.x.toFixed(1)}px, ${anchor.y.toFixed(1)}px, 0)`;
+    entry.element.style.setProperty("--label-x", `${cardX.toFixed(1)}px`);
+    entry.element.style.setProperty("--label-y", `${cardY.toFixed(1)}px`);
+    entry.element.style.setProperty(
+      "--label-line-length",
+      `${length.toFixed(1)}px`,
+    );
+    entry.element.style.setProperty(
+      "--label-line-angle",
+      `${angle.toFixed(2)}deg`,
+    );
+    blockers.push({
+      x: placement.x,
+      y: placement.y,
+      width: entry.width,
+      height: entry.height,
+    });
+  }
+}
+
+/** Coalesce label repositioning to one frame while the camera settles. */
+function scheduleArchitectureLabels(): void {
+  if (!viewMode || architectureFrame !== null) return;
+  architectureFrame = requestAnimationFrame(() => {
+    architectureFrame = null;
+    positionArchitectureLabels();
+  });
+}
+
+/** Toggle the read-only architecture overview; editing chrome is hidden there. */
+function setViewMode(open: boolean): void {
+  if (viewMode === open) return;
+  viewMode = open;
+  document.body.classList.toggle("view-mode", open);
+  viewToggle.setAttribute("aria-pressed", String(open));
+  viewToggle.textContent = open ? "Exit view" : "View";
+  if (open) {
+    builder?.reset();
+    setPanelOpen(false);
+    clearSelection();
+    hideCallout();
+    scene.fit();
+    rebuildArchitectureLabels();
+  } else {
+    architectureEntries = [];
+    architectureLabels.replaceChildren();
+  }
+  viewToggle.focus({ preventScroll: true });
+}
+
+viewToggle.addEventListener("click", () => setViewMode(!viewMode));
+scene.onViewChange(scheduleArchitectureLabels);
+scene.onLayoutChange(() => {
+  if (viewMode) rebuildArchitectureLabels();
+});
+document.addEventListener(
+  "contextmenu",
+  (event) => {
+    if (!viewMode) return;
+    event.preventDefault();
+    event.stopImmediatePropagation();
+  },
+  true,
+);
 
 /**
  * Surface an import/apply failure without mutating the scene.
@@ -1228,6 +1450,11 @@ document.addEventListener("keydown", (event) => {
   // selection; clearing both at once would fight the native control.
   if (event.key !== "Escape" || event.target instanceof HTMLSelectElement)
     return;
+  if (viewMode) {
+    event.preventDefault();
+    setViewMode(false);
+    return;
+  }
   if (sidebar.classList.contains("open")) setPanelOpen(false);
   else clearSelection();
 });
@@ -1250,7 +1477,7 @@ document.addEventListener("visibilitychange", () =>
 );
 
 traffic = new TrafficControls(
-  stage,
+  mustQuery<HTMLElement>("#simulation-section"),
   () => current,
   (state) => scene.setTraffic(state),
 );
@@ -1413,7 +1640,6 @@ const calloutOverlays = [
   toggle,
   sidebar,
   detail,
-  mustQuery<HTMLElement>(".traffic-controls"),
 ];
 let calloutMeasureFrame: number | null = null;
 /** Coalesce overlay mutations without doing DOM measurements on pointer frames. */

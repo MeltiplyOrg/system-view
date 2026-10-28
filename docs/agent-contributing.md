@@ -514,6 +514,18 @@ One pass explains where most edits belong:
   then sync the editor and metadata.
 - Provider and replica edits re-render in place, sync the document, and rebind
   the pinned selection. Apply and Reset use a non-animated render and refit.
+- Simulation controls live in Design → Simulation, not over the canvas. Closing
+  Design hides the readout but Run/Pause, clocks and markers continue; reopen
+  Design to inspect metrics or reset. The panel contains Run/Pause, Step, Reset,
+  live clock/metrics, crash limits and teaching notes.
+- **View** beside Design toggles a read-only architecture overview. It closes
+  Design/inspector/builder, hides top actions, Components, group drag headers,
+  construction controls, request markers and the ISO credit, and fits the
+  world. Every cluster and standalone instance receives one measured label
+  (group · type, name, provider or id) positioned through the callout solver so
+  labels avoid each other and the top action; labels follow camera/layout
+  changes. Clusters are labeled once as pools. Clicking again or Escape exits;
+  the camera stays where the overview left it.
 - Callout and inspector are screen-space overlays. Use the scene's view and
   layout listeners instead of measuring projected SVG geometry.
   Tooltip marks occupy a real grid column, never cover the summary. Card size

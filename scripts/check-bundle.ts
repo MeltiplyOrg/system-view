@@ -15,19 +15,20 @@ import { gzipSync } from "node:zlib";
  *
  * Includes artwork, assembly controls, visible traffic, queued capacity,
  * rolling SLO/crash HUD, inline wire insertion, cache coverage and the grouped
- * full-architecture application catalogue. The build measures about 83.8 KiB
- * JS gzip / 92.3 KiB total; 85 / 94 KiB bounds transfer.
+ * full-architecture application catalogue and read-only architecture view.
+ * The build measures about 85.6 KiB JS gzip / 94.3 KiB total; 87 / 96 KiB
+ * bounds transfer.
  * No SDKs, codecs or model copies are loaded. The 512-call runtime ceiling,
  * shared raster pixel budget and single-encoder limit remain independent.
  */
 const budgets = {
-  ".js": 85 * 1024,
+  ".js": 87 * 1024,
   ".css": 10 * 1024,
   ".html": 2 * 1024,
 } as const;
 
 /** Maximum gzipped bytes for the whole build. */
-const totalBudget = 94 * 1024;
+const totalBudget = 96 * 1024;
 
 // Dist is flat today, but recursive discovery keeps the gate valid if assets
 // move into nested chunks. Unknown file types are intentionally ignored.
