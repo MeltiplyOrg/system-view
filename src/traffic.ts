@@ -34,6 +34,8 @@ export interface LinkFlow {
 export interface RequestMarker {
   id: number;
   requestId: number;
+  /** Stable visual branch: linear hops and their response reuse it; forks get new ids. */
+  branch: number;
   connectionIndex: number;
   progress: number;
   direction: "request" | "response";
@@ -62,6 +64,8 @@ export interface SimulationSnapshot {
   loads: readonly NodeLoad[];
   flows: readonly LinkFlow[];
   requests: readonly RequestMarker[];
+  /** Branches with at least one travelling, queued, processing or waiting call. */
+  activeBranches: ReadonlySet<number>;
   generated: number;
   completed: number;
   rejected: number;
@@ -78,6 +82,7 @@ interface Actor {
   marker: RequestMarker;
   node: number;
   hops: number;
+  branch: number;
   started: number;
   ready: number;
   phase: "request" | "queued" | "processing" | "waiting" | "response";
@@ -134,6 +139,7 @@ export class TrafficModel {
   private metricsChanged = false;
   private nextActor = 1;
   private nextRequest = 1;
+  private nextBranch = 1;
 
   constructor(
     private readonly design: Design,
@@ -200,6 +206,7 @@ export class TrafficModel {
         responseRps: 0,
       })),
       requests: [],
+      activeBranches: new Set(),
       generated: 0,
       completed: 0,
       rejected: 0,
@@ -264,6 +271,7 @@ export class TrafficModel {
             1,
             at,
             null,
+            this.nextBranch++,
           )
         )
           this.outcome(this.nextRequest, at, true);
@@ -325,6 +333,7 @@ export class TrafficModel {
     hops: number,
     at: number,
     parent: Actor | null,
+    branch: number,
   ): boolean {
     if (this.actors.length >= 512) {
       this.state.limited++;
@@ -336,6 +345,7 @@ export class TrafficModel {
       marker: {
         id: this.nextActor++,
         requestId,
+        branch,
         connectionIndex: output.link,
         progress: 0,
         direction: "request",
@@ -344,6 +354,7 @@ export class TrafficModel {
       },
       node: output.to,
       hops,
+      branch,
       started: at,
       ready: at + NETWORK_SECONDS,
       phase: "request",
@@ -392,8 +403,21 @@ export class TrafficModel {
     const count = single ? Math.min(1, outputs.length) : outputs.length;
     for (let i = 0; i < count; i++) {
       const output = outputs[start + i];
+      // Forks and detached one-way deliveries get their own visual path; a
+      // linear synchronous hop continues the caller's branch.
+      const branch =
+        count > 1 || !this.replies[output.link]
+          ? this.nextBranch++
+          : actor.branch;
       if (
-        !this.spawn(output, actor.marker.requestId, actor.hops + 1, at, actor)
+        !this.spawn(
+          output,
+          actor.marker.requestId,
+          actor.hops + 1,
+          at,
+          actor,
+          branch,
+        )
       )
         actor.failed = true;
       else if (this.replies[output.link]) actor.children++;
@@ -493,6 +517,9 @@ export class TrafficModel {
       flow.rateRps = sends.length;
       flow.responseRps = returns.length;
     }
+    this.state.activeBranches = new Set(
+      this.actors.map((actor) => actor.branch),
+    );
     this.state.requests = this.actors.flatMap((actor) => {
       if (actor.phase === "waiting") return [];
       actor.marker.phase = actor.phase;

@@ -7,7 +7,7 @@ import {
   type SimulationSnapshot,
 } from "./traffic";
 
-/** Playback scales simulated time, including dot motion; 1× is normal, 0.1× is for inspection. */
+/** Playback scales simulation time; dots keep a fixed on-screen velocity. 1× is normal. */
 export class TrafficControls {
   private readonly root = document.createElement("section");
   private readonly toggle: HTMLButtonElement;
@@ -23,7 +23,10 @@ export class TrafficControls {
   constructor(
     host: HTMLElement,
     private readonly read: () => Design,
-    private readonly publish: (state: SimulationSnapshot) => void,
+    private readonly publish: (
+      state: SimulationSnapshot,
+      advanceSeconds: number,
+    ) => void,
   ) {
     this.model = new TrafficModel(read(), this.limits);
     this.root.className = "traffic-controls";
@@ -33,7 +36,7 @@ export class TrafficControls {
       <div class="traffic-clock"><span id="traffic-time">sim 0.00s</span><label>playback <select id="traffic-speed" aria-label="Simulation playback speed"><option value="0.1">0.1× · inspect</option><option value="1">1× · normal</option><option value="10">10× · fast</option></select></label></div>
       <dl class="traffic-metrics" aria-label="System metrics"><div><dt>p95</dt><dd id="traffic-p95">—</dd></div><div><dt>p99</dt><dd id="traffic-p99">—</dd></div><div><dt>errors</dt><dd id="traffic-error-rate">—</dd></div><div><dt>queued</dt><dd id="traffic-queued">0</dd></div></dl>
       <div class="traffic-health-row"><span id="traffic-health" role="status">awaiting responses</span><span id="traffic-samples">30s · 0 samples</span></div>
-      <details><summary>Crash limits</summary><form id="traffic-limits"><div class="traffic-limit-fields"><label>p95 (ms)<input id="traffic-p95-limit" type="number" min="0.001" step="any" required value="${this.limits.p95Ms}"></label><label>p99 (ms)<input id="traffic-p99-limit" type="number" min="0.001" step="any" required value="${this.limits.p99Ms}"></label><label>errors (%)<input id="traffic-error-limit" type="number" min="0" max="100" step="any" required value="${this.limits.errorRate * 100}"></label></div><button class="btn" type="submit">Apply limits &amp; reset</button></form><p>p95/p99 measure simulated milliseconds: 50ms per network leg plus processing and FIFO waiting. Playback scales the whole simulation, including how fast dots move; 1× is normal and 0.1× is inspection. It never changes latency or requests/s. Step advances 10ms. Metrics use completed root calls in the last 30 simulated seconds; — means no samples. Crossing any limit crashes the system until Reset.</p></details>
+      <details><summary>Crash limits</summary><form id="traffic-limits"><div class="traffic-limit-fields"><label>p95 (ms)<input id="traffic-p95-limit" type="number" min="0.001" step="any" required value="${this.limits.p95Ms}"></label><label>p99 (ms)<input id="traffic-p99-limit" type="number" min="0.001" step="any" required value="${this.limits.p99Ms}"></label><label>errors (%)<input id="traffic-error-limit" type="number" min="0" max="100" step="any" required value="${this.limits.errorRate * 100}"></label></div><button class="btn" type="submit">Apply limits &amp; reset</button></form><p>p95/p99 measure simulated milliseconds: 50ms per network leg plus processing and FIFO waiting. Playback scales simulation time; dots keep a fixed on-screen speed. 1× is normal and 0.1× is inspection. Playback never changes latency or requests/s. Step advances 10ms. Metrics use completed root calls in the last 30 simulated seconds; — means no samples. Crossing any limit crashes the system until Reset.</p></details>
       <details><summary>How requests travel</summary><p>Wire Users → Frontend → Backend → Database. Set requests/s on Users. Solid dots go out; matching rings return. Nodes wait FIFO at 100% load and reply after all synchronous dependencies finish. Queue handoffs/replication are one-way. Async deliveries are counted separately from root SLO samples. The 32-hop and 512-call safety limits produce errors, not infinite work.</p></details>`;
     host.append(this.root);
     this.toggle = this.root.querySelector("#traffic-toggle")!;
@@ -47,7 +50,8 @@ export class TrafficControls {
     this.stepButton.addEventListener("click", () => {
       this.running = false;
       this.model.step(0.01);
-      this.schedule();
+      // A Step is a fixed presentation pulse so manual inspection still moves dots.
+      this.schedule(0.1);
     });
     this.root.querySelector("#traffic-reset")!.addEventListener("click", () => {
       this.running = false;
@@ -84,7 +88,7 @@ export class TrafficControls {
   }
 
   /** Own a single animation frame only while running, visible and configured with an active Users source. */
-  private schedule(): void {
+  private schedule(advanceSeconds = 0): void {
     if (this.frame !== null) cancelAnimationFrame(this.frame);
     this.frame = null;
     this.previous = 0;
@@ -98,10 +102,10 @@ export class TrafficControls {
       )
     )
       this.frame = requestAnimationFrame((now) => this.tick(now));
-    this.render();
+    this.render(advanceSeconds);
   }
 
-  /** Sample wall time at 30Hz, then convert to simulated seconds; long stalls never catch up. */
+  /** Sample wall time at 30Hz; simulation uses the scaled delta, dots use the wall delta. */
   private tick(now: number): void {
     this.frame = requestAnimationFrame((time) => this.tick(time));
     if (!this.previous) {
@@ -111,8 +115,9 @@ export class TrafficControls {
     const elapsed = (now - this.previous) / 1000;
     if (elapsed < 1 / 30) return;
     this.previous = now;
-    this.model.step(Math.min(0.1, elapsed) * this.speed);
-    this.render();
+    const advance = Math.min(0.1, elapsed);
+    this.model.step(advance * this.speed);
+    this.render(advance);
   }
 
   /** Skip unchanged text so the shell's overlay observer never measures on idle metric frames. */
@@ -122,7 +127,7 @@ export class TrafficControls {
   }
 
   /** Publish node queues, true root-call metrics and a latched crash; cancel the next frame on failure. */
-  private render(): void {
+  private render(advanceSeconds = 0): void {
     const state = this.model.snapshot();
     if (state.crash) {
       this.running = false;
@@ -130,7 +135,7 @@ export class TrafficControls {
       this.frame = null;
       this.previous = 0;
     }
-    this.publish(state);
+    this.publish(state, advanceSeconds);
     const sources = this.read().instances.filter(
       (node) => inferInstanceType(node.id) === "users",
     );

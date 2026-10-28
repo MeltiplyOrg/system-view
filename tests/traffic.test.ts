@@ -75,6 +75,53 @@ describe("individual requests", () => {
     expect(delivered.metrics.p95Ms).toBeCloseTo(600, 6);
   });
 
+  test("linear hops and their response share one presentation branch", () => {
+    const model = new TrafficModel(chain());
+    const branches = new Set<number>();
+    let state = model.step(0);
+    for (let tick = 0; tick < 400 && !state.completed; tick++) {
+      state = model.step(0.01);
+      for (const packet of state.requests)
+        if (packet.requestId === 1) branches.add(packet.branch);
+    }
+    expect(state.completed).toBe(1);
+    expect(branches.size).toBe(1);
+    expect(state.activeBranches.size).toBe(0);
+  });
+
+  test("fan-out forks and one-way queue deliveries get separate presentation branches", () => {
+    const forked = chain();
+    forked.instances.push({ id: "cache-fast" });
+    forked.connections.push({ from: "compute-api", to: "cache-fast" });
+    const byConnection = new Map<number, number>();
+    const model = new TrafficModel(forked);
+    for (let tick = 0; tick < 200; tick++) {
+      for (const packet of model.step(0.01).requests)
+        if (packet.requestId === 1)
+          byConnection.set(packet.connectionIndex, packet.branch);
+    }
+    expect(byConnection.get(0)).toBe(byConnection.get(1));
+    expect(
+      new Set([byConnection.get(1), byConnection.get(2), byConnection.get(3)])
+        .size,
+    ).toBe(3);
+
+    const queued = chain();
+    queued.instances[3] = { id: "queue-jobs" };
+    queued.instances.push({ id: "worker-job" });
+    queued.connections[2] = { from: "compute-api", to: "queue-jobs" };
+    queued.connections.push({ from: "queue-jobs", to: "worker-job" });
+    const oneWay = new Map<number, number>();
+    const queueModel = new TrafficModel(queued);
+    for (let tick = 0; tick < 200; tick++) {
+      for (const packet of queueModel.step(0.01).requests)
+        if (packet.requestId === 1)
+          oneWay.set(packet.connectionIndex, packet.branch);
+    }
+    expect(oneWay.get(1)).not.toBe(oneWay.get(2));
+    expect(oneWay.get(2)).not.toBe(oneWay.get(3));
+  });
+
   test("traffic comes only from Users and zero-rate sources stay silent", () => {
     const silent = new TrafficModel(chain(0));
     expect(advance(silent, 5).generated).toBe(0);

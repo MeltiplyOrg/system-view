@@ -28,8 +28,17 @@ import { NodeStatusLayer } from "./node-status";
 import { capacityRps, type NodeLoad, type SimulationSnapshot } from "./traffic";
 import { hasResponse } from "./component-rules";
 import { cableLane, type CableLane } from "./wire-lanes";
+import {
+  appendTrail,
+  createTrail,
+  pointOnTrail,
+  type Trail,
+} from "./traffic-trails";
 
 const NS = "http://www.w3.org/2000/svg";
+
+/** Fixed on-screen dot velocity; playback scales the simulation, never this motion. */
+const TRAFFIC_SPEED_PX = 340;
 
 /**
  * Prefix for a single instance's synthetic border key.
@@ -855,7 +864,19 @@ export class SystemScene {
   private nodeLoads: readonly NodeLoad[] = [];
   private trafficState: SimulationSnapshot | null = null;
   private readonly requestLayer = document.createElementNS(NS, "g");
-  private readonly requestMarkers = new Map<number, SVGCircleElement>();
+  /** One dot per request branch; its trail accumulates simulation legs for fixed-velocity motion. */
+  private readonly requestTrails = new Map<
+    number,
+    {
+      trail: Trail;
+      distance: number;
+      laneKey: string | null;
+      marker: SVGCircleElement;
+      title: SVGTitleElement;
+    }
+  >();
+  /** Screen pixels per SVG user unit, cached by `updateViewport` for zoom-stable velocity. */
+  private requestScale = 1;
   /** Five CSS pixels, converted through the cached viewport so requests remain legible at overview zoom. */
   private requestRadius = 5;
   private statusUpdatedAt = -1;
@@ -1147,6 +1168,7 @@ export class SystemScene {
    */
   render(design: Design, animate = false): void {
     this.currentDesign = design;
+    this.clearRequestTrails();
     // A group role exposes live meter values and keyboard-operable group titles;
     // an image role would hide their descendants from assistive technology.
     this.svg.setAttribute("role", "group");
@@ -1758,57 +1780,101 @@ export class SystemScene {
     if (animate) for (const listener of this.layoutListeners) listener();
   }
 
-  /** Draw individual request circles at their actual progress; never recolor or animate a whole cable. */
-  setTraffic(state: SimulationSnapshot, forceStatus = false): void {
+  /**
+   * Animate one dot per request branch at a fixed on-screen velocity.
+   *
+   * Simulated legs are appended as the model reveals them, so changing playback
+   * speed changes when hops/outcomes appear but never how fast an existing dot
+   * moves. `advanceSeconds` is presentation time from Run ticks or a manual Step
+   * pulse; pause/reset pass zero. A completed branch keeps its dot until the
+   * accumulated route is finished.
+   */
+  setTraffic(
+    state: SimulationSnapshot,
+    forceStatus = false,
+    advanceSeconds = 0,
+  ): void {
     this.trafficState = state;
-    const visible = new Set<number>();
+    if (state.time === 0 && state.generated === 0 && !state.requests.length)
+      this.clearRequestTrails();
+    const advance =
+      (Math.max(0, advanceSeconds) * TRAFFIC_SPEED_PX) /
+      Math.max(0.01, this.requestScale);
+    for (const record of this.requestTrails.values())
+      record.distance = Math.min(record.trail.total, record.distance + advance);
+
     for (const request of state.requests) {
       const cable = this.renderedWires.get(request.connectionIndex);
-      const wire =
+      const lane =
         request.direction === "response" ? cable?.inbound : cable?.outbound;
-      if (!wire || !wire.total) continue;
-      visible.add(request.id);
-      let marker = this.requestMarkers.get(request.id);
-      if (!marker) {
-        marker = document.createElementNS(NS, "circle");
+      if (!lane || !lane.total) continue;
+      let record = this.requestTrails.get(request.branch);
+      if (!record) {
+        // Bound presentation ghosts independently of the model's 512-call cap.
+        if (this.requestTrails.size >= 512) {
+          let dropped = false;
+          for (const [branch, old] of this.requestTrails) {
+            if (state.activeBranches.has(branch)) continue;
+            old.marker.remove();
+            this.requestTrails.delete(branch);
+            dropped = true;
+            break;
+          }
+          if (!dropped) continue;
+        }
+        const marker = document.createElementNS(NS, "circle");
         marker.classList.add("request-marker");
         marker.setAttribute("r", String(this.requestRadius));
         marker.dataset.requestId = String(request.requestId);
+        marker.dataset.branch = String(request.branch);
         const title = document.createElementNS(NS, "title");
         title.textContent = `Request #${request.requestId}`;
         marker.append(title);
         this.requestLayer.append(marker);
-        this.requestMarkers.set(request.id, marker);
+        record = {
+          trail: createTrail(),
+          distance: 0,
+          laneKey: null,
+          marker,
+          title,
+        };
+        this.requestTrails.set(request.branch, record);
       }
+      const laneKey = `${request.id}:${request.connectionIndex}:${request.direction}`;
+      if (record.laneKey !== laneKey) {
+        appendTrail(
+          record.trail,
+          request.direction === "response"
+            ? [...lane.points].reverse()
+            : lane.points,
+        );
+        record.laneKey = laneKey;
+      }
+      const { marker } = record;
       marker.dataset.connectionIndex = String(request.connectionIndex);
-      marker.dataset.progress = String(request.progress);
       marker.dataset.direction = request.direction;
       marker.dataset.phase = request.phase;
       marker.classList.toggle("response", request.direction === "response");
       marker.classList.toggle("failed", request.failed);
-      marker.firstElementChild!.textContent = `${request.direction === "response" ? (request.failed ? "Error response" : "Response") : request.phase === "queued" ? "Queued request" : request.phase === "processing" ? "Processing request" : "Request"} #${request.requestId}`;
-      let distance =
-          (request.direction === "response"
-            ? 1 - request.progress
-            : request.progress) * wire.total,
-        segment = 0;
-      while (
-        segment < wire.lengths.length - 1 &&
-        distance > wire.lengths[segment]
-      ) {
-        distance -= wire.lengths[segment++];
-      }
-      const a = wire.points[segment],
-        b = wire.points[segment + 1];
-      const t = wire.lengths[segment] ? distance / wire.lengths[segment] : 0;
-      marker.setAttribute("cx", String(a[0] + (b[0] - a[0]) * t));
-      marker.setAttribute("cy", String(a[1] + (b[1] - a[1]) * t));
+      record.title.textContent = `${request.direction === "response" ? (request.failed ? "Error response" : "Response") : request.phase === "queued" ? "Queued request" : request.phase === "processing" ? "Processing request" : "Request"} #${request.requestId}`;
     }
-    for (const [id, marker] of this.requestMarkers)
-      if (!visible.has(id)) {
-        marker.remove();
-        this.requestMarkers.delete(id);
+
+    for (const [branch, record] of this.requestTrails) {
+      const [cx, cy] = pointOnTrail(record.trail, record.distance);
+      record.marker.setAttribute("cx", String(cx));
+      record.marker.setAttribute("cy", String(cy));
+      record.marker.dataset.progress = String(
+        record.trail.total ? record.distance / record.trail.total : 0,
+      );
+      if (
+        !state.activeBranches.has(branch) &&
+        record.distance >= record.trail.total - 0.01
+      ) {
+        record.marker.remove();
+        this.requestTrails.delete(branch);
       }
+    }
+
     if (
       !forceStatus &&
       !state.crash &&
@@ -1826,6 +1892,12 @@ export class SystemScene {
       wire.root.dataset.responseRps = String(flow.responseRps);
       wire.title.textContent = `${wire.name} · ${flow.rateRps} requests · ${flow.responseRps} responses in the last second`;
     }
+  }
+
+  /** Drop presentation dots when geometry or simulation identity is replaced. */
+  private clearRequestTrails(): void {
+    for (const record of this.requestTrails.values()) record.marker.remove();
+    this.requestTrails.clear();
   }
 
   /**
@@ -2929,9 +3001,11 @@ export class SystemScene {
       x = this.center[0] - width / 2,
       y = this.center[1] - height / 2;
     this.svg.setAttribute("viewBox", `${x} ${y} ${width} ${height}`);
+    this.requestScale =
+      this.viewport.width > 0 && width > 0 ? this.viewport.width / width : 1;
     this.requestRadius = (5 * width) / Math.max(1, this.viewport.width);
-    for (const marker of this.requestMarkers.values())
-      marker.setAttribute("r", String(this.requestRadius));
+    for (const record of this.requestTrails.values())
+      record.marker.setAttribute("r", String(this.requestRadius));
     // Hysteresis avoids detail flicker while zoom hovers near the cutoff.
     const rackPixels =
       (componentHeight("database-rack") * this.viewport.width) / width;

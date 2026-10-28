@@ -255,12 +255,12 @@ One pass explains where most edits belong:
   The small cap makes every request visible without weighted/sampled markers.
 - All engine timing is simulated seconds, independent of wall-clock playback.
   Run defaults to 1× (normal simulated pace); 0.1× is an inspection mode that
-  slows the clock and dot motion together, while 10× accelerates both. These
-  settings never change latency or requests/s. Initial Run skips the empty
-  interval before the first real source emission, not processing work.
-  Reset clears requests/counters. The sole RAF samples at most 30Hz, stops while
-  paused/hidden/crashed, and never catches up a stalled page. Source/graph edits
-  reset obsolete work.
+  slows the clock while 10× accelerates it. Playback never changes simulated
+  latency or requests/s. Dots move at a fixed on-screen velocity regardless of
+  playback. Initial Run skips the empty interval before the first real source
+  emission, not processing work. Reset clears requests/counters. The sole RAF
+  samples at most 30Hz, stops while paused/hidden/crashed, and never catches up
+  a stalled page. Source/graph edits reset obsolete work.
 - Each network leg takes 50 simulated milliseconds, not its animation duration.
   Request arrivals wait FIFO for
   target capacity tokens, then process for `latencyMs` (default 100ms). Queue
@@ -320,18 +320,28 @@ One pass explains where most edits belong:
   not bias caller-response SLOs, although they still count as deliveries.
 - Crash limits are editable session settings in simulated milliseconds: defaults
   p95 1000ms, p99 2000ms, errors 5%. The boot round trip is 600ms simulated
-  (six 50ms legs plus three 100ms processing delays), even when its slow-motion
-  presentation takes seconds. A measured value strictly
+  (six 50ms legs plus three 100ms processing delays), even when playback
+  stretches its presentation. A measured value strictly
   above any limit latches a crash with its causes and simulated time; Run and
   Step disable, the RAF stops, and queued/travelling calls freeze. There is no
   automatic recovery when old samples expire. Reset/graph edits start a fresh
   simulation; applying limits explicitly resets it. Limits survive these resets
   but are not exported as graph data. Reload restores the default limits.
-- Each request remains visible at its arrival socket during queued/processing
-  phases; logical callers waiting on dependencies do not create duplicate dots.
+- Each request remains visible at its arrival socket once its trail reaches the
+  queued/processing node; logical callers waiting on dependencies do not create
+  duplicate dots.
   Markers stay 10 CSS pixels across through overview zoom and resize, using the
   cached viewport scale rather than per-frame geometry reads. On mobile during
   placement, supplementary HUD rows collapse to keep build ground reachable.
+- Dots are presentation trails, not simulation samples. A linear branch and its
+  response reuse one `branch` id and append each traversed lane to one polyline;
+  forks and one-way deliveries get new ids. One dot animates at 340 CSS px/s
+  along that trail at every playback setting, with Step contributing a fixed
+  0.1s presentation pulse. Playback therefore changes when hops/outcomes appear,
+  not the dot's velocity. A branch keeps moving after its logical completion and
+  disappears only at the end of its accumulated route; at fast playback the
+  visuals intentionally lag the metrics. Queued/processing branches wait at the
+  node. Trails cap at 512 and are cleared by Reset or geometry rebuilds.
 
 ### Geometry and artwork
 

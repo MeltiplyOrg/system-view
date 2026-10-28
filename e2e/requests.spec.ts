@@ -54,10 +54,12 @@ test("individual request identity travels through the boot journey without light
   await step(page, 5);
   await expect(first).toHaveAttribute("data-connection-index", "0");
   await step(page, 5);
-  await expect(first).toHaveCount(0);
   await expect(page.locator("#traffic-summary")).toContainText("1 delivered");
   await expect(page.locator("#traffic-p95")).toHaveText("600ms");
   await expect(page.locator("#traffic-time")).toHaveText("sim 1.62s");
+  // The dot keeps its fixed velocity after the logical call completes.
+  await step(page, 40);
+  await expect(first).toHaveCount(0);
   await page.locator("#traffic-reset").click();
   await expect(page.locator(".request-marker")).toHaveCount(0);
 });
@@ -189,6 +191,33 @@ test("slow-motion playback changes wall-clock pace, never simulated latency or s
   await expect(page.locator("#traffic-summary")).toContainText("1 delivered");
   await page.locator("#traffic-toggle").click();
   await expect(page.locator("#traffic-p95")).toHaveText("600ms");
+});
+
+test("dot velocity stays fixed when playback changes the time scale", async ({
+  page,
+}) => {
+  /** Same manual simulation steps, only the clock multiplier differs. */
+  async function travel(speed: string): Promise<number> {
+    await page.goto("/");
+    await page.selectOption("#traffic-speed", speed);
+    await step(page, 102);
+    const marker = page.locator('.request-marker[data-request-id="1"]');
+    await expect(marker).toHaveCount(1);
+    const before = await marker.evaluate((node) => [
+      Number(node.getAttribute("cx")),
+      Number(node.getAttribute("cy")),
+    ]);
+    await step(page, 4);
+    const after = await marker.evaluate((node) => [
+      Number(node.getAttribute("cx")),
+      Number(node.getAttribute("cy")),
+    ]);
+    return Math.hypot(after[0] - before[0], after[1] - before[1]);
+  }
+  const slow = await travel("0.1");
+  const normal = await travel("1");
+  expect(slow).toBeGreaterThan(10);
+  expect(normal).toBeCloseTo(slow, 6);
 });
 
 test("0.1× Run immediately shows a legible request and retains it while the node processes", async ({
