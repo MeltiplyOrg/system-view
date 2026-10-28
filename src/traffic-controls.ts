@@ -7,7 +7,7 @@ import {
   type SimulationSnapshot,
 } from "./traffic";
 
-/** Playback dilates simulated time, never latency: 0.1× shows 50ms network legs over 500ms of wall time. */
+/** Playback scales simulated time, including dot motion; 1× is normal, 0.1× is for inspection. */
 export class TrafficControls {
   private readonly root = document.createElement("section");
   private readonly toggle: HTMLButtonElement;
@@ -18,7 +18,7 @@ export class TrafficControls {
   private running = false;
   private frame: number | null = null;
   private previous = 0;
-  private speed = 0.1;
+  private speed = 1;
 
   constructor(
     host: HTMLElement,
@@ -30,10 +30,10 @@ export class TrafficControls {
     this.root.setAttribute("aria-label", "Request simulation");
     this.root.innerHTML = `<div class="traffic-form"><span>Requests<br><small>solid out · ring back</small></span><button id="traffic-toggle" class="btn" type="button" aria-pressed="false">Run</button><button id="traffic-step" class="btn" type="button" title="Advance 10ms of simulated time">Step</button><button id="traffic-reset" class="btn" type="button">Reset</button></div>
       <output id="traffic-summary" aria-live="off"></output>
-      <div class="traffic-clock"><span id="traffic-time">sim 0.00s</span><label>playback <select id="traffic-speed" aria-label="Simulation playback speed"><option value="0.1">0.1× · slow motion</option><option value="1">1×</option><option value="10">10×</option></select></label></div>
+      <div class="traffic-clock"><span id="traffic-time">sim 0.00s</span><label>playback <select id="traffic-speed" aria-label="Simulation playback speed"><option value="0.1">0.1× · inspect</option><option value="1">1× · normal</option><option value="10">10× · fast</option></select></label></div>
       <dl class="traffic-metrics" aria-label="System metrics"><div><dt>p95</dt><dd id="traffic-p95">—</dd></div><div><dt>p99</dt><dd id="traffic-p99">—</dd></div><div><dt>errors</dt><dd id="traffic-error-rate">—</dd></div><div><dt>queued</dt><dd id="traffic-queued">0</dd></div></dl>
       <div class="traffic-health-row"><span id="traffic-health" role="status">awaiting responses</span><span id="traffic-samples">30s · 0 samples</span></div>
-      <details><summary>Crash limits</summary><form id="traffic-limits"><div class="traffic-limit-fields"><label>p95 (ms)<input id="traffic-p95-limit" type="number" min="0.001" step="any" required value="${this.limits.p95Ms}"></label><label>p99 (ms)<input id="traffic-p99-limit" type="number" min="0.001" step="any" required value="${this.limits.p99Ms}"></label><label>errors (%)<input id="traffic-error-limit" type="number" min="0" max="100" step="any" required value="${this.limits.errorRate * 100}"></label></div><button class="btn" type="submit">Apply limits &amp; reset</button></form><p>p95/p99 measure simulated milliseconds: 50ms per network leg plus processing and FIFO waiting. Playback speed changes only how fast simulated time passes, never latency or requests/s. Step advances 10ms. Metrics use completed root calls in the last 30 simulated seconds; — means no samples. Crossing any limit crashes the system until Reset.</p></details>
+      <details><summary>Crash limits</summary><form id="traffic-limits"><div class="traffic-limit-fields"><label>p95 (ms)<input id="traffic-p95-limit" type="number" min="0.001" step="any" required value="${this.limits.p95Ms}"></label><label>p99 (ms)<input id="traffic-p99-limit" type="number" min="0.001" step="any" required value="${this.limits.p99Ms}"></label><label>errors (%)<input id="traffic-error-limit" type="number" min="0" max="100" step="any" required value="${this.limits.errorRate * 100}"></label></div><button class="btn" type="submit">Apply limits &amp; reset</button></form><p>p95/p99 measure simulated milliseconds: 50ms per network leg plus processing and FIFO waiting. Playback scales the whole simulation, including how fast dots move; 1× is normal and 0.1× is inspection. It never changes latency or requests/s. Step advances 10ms. Metrics use completed root calls in the last 30 simulated seconds; — means no samples. Crossing any limit crashes the system until Reset.</p></details>
       <details><summary>How requests travel</summary><p>Wire Users → Frontend → Backend → Database. Set requests/s on Users. Solid dots go out; matching rings return. Nodes wait FIFO at 100% load and reply after all synchronous dependencies finish. Queue handoffs/replication are one-way. Async deliveries are counted separately from root SLO samples. The 32-hop and 512-call safety limits produce errors, not infinite work.</p></details>`;
     host.append(this.root);
     this.toggle = this.root.querySelector("#traffic-toggle")!;
@@ -53,12 +53,13 @@ export class TrafficControls {
       this.running = false;
       this.sync(this.read());
     });
-    this.root
-      .querySelector<HTMLSelectElement>("#traffic-speed")!
-      .addEventListener("change", (event) => {
-        this.speed = Number((event.target as HTMLSelectElement).value);
-        this.schedule();
-      });
+    const speedSelect =
+      this.root.querySelector<HTMLSelectElement>("#traffic-speed")!;
+    speedSelect.value = String(this.speed);
+    speedSelect.addEventListener("change", (event) => {
+      this.speed = Number((event.target as HTMLSelectElement).value);
+      this.schedule();
+    });
     this.root
       .querySelector("#traffic-limits")!
       .addEventListener("submit", (event) => {

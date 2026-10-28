@@ -254,9 +254,10 @@ One pass explains where most edits belong:
   independent: finite 0–20 requests/s, default 1; zero disables that source.
   The small cap makes every request visible without weighted/sampled markers.
 - All engine timing is simulated seconds, independent of wall-clock playback.
-  Run defaults to 0.1× slow motion; 1× and 10× change only the rate of clock
-  advancement. Step always advances 10 simulated milliseconds. Initial Run skips
-  the empty interval before the first real source emission, not processing work.
+  Run defaults to 1× (normal simulated pace); 0.1× is an inspection mode that
+  slows the clock and dot motion together, while 10× accelerates both. These
+  settings never change latency or requests/s. Initial Run skips the empty
+  interval before the first real source emission, not processing work.
   Reset clears requests/counters. The sole RAF samples at most 30Hz, stops while
   paused/hidden/crashed, and never catches up a stalled page. Source/graph edits
   reset obsolete work.
@@ -305,7 +306,7 @@ One pass explains where most edits belong:
 - `NodeStatusLayer` stays outside the artwork raster cache. It uses expanded
   frame bounds from the scene margin helper; world moves rebuild positions,
   while request frames update circles and sample ground status every 20 simulated
-  milliseconds (5Hz at default playback). A crash forces the final status sample.
+  milliseconds, bounded by the 30Hz frame clock. A crash forces the final sample.
   Camera movement never restarts simulated time. Applied document edits reset
   requests while preserving Run/Pause; source rates live in the document.
 - Root-call p95/p99 use nearest-rank percentiles over outcomes completed in the

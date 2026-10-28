@@ -173,7 +173,8 @@ test("slow-motion playback changes wall-clock pace, never simulated latency or s
   page,
 }) => {
   await page.goto("/");
-  await expect(page.locator("#traffic-speed")).toHaveValue("0.1");
+  await expect(page.locator("#traffic-speed")).toHaveValue("1");
+  await page.selectOption("#traffic-speed", "0.1");
   await step(page, 102);
   await expect(page.locator("#traffic-time")).toHaveText("sim 1.02s");
   await page.selectOption("#traffic-speed", "10");
@@ -194,6 +195,7 @@ test("0.1× Run immediately shows a legible request and retains it while the nod
   page,
 }) => {
   await page.goto("/");
+  await page.selectOption("#traffic-speed", "0.1");
   await page.locator("#traffic-toggle").click();
   const first = page.locator('.request-marker[data-request-id="1"]');
   await expect(first).toHaveCount(1);
