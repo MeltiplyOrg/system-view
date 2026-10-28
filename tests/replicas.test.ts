@@ -130,6 +130,7 @@ describe("replica resizing", () => {
       ...structuredClone(webAppExample),
       connections: [],
       clusters: [],
+      groups: [],
       instances: [{ id: "compute-machine", placement: { x: -640, y: 360 } }],
     };
     const expanded = resizeReplicas(original, "compute-machine", 3);
@@ -156,6 +157,7 @@ describe("replica resizing", () => {
       ...structuredClone(webAppExample),
       connections: [],
       clusters: [],
+      groups: [],
       instances: Array.from({ length: 64 }, (_, index) => ({
         id: `compute-${index}`,
       })),

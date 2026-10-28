@@ -287,6 +287,18 @@ describe("example catalogue", () => {
       expect(design.instances.some(({ id }) => id.startsWith("users-"))).toBe(
         true,
       );
+      const worldGroups = design.groups ?? [];
+      expect(worldGroups.length).toBeGreaterThan(0);
+      expect(new Set(worldGroups.map(({ id }) => id)).size).toBe(
+        worldGroups.length,
+      );
+      const groupedIds = worldGroups.flatMap(({ instances }) => instances);
+      expect(groupedIds).toHaveLength(design.instances.length);
+      expect(new Set(groupedIds).size).toBe(design.instances.length);
+      for (const worldGroup of worldGroups) {
+        expect(worldGroup.label.trim()).not.toBe("");
+        expect(worldGroup.instances.length).toBeGreaterThan(0);
+      }
       expect(parseDesign(JSON.stringify(design))).toEqual(design);
       if (groups.at(-1) !== group) groups.push(group);
     }
@@ -315,13 +327,9 @@ describe("example catalogue", () => {
     }
   });
 
-  test("every example runs a real request without rejected calls", () => {
+  test("every example runs a real request within the default SLOs", () => {
     for (const { design } of examples) {
-      const model = new TrafficModel(design, {
-        p95Ms: 1_000_000,
-        p99Ms: 1_000_000,
-        errorRate: 1,
-      });
+      const model = new TrafficModel(design);
       let state = model.step(0);
       for (let time = 0; time < 30; time += 0.05) state = model.step(0.05);
       expect(

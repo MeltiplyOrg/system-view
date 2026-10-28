@@ -282,6 +282,33 @@ export const example: Design = {
       instances: ["db-primary", "db-replica-1", "db-replica-2"],
     },
   ],
+  groups: [
+    {
+      id: "group-edge",
+      label: "Edge",
+      instances: ["users-scale", "web-scale", "lb-scale"],
+    },
+    {
+      id: "group-api",
+      label: "API fleet",
+      instances: [
+        "compute-scale-1",
+        "compute-scale-2",
+        "compute-scale-3",
+        "cache-scale",
+      ],
+    },
+    {
+      id: "group-data",
+      label: "Database",
+      instances: ["db-primary", "db-replica-1", "db-replica-2"],
+    },
+    {
+      id: "group-audit",
+      label: "Audit",
+      instances: ["queue-events", "worker-events", "storage-events"],
+    },
+  ],
 };
 
 /** Explicit source-to-storage journey; one visible marker is one real simulated request. */
@@ -330,6 +357,23 @@ export const webAppExample: Design = {
     { from: "compute-api", to: "db-app", relation: "SQL" },
   ],
   clusters: [],
+  groups: [
+    {
+      id: "group-client",
+      label: "Client",
+      instances: ["users-source", "web-frontend"],
+    },
+    {
+      id: "group-service",
+      label: "Service",
+      instances: ["compute-api"],
+    },
+    {
+      id: "group-data",
+      label: "Data",
+      instances: ["db-app"],
+    },
+  ],
 };
 
 /**
@@ -441,6 +485,38 @@ const microservicesExample: Design = {
     { from: "storage-media", to: "cdn-market", relation: "PUBLISH" },
   ],
   clusters: [],
+  groups: [
+    {
+      id: "group-edge",
+      label: "Edge & gateway",
+      instances: ["users-market", "web-market", "lb-market", "compute-gateway"],
+    },
+    {
+      id: "group-services",
+      label: "Services",
+      instances: [
+        "compute-orders",
+        "compute-users",
+        "compute-payments",
+        "cache-gateway",
+      ],
+    },
+    {
+      id: "group-data",
+      label: "Databases",
+      instances: ["db-orders", "db-users", "db-payments"],
+    },
+    {
+      id: "group-events",
+      label: "Events & media",
+      instances: [
+        "queue-events",
+        "worker-events",
+        "storage-media",
+        "cdn-market",
+      ],
+    },
+  ],
 };
 
 /**
@@ -528,6 +604,28 @@ const cdnDeliveryExample: Design = {
     { from: "compute-api-b", to: "storage-uploads", relation: "UPLOAD" },
   ],
   clusters: [],
+  groups: [
+    {
+      id: "group-client",
+      label: "Client & edge",
+      instances: ["users-viewers", "web-site", "cdn-edge"],
+    },
+    {
+      id: "group-origin",
+      label: "Origin",
+      instances: ["compute-origin", "storage-assets"],
+    },
+    {
+      id: "group-api",
+      label: "API tier",
+      instances: ["lb-api", "compute-api-a", "compute-api-b", "cache-content"],
+    },
+    {
+      id: "group-data",
+      label: "Content data",
+      instances: ["db-content", "storage-uploads"],
+    },
+  ],
 };
 
 /**

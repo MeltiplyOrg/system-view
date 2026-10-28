@@ -779,13 +779,13 @@ function createNodeGroups(groups: readonly PlacedNodeGroup[]): SVGGElement {
       group.label.length > maxChars
         ? `${group.label.slice(0, maxChars - 1)}…`
         : group.label;
-    root.querySelector(".node-group-title")!.textContent =
-      `${label} · ${group.instances.length}`;
+    const visibleTitle = `${label} · ${group.instances.length}`;
+    root.querySelector(".node-group-title")!.textContent = visibleTitle;
     root
       .querySelector(".node-group-header")!
       .setAttribute(
         "aria-label",
-        `${group.label}: drag group, Enter to manage, arrow keys to move`,
+        `${visibleTitle}: drag group, Enter to manage, arrow keys to move`,
       );
     layer.append(root);
   }

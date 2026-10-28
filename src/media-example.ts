@@ -154,4 +154,43 @@ export const mediaExample: Design = {
     },
   ],
   clusters: [],
+  groups: [
+    {
+      id: "group-entry",
+      label: "Entry",
+      instances: ["users-media", "web-media", "branch-action"],
+    },
+    {
+      id: "group-playback",
+      label: "Playback",
+      instances: [
+        "cdn-media",
+        "branch-cache",
+        "storage-delivery",
+        "compute-cached",
+      ],
+    },
+    {
+      id: "group-upload",
+      label: "Upload & processing",
+      instances: [
+        "compute-api",
+        "storage-originals",
+        "branch-media",
+        "queue-encoding",
+        "worker-encoder",
+        "compute-image",
+      ],
+    },
+    {
+      id: "group-publish",
+      label: "Publication",
+      instances: [
+        "merge-processed",
+        "merge-upload",
+        "storage-published",
+        "db-media",
+      ],
+    },
+  ],
 };

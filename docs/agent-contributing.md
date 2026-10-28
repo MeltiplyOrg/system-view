@@ -112,6 +112,11 @@ One pass explains where most edits belong:
   designs in `src/app-examples.ts` (or `media-example.ts`) and catalogue
   metadata in `src/design.ts`. Catalogue tests enforce unique names/groups,
   parser round-trips, Users coverage and non-overlapping explicit sites.
+- Every catalogue document partitions all instances into named `groups` such
+  as Edge, Application, Data or Async work. The scene paints these as ground
+  regions with draggable titles, so the architecture reads as tiers in the
+  world as well as in the picker. Groups remain organizational: wires and
+  replica clusters are independent.
 
 ### Factory construction
 
@@ -327,8 +332,9 @@ One pass explains where most edits belong:
   errors or invented weighted samples are added. Detached async deliveries do
   not bias caller-response SLOs, although they still count as deliveries.
 - Crash limits are editable session settings in simulated milliseconds: defaults
-  p95 3000ms, p99 4000ms, errors 5%. The boot round trip is 2100ms simulated
-  (six 300ms hops plus three 100ms processing delays). A measured value strictly
+  p95 10000ms, p99 15000ms, errors 5%. The boot round trip is 2100ms simulated
+  (six 300ms hops plus three 100ms processing delays); deeper examples with
+  queues and workers legitimately reach 3.5–7.4s. A measured value strictly
   above any limit latches a crash with its causes and simulated time; Run and
   Step disable, the RAF stops, and queued/travelling calls freeze. There is no
   automatic recovery when old samples expire. Reset/graph edits start a fresh

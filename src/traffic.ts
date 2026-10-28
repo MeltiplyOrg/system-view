@@ -48,8 +48,8 @@ export interface CrashLimits {
   errorRate: number;
 }
 export const DEFAULT_CRASH_LIMITS: Readonly<CrashLimits> = {
-  p95Ms: 3_000,
-  p99Ms: 4_000,
+  p95Ms: 10_000,
+  p99Ms: 15_000,
   errorRate: 0.05,
 };
 export interface TrafficMetrics {

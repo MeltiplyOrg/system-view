@@ -160,6 +160,48 @@ export const ecommerceExample: Design = {
     { from: "compute-payments", to: "storage-receipts", relation: "RECEIPT" },
   ],
   clusters: [],
+  groups: [
+    {
+      id: "group-edge",
+      label: "Edge",
+      instances: [
+        "users-shop",
+        "web-shop",
+        "cdn-shop",
+        "storage-shop-assets",
+        "lb-shop",
+      ],
+    },
+    {
+      id: "group-app",
+      label: "Application",
+      instances: [
+        "compute-web-a",
+        "compute-web-b",
+        "cache-sessions",
+        "compute-catalog",
+        "cache-catalog",
+        "compute-orders",
+        "compute-payments",
+      ],
+    },
+    {
+      id: "group-data",
+      label: "Data",
+      instances: ["db-catalog", "db-orders", "db-payments"],
+    },
+    {
+      id: "group-async",
+      label: "Async work",
+      instances: [
+        "queue-events",
+        "worker-fulfillment",
+        "queue-notifications",
+        "worker-notifications",
+        "storage-receipts",
+      ],
+    },
+  ],
 };
 
 /** Multi-tenant workspace with read scaling and asynchronous exports. */
@@ -283,6 +325,35 @@ export const saasExample: Design = {
     {
       label: "Tenant database replica set",
       instances: ["db-tenants-primary", "db-tenants-read"],
+    },
+  ],
+  groups: [
+    {
+      id: "group-edge",
+      label: "Edge & API",
+      instances: [
+        "users-teams",
+        "web-workspace",
+        "lb-workspace",
+        "compute-workspace-a",
+        "compute-workspace-b",
+        "cache-sessions",
+      ],
+    },
+    {
+      id: "group-data",
+      label: "Data & billing",
+      instances: [
+        "db-tenants-primary",
+        "db-tenants-read",
+        "compute-billing",
+        "db-billing",
+      ],
+    },
+    {
+      id: "group-async",
+      label: "Async exports",
+      instances: ["queue-exports", "worker-exports", "storage-exports"],
     },
   ],
 };
@@ -411,6 +482,36 @@ export const paymentsExample: Design = {
       instances: ["db-ledger-primary", "db-ledger-read"],
     },
   ],
+  groups: [
+    {
+      id: "group-edge",
+      label: "Edge & payments",
+      instances: [
+        "users-payers",
+        "web-pay",
+        "lb-pay",
+        "compute-pay-a",
+        "compute-pay-b",
+        "cache-idempotency",
+      ],
+    },
+    {
+      id: "group-risk",
+      label: "Risk & ledger",
+      instances: [
+        "compute-risk",
+        "cache-risk",
+        "db-ledger-primary",
+        "db-ledger-read",
+        "db-merchants",
+      ],
+    },
+    {
+      id: "group-settlement",
+      label: "Settlement",
+      instances: ["queue-settlement", "worker-settlement", "storage-receipts"],
+    },
+  ],
 };
 
 /** Realtime chat with presence, fan-out workers and attachment delivery. */
@@ -507,6 +608,39 @@ export const chatExample: Design = {
     { from: "storage-attachments", to: "cdn-attachments", relation: "PUBLISH" },
   ],
   clusters: [],
+  groups: [
+    {
+      id: "group-edge",
+      label: "Edge & chat APIs",
+      instances: [
+        "users-chat",
+        "web-chat",
+        "lb-chat",
+        "compute-chat-a",
+        "compute-chat-b",
+      ],
+    },
+    {
+      id: "group-state",
+      label: "State & queue",
+      instances: [
+        "cache-presence",
+        "db-messages",
+        "queue-fanout",
+        "storage-attachments",
+      ],
+    },
+    {
+      id: "group-delivery",
+      label: "Fan-out & delivery",
+      instances: [
+        "worker-fanout",
+        "queue-push",
+        "worker-push",
+        "cdn-attachments",
+      ],
+    },
+  ],
 };
 
 /** Event ingestion, batch processing and a query tier over one warehouse. */
@@ -591,6 +725,31 @@ export const analyticsExample: Design = {
     { from: "cache-results", to: "db-warehouse", relation: "MISS" },
   ],
   clusters: [],
+  groups: [
+    {
+      id: "group-ingest",
+      label: "Edge & ingest",
+      instances: [
+        "users-analysts",
+        "web-analytics",
+        "lb-analytics",
+        "compute-ingest-a",
+        "compute-ingest-b",
+      ],
+    },
+    {
+      id: "group-pipeline",
+      label: "Pipeline & query",
+      instances: [
+        "queue-ingest",
+        "worker-batch",
+        "storage-raw",
+        "db-warehouse",
+        "compute-query",
+        "cache-results",
+      ],
+    },
+  ],
 };
 
 /** Sharded social graph with cached feeds and asynchronous fan-out. */
@@ -702,6 +861,34 @@ export const shardedSocialExample: Design = {
     { from: "storage-media", to: "cdn-media", relation: "PUBLISH" },
   ],
   clusters: [],
+  groups: [
+    {
+      id: "group-edge",
+      label: "Feed edge",
+      instances: [
+        "users-social",
+        "web-social",
+        "lb-social",
+        "compute-feed-a",
+        "compute-feed-b",
+      ],
+    },
+    {
+      id: "group-fanout",
+      label: "Fan-out",
+      instances: ["cache-feed", "queue-fanout", "worker-fanout"],
+    },
+    {
+      id: "group-shards",
+      label: "Shard set",
+      instances: ["compute-router", "db-shard-a", "db-shard-b", "db-shard-c"],
+    },
+    {
+      id: "group-media",
+      label: "Media",
+      instances: ["storage-media", "cdn-media"],
+    },
+  ],
 };
 
 /** Viewer playback and creator ingest connected by a transcoding pipeline. */
@@ -802,4 +989,33 @@ export const videoStreamingExample: Design = {
     { from: "storage-renditions", to: "cdn-video", relation: "FILL EDGE" },
   ],
   clusters: [],
+  groups: [
+    {
+      id: "group-viewers",
+      label: "Viewer edge",
+      instances: ["users-viewers", "web-player", "cdn-video"],
+    },
+    {
+      id: "group-origin",
+      label: "Playback origin",
+      instances: [
+        "compute-origin",
+        "storage-masters",
+        "db-catalog",
+        "cache-catalog",
+      ],
+    },
+    {
+      id: "group-creators",
+      label: "Creator ingest",
+      instances: [
+        "users-creators",
+        "web-studio",
+        "compute-ingest",
+        "queue-transcode",
+        "worker-transcoder",
+        "storage-renditions",
+      ],
+    },
+  ],
 };
