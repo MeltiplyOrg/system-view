@@ -52,7 +52,11 @@ test("View mode hides editing chrome and labels the complete architecture", asyn
           .getBoundingClientRect(),
         name: label.querySelector(".architecture-name")?.textContent ?? "",
       }));
-    const overlaps: string[] = [];
+    const nodes = [...document.querySelectorAll<SVGElement>(".scene-instance")]
+      .map((node) => node.getBoundingClientRect())
+      .filter((box) => box.width > 0 && box.height > 0);
+    const overlaps: string[] = [],
+      covering: string[] = [];
     for (let first = 0; first < cards.length; first++)
       for (let second = first + 1; second < cards.length; second++)
         if (
@@ -62,9 +66,44 @@ test("View mode hides editing chrome and labels the complete architecture", asyn
           cards[first].box.bottom > cards[second].box.top
         )
           overlaps.push(`${cards[first].name} / ${cards[second].name}`);
+    for (const card of cards)
+      if (
+        nodes.some(
+          (node) =>
+            card.box.left < node.right &&
+            card.box.right > node.left &&
+            card.box.top < node.bottom &&
+            card.box.bottom > node.top,
+        )
+      )
+        covering.push(card.name);
+    const content = nodes.reduce(
+        (box, node) => ({
+          left: Math.min(box.left, node.left),
+          top: Math.min(box.top, node.top),
+          right: Math.max(box.right, node.right),
+          bottom: Math.max(box.bottom, node.bottom),
+        }),
+        { left: Infinity, top: Infinity, right: -Infinity, bottom: -Infinity },
+      ),
+      center = {
+        x: (content.left + content.right) / 2,
+        y: (content.top + content.bottom) / 2,
+      },
+      centerOf = (box: DOMRect) => ({
+        x: box.left + box.width / 2,
+        y: box.top + box.height / 2,
+      }),
+      sides = {
+        left: cards.filter((card) => centerOf(card.box).x < center.x).length,
+        right: cards.filter((card) => centerOf(card.box).x >= center.x).length,
+        above: cards.filter((card) => centerOf(card.box).y < center.y).length,
+        below: cards.filter((card) => centerOf(card.box).y >= center.y).length,
+      };
     return {
       count: cards.length,
       overlaps,
+      covering,
       inside: cards.every(
         ({ box }) =>
           box.left >= 0 &&
@@ -72,9 +111,19 @@ test("View mode hides editing chrome and labels the complete architecture", asyn
           box.right <= innerWidth &&
           box.bottom <= innerHeight,
       ),
+      sides,
     };
   });
-  expect(geometry).toEqual({ count: 20, overlaps: [], inside: true });
+  expect(geometry).toMatchObject({
+    count: 20,
+    overlaps: [],
+    covering: [],
+    inside: true,
+  });
+  expect(geometry.sides.left).toBeGreaterThan(0);
+  expect(geometry.sides.right).toBeGreaterThan(0);
+  expect(geometry.sides.above).toBeGreaterThan(0);
+  expect(geometry.sides.below).toBeGreaterThan(0);
 
   await page.locator("#view-toggle").click();
   await expect(page.locator("body")).not.toHaveClass(/view-mode/);

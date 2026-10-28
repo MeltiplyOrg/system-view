@@ -15,7 +15,12 @@ import { WorldBuilder } from "./world-builder";
 import { pinWorld, BUILD_TYPES } from "./construction";
 import { replicaIssue } from "./component-rules";
 import { FlowNodeEditor } from "./flow-node-editor";
-import { placeCallout, type CalloutRect } from "./callout-layout";
+import {
+  placeCallout,
+  placeOverviewLabels,
+  type CalloutRect,
+  type OverviewLabel,
+} from "./callout-layout";
 import { TrafficControls } from "./traffic-controls";
 import { capacityRps } from "./traffic";
 
@@ -1141,12 +1146,31 @@ function rebuildArchitectureLabels(): void {
   positionArchitectureLabels();
 }
 
-/** Place labels around their anchors, avoiding prior labels and the top actions. */
+/** Place labels around their node edges, avoiding artwork and each other. */
 function positionArchitectureLabels(): void {
   if (!viewMode) return;
   const stage = stageBounds,
+    toStage = (rect: CalloutRect): CalloutRect => ({
+      x: rect.x - stage.left,
+      y: rect.y - stage.top,
+      width: rect.width,
+      height: rect.height,
+    }),
+    obstacles = current.instances.flatMap((instance) => {
+      const rect = scene.targetScreenRect(`instance:${instance.id}`);
+      return rect
+        ? [
+            {
+              x: rect.x - stage.left - 2,
+              y: rect.y - stage.top - 2,
+              width: rect.width + 4,
+              height: rect.height + 4,
+            },
+          ]
+        : [];
+    }),
     actions = document.querySelector(".top-actions")?.getBoundingClientRect(),
-    blockers: CalloutRect[] = actions
+    reserved = actions
       ? [
           {
             x: actions.left - stage.left,
@@ -1155,21 +1179,35 @@ function positionArchitectureLabels(): void {
             height: actions.height,
           },
         ]
-      : [];
+      : [],
+    labels: OverviewLabel[] = [],
+    byKey = new Map(architectureEntries.map((entry) => [entry.key, entry]));
   for (const entry of architectureEntries) {
-    const point = scene.targetTopPoint(entry.key);
-    if (!point) {
+    const rect = scene.targetScreenRect(entry.key);
+    if (!rect) {
       entry.element.hidden = true;
       continue;
     }
     entry.element.hidden = false;
-    const anchor = { x: point.x - stage.left, y: point.y - stage.top },
-      placement = placeCallout(
-        anchor,
-        { width: entry.width, height: entry.height },
-        stage,
-        blockers,
-      ),
+    labels.push({
+      key: entry.key,
+      rect: toStage(rect),
+      size: { width: entry.width, height: entry.height },
+    });
+  }
+  const placements = placeOverviewLabels(
+    labels,
+    { width: stage.width, height: stage.height },
+    obstacles,
+    reserved,
+  );
+  for (const placement of placements) {
+    const entry = byKey.get(placement.key);
+    if (!entry) continue;
+    const anchor = {
+        x: placement.anchor.x,
+        y: placement.anchor.y,
+      },
       cardX = placement.x - anchor.x,
       cardY = placement.y - anchor.y,
       corners = [
@@ -1196,12 +1234,6 @@ function positionArchitectureLabels(): void {
       "--label-line-angle",
       `${angle.toFixed(2)}deg`,
     );
-    blockers.push({
-      x: placement.x,
-      y: placement.y,
-      width: entry.width,
-      height: entry.height,
-    });
   }
 }
 

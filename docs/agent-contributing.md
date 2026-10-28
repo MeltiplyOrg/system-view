@@ -522,8 +522,10 @@ One pass explains where most edits belong:
   Design/inspector/builder, hides top actions, Components, group drag headers,
   construction controls, request markers and the ISO credit, and fits the
   world. Every cluster and standalone instance receives one measured label
-  (group · type, name, provider or id) positioned through the callout solver so
-  labels avoid each other and the top action; labels follow camera/layout
+  (group · type, name, provider or id) placed on the side facing away from the
+  architecture centre. Labels avoid every projected node rectangle and each
+  other, spread to the opposite side or a larger radius when crowded, and their
+  leader segments avoid crossing other nodes. Labels follow camera/layout
   changes. Clusters are labeled once as pools. Clicking again or Escape exits;
   the camera stays where the overview left it.
 - Callout and inspector are screen-space overlays. Use the scene's view and

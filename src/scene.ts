@@ -20,6 +20,7 @@ import {
 } from "./components";
 import { ComponentRasterCache } from "./component-raster";
 import { routeOrthogonal } from "./routing";
+import type { CalloutRect } from "./callout-layout";
 import type { RoutePoint, RouteRect } from "./routing";
 import { TransformerTransitions } from "./transformer-transitions";
 import type { TransformerSource } from "./transformer-transitions";
@@ -2734,6 +2735,28 @@ export class SystemScene {
       y:
         stage.top +
         ((point[1] - (this.center[1] - height / 2)) / height) * stage.height,
+    };
+  }
+
+  /**
+   * Client-space projected rectangle for a rendered target.
+   *
+   * Overview labels use the cached layout bounds to stay clear of the artwork
+   * without reading SVG geometry on every camera frame.
+   */
+  targetScreenRect(key: string): CalloutRect | null {
+    const bounds = this.targetBounds.get(key),
+      stage = this.viewport;
+    if (!bounds || !stage.width || !stage.height) return null;
+    const width = this.base.width / this.zoom,
+      height = this.base.height / this.zoom,
+      left = this.center[0] - width / 2,
+      top = this.center[1] - height / 2;
+    return {
+      x: stage.left + ((bounds.minX - left) / width) * stage.width,
+      y: stage.top + ((bounds.minY - top) / height) * stage.height,
+      width: ((bounds.maxX - bounds.minX) / width) * stage.width,
+      height: ((bounds.maxY - bounds.minY) / height) * stage.height,
     };
   }
 
