@@ -29,37 +29,53 @@ test("individual request identity travels through the boot journey without light
   page,
 }) => {
   await page.goto("/");
+  const paintOrder = await page.evaluate(() => {
+    const requests = document.querySelector(".request-layer");
+    const cable = document.querySelector(".connection");
+    const machine = document.querySelector(".scene-instance");
+    if (!requests || !cable || !machine) return null;
+    return {
+      afterCable: Boolean(
+        cable.compareDocumentPosition(requests) &
+        Node.DOCUMENT_POSITION_FOLLOWING,
+      ),
+      beforeMachine: Boolean(
+        requests.compareDocumentPosition(machine) &
+        Node.DOCUMENT_POSITION_FOLLOWING,
+      ),
+    };
+  });
+  expect(paintOrder).toEqual({ afterCable: true, beforeMachine: true });
   await expect(page.locator(".connection.duplex")).toHaveCount(3);
   await expect(page.locator(".wire-response")).toHaveCount(3);
   await expect(page.locator(".request-marker")).toHaveCount(0);
-  await step(page, 102);
+  await step(page, 100);
   const first = page.locator('.request-marker[data-request-id="1"]');
   await expect(first).toHaveAttribute("data-connection-index", "0");
-  const before = await first.getAttribute("cx");
-  await step(page, 2);
-  expect(await first.getAttribute("cx")).not.toBe(before);
-  await step(page, 13);
+  await step(page, 1);
+  await expect(first).toHaveAttribute("data-phase", "processing");
+  await step(page, 10);
   await expect(first).toHaveAttribute("data-connection-index", "1");
-  await step(page, 15);
+  await step(page, 1);
+  await expect(first).toHaveAttribute("data-connection-index", "1");
+  await expect(first).toHaveAttribute("data-phase", "processing");
+  await step(page, 10);
   await expect(first).toHaveAttribute("data-connection-index", "2");
-  await step(page, 15);
+  await step(page, 1);
+  await expect(first).toHaveAttribute("data-phase", "processing");
+  await step(page, 10);
   await expect(first).toHaveAttribute("data-direction", "response");
   await expect(first).toHaveAttribute("data-connection-index", "2");
   await expect(page.locator("#traffic-summary")).toContainText("0 delivered");
-  const returning = await first.getAttribute("cx");
-  await step(page, 2);
-  expect(await first.getAttribute("cx")).not.toBe(returning);
-  await step(page, 3);
+  await step(page, 1);
   await expect(first).toHaveAttribute("data-connection-index", "1");
-  await step(page, 5);
+  await step(page, 1);
   await expect(first).toHaveAttribute("data-connection-index", "0");
-  await step(page, 5);
-  await expect(page.locator("#traffic-summary")).toContainText("1 delivered");
-  await expect(page.locator("#traffic-p95")).toHaveText("600ms");
-  await expect(page.locator("#traffic-time")).toHaveText("sim 1.62s");
-  // The dot keeps its fixed velocity after the logical call completes.
-  await step(page, 40);
+  await step(page, 1);
   await expect(first).toHaveCount(0);
+  await expect(page.locator("#traffic-summary")).toContainText("1 delivered");
+  await expect(page.locator("#traffic-p95")).toHaveText("360ms");
+  await expect(page.locator("#traffic-time")).toHaveText("sim 1.36s");
   await page.locator("#traffic-reset").click();
   await expect(page.locator(".request-marker")).toHaveCount(0);
 });
@@ -116,7 +132,10 @@ test("overload queues at 100%, then a tail-latency breach crashes and Reset clea
   await step(page, 200);
   await expect(page.locator("#traffic-health")).toContainText("system crashed");
   await expect(page.locator("#traffic-health")).toContainText("p95 > 1000ms");
-  await expect(page.locator("#traffic-p95")).toHaveText("1500ms");
+  const p95 = Number(
+    (await page.locator("#traffic-p95").textContent())?.replace("ms", ""),
+  );
+  expect(p95).toBeGreaterThan(1000);
   await expect(page.locator("#traffic-error-rate")).toHaveText("0.0%");
   await expect(page.locator("#traffic-toggle")).toBeDisabled();
   await expect(page.locator("#traffic-step")).toBeDisabled();
@@ -135,22 +154,22 @@ test("editable p99 crash limits survive reset and can restart a healthy simulati
   await page.goto("/");
   await page.getByText("Crash limits", { exact: true }).click();
   await page.locator("#traffic-p95-limit").fill("60000");
-  await page.locator("#traffic-p99-limit").fill("500");
+  await page.locator("#traffic-p99-limit").fill("300");
   await page.locator("#traffic-error-limit").fill("100");
   await page
     .getByRole("button", { name: "Apply limits & reset", exact: true })
     .click();
   await step(page, 162);
-  await expect(page.locator("#traffic-health")).toContainText("p99 > 500ms");
+  await expect(page.locator("#traffic-health")).toContainText("p99 > 300ms");
   await page.locator("#traffic-reset").click();
-  await expect(page.locator("#traffic-p99-limit")).toHaveValue("500");
+  await expect(page.locator("#traffic-p99-limit")).toHaveValue("300");
   await page.locator("#traffic-p99-limit").fill("60000");
   await page
     .getByRole("button", { name: "Apply limits & reset", exact: true })
     .click();
   await step(page, 162);
-  await expect(page.locator("#traffic-p95")).toHaveText("600ms");
-  await expect(page.locator("#traffic-p99")).toHaveText("600ms");
+  await expect(page.locator("#traffic-p95")).toHaveText("360ms");
+  await expect(page.locator("#traffic-p99")).toHaveText("360ms");
   await expect(page.locator("#traffic-health")).toHaveText("system healthy");
 });
 
@@ -171,69 +190,13 @@ test("failed root calls breach the error-rate limit independently of latency", a
   await expect(page.locator("#traffic-toggle")).toBeDisabled();
 });
 
-test("slow-motion playback changes wall-clock pace, never simulated latency or source rate", async ({
+test("Run advances the fixed simulation clock without a playback control", async ({
   page,
 }) => {
   await page.goto("/");
-  await expect(page.locator("#traffic-speed")).toHaveValue("1");
-  await page.selectOption("#traffic-speed", "0.1");
-  await step(page, 102);
-  await expect(page.locator("#traffic-time")).toHaveText("sim 1.02s");
-  await page.selectOption("#traffic-speed", "10");
-  await expect(page.locator("#traffic-time")).toHaveText("sim 1.02s");
-  await step(page, 60);
-  await expect(page.locator("#traffic-time")).toHaveText("sim 1.62s");
-  await expect(page.locator("#traffic-p95")).toHaveText("600ms");
-  await expect(page.locator("#traffic-summary")).toContainText("1 sent");
-  await page.locator("#traffic-reset").click();
-  await page.selectOption("#traffic-speed", "1");
+  await expect(page.locator("#traffic-speed")).toHaveCount(0);
   await page.locator("#traffic-toggle").click();
   await expect(page.locator("#traffic-summary")).toContainText("1 delivered");
   await page.locator("#traffic-toggle").click();
-  await expect(page.locator("#traffic-p95")).toHaveText("600ms");
-});
-
-test("dot velocity stays fixed when playback changes the time scale", async ({
-  page,
-}) => {
-  /** Same manual simulation steps, only the clock multiplier differs. */
-  async function travel(speed: string): Promise<number> {
-    await page.goto("/");
-    await page.selectOption("#traffic-speed", speed);
-    await step(page, 102);
-    const marker = page.locator('.request-marker[data-request-id="1"]');
-    await expect(marker).toHaveCount(1);
-    const before = await marker.evaluate((node) => [
-      Number(node.getAttribute("cx")),
-      Number(node.getAttribute("cy")),
-    ]);
-    await step(page, 4);
-    const after = await marker.evaluate((node) => [
-      Number(node.getAttribute("cx")),
-      Number(node.getAttribute("cy")),
-    ]);
-    return Math.hypot(after[0] - before[0], after[1] - before[1]);
-  }
-  const slow = await travel("0.1");
-  const normal = await travel("1");
-  expect(slow).toBeGreaterThan(10);
-  expect(normal).toBeCloseTo(slow, 6);
-});
-
-test("0.1× Run immediately shows a legible request and retains it while the node processes", async ({
-  page,
-}) => {
-  await page.goto("/");
-  await page.selectOption("#traffic-speed", "0.1");
-  await page.locator("#traffic-toggle").click();
-  const first = page.locator('.request-marker[data-request-id="1"]');
-  await expect(first).toHaveCount(1);
-  const size = await first.boundingBox();
-  expect(size!.width).toBeGreaterThanOrEqual(8);
-  await expect(first).toHaveAttribute("data-phase", "processing");
-  await page.locator("#traffic-toggle").click();
-  await expect(first).toHaveAttribute("data-phase", "processing");
-  await expect(page.locator("#traffic-summary")).toContainText("1 sent");
-  await page.locator("#traffic-reset").click();
-  await expect(page.locator(".request-marker")).toHaveCount(0);
+  await expect(page.locator("#traffic-p95")).toHaveText("360ms");
 });

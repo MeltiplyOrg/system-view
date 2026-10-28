@@ -3,8 +3,8 @@ import { DEFAULT_CACHE_HIT_PERCENT } from "./design";
 import { inferInstanceType } from "./layout";
 import { hasResponse } from "./component-rules";
 
-/** Educational one-way network latency in simulated seconds; rendering never defines this duration. */
-const NETWORK_SECONDS = 0.05;
+/** Fixed time for one node-to-node journey, in simulated and wall seconds. */
+const NETWORK_SECONDS = 0.01;
 
 /** Illustrative service budgets, not vendor benchmarks. */
 const CAPACITY: Partial<Record<PlacedInstance["type"], number>> = {
@@ -34,8 +34,6 @@ export interface LinkFlow {
 export interface RequestMarker {
   id: number;
   requestId: number;
-  /** Stable visual branch: linear hops and their response reuse it; forks get new ids. */
-  branch: number;
   connectionIndex: number;
   progress: number;
   direction: "request" | "response";
@@ -64,8 +62,6 @@ export interface SimulationSnapshot {
   loads: readonly NodeLoad[];
   flows: readonly LinkFlow[];
   requests: readonly RequestMarker[];
-  /** Branches with at least one travelling, queued, processing or waiting call. */
-  activeBranches: ReadonlySet<number>;
   generated: number;
   completed: number;
   rejected: number;
@@ -82,7 +78,6 @@ interface Actor {
   marker: RequestMarker;
   node: number;
   hops: number;
-  branch: number;
   started: number;
   ready: number;
   phase: "request" | "queued" | "processing" | "waiting" | "response";
@@ -107,7 +102,7 @@ export function capacityRps(instance: DesignInstance): number | null {
 }
 
 /**
- * Deterministic simulated time: 50ms per wire leg, configured processing, then
+ * Deterministic simulated time: 10ms per wire leg, configured processing, then
  * dependency calls. A caller waits for every synchronous child response before
  * replying on its own incoming wire. One-way children detach at dispatch, so
  * queue jobs/replication cannot invent responses or hold an HTTP caller open.
@@ -139,7 +134,6 @@ export class TrafficModel {
   private metricsChanged = false;
   private nextActor = 1;
   private nextRequest = 1;
-  private nextBranch = 1;
 
   constructor(
     private readonly design: Design,
@@ -206,7 +200,6 @@ export class TrafficModel {
         responseRps: 0,
       })),
       requests: [],
-      activeBranches: new Set(),
       generated: 0,
       completed: 0,
       rejected: 0,
@@ -222,7 +215,7 @@ export class TrafficModel {
     return this.state;
   }
 
-  /** Skip only the initial empty interval so slow-motion Run starts with an actual source emission. */
+  /** Skip only the initial empty interval so Run starts with an actual source emission. */
   begin(): SimulationSnapshot {
     if (this.state.time === 0 && this.state.generated === 0) {
       const first = Math.min(...this.sources.map((source) => source.next));
@@ -271,7 +264,6 @@ export class TrafficModel {
             1,
             at,
             null,
-            this.nextBranch++,
           )
         )
           this.outcome(this.nextRequest, at, true);
@@ -333,7 +325,6 @@ export class TrafficModel {
     hops: number,
     at: number,
     parent: Actor | null,
-    branch: number,
   ): boolean {
     if (this.actors.length >= 512) {
       this.state.limited++;
@@ -345,7 +336,6 @@ export class TrafficModel {
       marker: {
         id: this.nextActor++,
         requestId,
-        branch,
         connectionIndex: output.link,
         progress: 0,
         direction: "request",
@@ -354,7 +344,6 @@ export class TrafficModel {
       },
       node: output.to,
       hops,
-      branch,
       started: at,
       ready: at + NETWORK_SECONDS,
       phase: "request",
@@ -403,21 +392,8 @@ export class TrafficModel {
     const count = single ? Math.min(1, outputs.length) : outputs.length;
     for (let i = 0; i < count; i++) {
       const output = outputs[start + i];
-      // Forks and detached one-way deliveries get their own visual path; a
-      // linear synchronous hop continues the caller's branch.
-      const branch =
-        count > 1 || !this.replies[output.link]
-          ? this.nextBranch++
-          : actor.branch;
       if (
-        !this.spawn(
-          output,
-          actor.marker.requestId,
-          actor.hops + 1,
-          at,
-          actor,
-          branch,
-        )
+        !this.spawn(output, actor.marker.requestId, actor.hops + 1, at, actor)
       )
         actor.failed = true;
       else if (this.replies[output.link]) actor.children++;
@@ -517,9 +493,6 @@ export class TrafficModel {
       flow.rateRps = sends.length;
       flow.responseRps = returns.length;
     }
-    this.state.activeBranches = new Set(
-      this.actors.map((actor) => actor.branch),
-    );
     this.state.requests = this.actors.flatMap((actor) => {
       if (actor.phase === "waiting") return [];
       actor.marker.phase = actor.phase;

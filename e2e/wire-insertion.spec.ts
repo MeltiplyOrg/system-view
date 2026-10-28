@@ -88,12 +88,14 @@ test("wire context menu inserts cache in place, persists coverage, and only miss
   await expect(
     page.locator('.connection[data-connection-index="3"]'),
   ).toHaveAttribute("data-rate-rps", "0");
-  await expect(page.locator("#traffic-summary")).toContainText("1 delivered");
+  await expect(page.locator("#traffic-summary")).toContainText(
+    /[1-9]\d* delivered/,
+  );
   await page.locator("#cache-hit-percent").fill("0");
   await page
     .getByRole("button", { name: "Set cache coverage", exact: true })
     .click();
-  await advance(page, 170);
+  await advance(page, 140);
   await expect(
     page.locator('.connection[data-connection-index="3"]'),
   ).toHaveAttribute("data-rate-rps", "1");

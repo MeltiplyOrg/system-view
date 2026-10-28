@@ -253,21 +253,19 @@ One pass explains where most edits belong:
 - Select Users to edit persisted `trafficRps` in its detail HUD. Each source is
   independent: finite 0–20 requests/s, default 1; zero disables that source.
   The small cap makes every request visible without weighted/sampled markers.
-- All engine timing is simulated seconds, independent of wall-clock playback.
-  Run defaults to 1× (normal simulated pace); 0.1× is an inspection mode that
-  slows the clock while 10× accelerates it. Playback never changes simulated
-  latency or requests/s. Dots move at a fixed on-screen velocity regardless of
-  playback. Initial Run skips the empty interval before the first real source
-  emission, not processing work. Reset clears requests/counters. The sole RAF
-  samples at most 30Hz, stops while paused/hidden/crashed, and never catches up
-  a stalled page. Source/graph edits reset obsolete work.
-- Each network leg takes 50 simulated milliseconds, not its animation duration.
-  Request arrivals wait FIFO for
-  target capacity tokens, then process for `latencyMs` (default 100ms). Queue
-  waiting adds to end-to-end latency; saturation alone never rejects a request.
-  Only the queue head wakes for the next token, so arrivals cannot jump the line.
-  Responses bypass capacity and do not trigger downstream calls again. Simulated
-  one-second arrival/admission windows drive meters and directional wire counts.
+- All engine timing is simulated seconds and runs at real time; there is no
+  playback multiplier. Run advances the wall clock, Step advances exactly 10ms,
+  and Reset clears requests/counters. Initial Run skips the empty interval before
+  the first real source emission, not processing work. The sole RAF samples at
+  most 30Hz, stops while paused/hidden/crashed, and never catches up a stalled
+  page. Source/graph edits reset obsolete work.
+- Each node-to-node hop takes a fixed 10 simulated milliseconds, not an
+  animation-derived duration. Request arrivals wait FIFO for target capacity
+  tokens, then process for `latencyMs` (default 100ms). Queue waiting adds to
+  end-to-end latency; saturation alone never rejects a request. Only the queue
+  head wakes for the next token, so arrivals cannot jump the line. Responses
+  bypass capacity and do not trigger downstream calls again. Simulated one-second
+  arrival/admission windows drive meters and directional wire counts.
 - Interactive connections have two neutral lanes: solid request dots travel
   downstream, hollow response rings travel upstream with the same request ID.
   A node waits for every synchronous dependency response before replying on its
@@ -290,7 +288,7 @@ One pass explains where most edits belong:
   processing/capacity and return on the incoming response lane without contacting
   the origin. Misses await downstream responses; a miss without any downstream
   dependency returns an error, never fake success. Each root still has one SLO
-  outcome. Counters reset with simulation; playback speed cannot change decisions.
+  outcome. Counters reset with simulation.
 - A 32-hop TTL rejects cycles and unwinds waiting callers. At most 512 travelling,
   queued, processing or waiting calls are retained; excess admissions increment
   the limit-drop counter and fail the parent. Rendering pools circles by call
@@ -319,29 +317,20 @@ One pass explains where most edits belong:
   errors or invented weighted samples are added. Detached async deliveries do
   not bias caller-response SLOs, although they still count as deliveries.
 - Crash limits are editable session settings in simulated milliseconds: defaults
-  p95 1000ms, p99 2000ms, errors 5%. The boot round trip is 600ms simulated
-  (six 50ms legs plus three 100ms processing delays), even when playback
-  stretches its presentation. A measured value strictly
+  p95 1000ms, p99 2000ms, errors 5%. The boot round trip is 360ms simulated
+  (six 10ms hops plus three 100ms processing delays). A measured value strictly
   above any limit latches a crash with its causes and simulated time; Run and
   Step disable, the RAF stops, and queued/travelling calls freeze. There is no
   automatic recovery when old samples expire. Reset/graph edits start a fresh
   simulation; applying limits explicitly resets it. Limits survive these resets
   but are not exported as graph data. Reload restores the default limits.
-- Each request remains visible at its arrival socket once its trail reaches the
-  queued/processing node; logical callers waiting on dependencies do not create
-  duplicate dots.
+- Each request is one circle at its actual simulated progress. During
+  queued/processing phases it rests at the arrival socket; logical callers
+  waiting on dependencies do not create duplicate dots. Dots paint above static
+  cables and ground meters but below machine roots, so objects occlude them.
   Markers stay 10 CSS pixels across through overview zoom and resize, using the
   cached viewport scale rather than per-frame geometry reads. On mobile during
   placement, supplementary HUD rows collapse to keep build ground reachable.
-- Dots are presentation trails, not simulation samples. A linear branch and its
-  response reuse one `branch` id and append each traversed lane to one polyline;
-  forks and one-way deliveries get new ids. One dot animates at 340 CSS px/s
-  along that trail at every playback setting, with Step contributing a fixed
-  0.1s presentation pulse. Playback therefore changes when hops/outcomes appear,
-  not the dot's velocity. A branch keeps moving after its logical completion and
-  disappears only at the end of its accumulated route; at fast playback the
-  visuals intentionally lag the metrics. Queued/processing branches wait at the
-  node. Trails cap at 512 and are cleared by Reset or geometry rebuilds.
 
 ### Geometry and artwork
 

@@ -2507,14 +2507,6 @@ aside.detail.open {
   color: var(--muted);
   font-size: 9px;
 }
-.traffic-clock select {
-  color: var(--fg);
-  background: var(--recess);
-  border: 1px solid var(--border);
-  border-radius: 3px;
-  font: inherit;
-  padding: 2px;
-}
 .traffic-metrics {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));

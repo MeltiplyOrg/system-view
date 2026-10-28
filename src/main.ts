@@ -181,7 +181,7 @@ app.innerHTML = `
           <p>Only supported machines scale: API/compute and worker instances, database/cache replicas, never SQLite server replicas. Clients, CDNs, queues, buckets, If/Else and Merge nodes are logical components, not replicable machines. Replica groups require the same component type and provider. Scale from 1 to 10 within the world limit; new members inherit behavior, not an occupied placement.</p>
           <p>Wires stay neutral; individual requests go out and response rings return. Right-click a wire for Cut or Add node. Add inserts a compatible component between endpoints without moving existing nodes. Select a cache to set hit coverage: 90% serves nine requests locally and sends every tenth downstream. Hits return immediately after cache processing; misses wait for the origin. Focus a wire and press Enter for the same menu.</p>
           <p>This is a visual system-design sandbox: no external integrations, cloud calls, real uploads or transcoding. The editable media-app example is available in the Examples menu.</p>
-          <p>Add Users and wire it to a frontend. Select Users to set traffic (0–20 requests/s), then Run. Each source has its own persisted rate. Playback defaults to 1×; select 0.1× to inspect individual requests without changing dot speed. It scales simulated time, emissions and metrics, never latency or the fixed on-screen motion. Step advances 10ms. Load stops at 100% and excess requests wait FIFO. The HUD tracks root-call p95, p99 and errors over 30 simulated seconds; crossing a crash limit freezes the system until Reset. This is an educational model, not a provider benchmark.</p>
+          <p>Add Users and wire it to a frontend. Select Users to set traffic (0–20 requests/s), then Run. Each source has its own persisted rate. Every hop between nodes takes a fixed 10ms simulated; Run advances that clock in real time. Step advances 10ms. Load stops at 100% and excess requests wait FIFO. The HUD tracks root-call p95, p99 and errors over 30 simulated seconds; crossing a crash limit freezes the system until Reset. This is an educational model, not a provider benchmark.</p>
           <p>If/Else and Merge are compact junctions directly on the wires, not machines. Choose TRUE/FALSE in Wire, and select a junction to edit its condition or merge mode. Invalid connection types are rejected in both the builder and JSON imports.</p>
         </section>
       </div>
@@ -1242,7 +1242,7 @@ document.addEventListener("visibilitychange", () =>
 traffic = new TrafficControls(
   stage,
   () => current,
-  (state, advanceSeconds) => scene.setTraffic(state, false, advanceSeconds),
+  (state) => scene.setTraffic(state),
 );
 apply(webAppExample);
 

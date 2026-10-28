@@ -30,96 +30,64 @@ function advance(model: TrafficModel, seconds: number) {
   return structuredClone(model.snapshot());
 }
 
+/** Advance to an exact simulated instant in 1ms frames, resolving 10ms hops. */
+function atTime(model: TrafficModel, seconds: number) {
+  for (let time = model.snapshot().time; time < seconds - 1e-9; time += 0.001)
+    model.step(Math.min(0.001, seconds - time));
+  return structuredClone(model.snapshot());
+}
+
 describe("individual requests", () => {
   test("one request travels Users → Frontend → Backend → Database in order", () => {
     const model = new TrafficModel(chain());
-    const emitted = advance(model, 1.02);
-    expect(emitted.generated).toBe(1);
-    expect(emitted.requests).toHaveLength(1);
-    expect(emitted.requests[0]).toMatchObject({
+    const flying = atTime(model, 1.005);
+    expect(flying.generated).toBe(1);
+    expect(flying.requests).toHaveLength(1);
+    expect(flying.requests[0]).toMatchObject({
       requestId: 1,
       connectionIndex: 0,
     });
-    expect(emitted.requests[0].progress).toBeGreaterThan(0);
-    expect(emitted.requests[0].progress).toBeLessThan(1);
-    const next = advance(model, 0.15);
-    expect(
-      next.requests.find((packet) => packet.requestId === 1)?.connectionIndex,
-    ).toBe(1);
-    expect(next.loads.find((load) => load.id === "db-data")?.incomingRps).toBe(
-      0,
-    );
-    const backend = advance(model, 0.15);
-    expect(
-      backend.requests.find((packet) => packet.requestId === 1)
-        ?.connectionIndex,
-    ).toBe(2);
-    const databaseReply = advance(model, 0.15);
+    expect(flying.requests[0].progress).toBeGreaterThan(0);
+    expect(flying.requests[0].progress).toBeLessThan(1);
+    expect(atTime(model, 1.05).requests[0]).toMatchObject({
+      connectionIndex: 0,
+      phase: "processing",
+    });
+    expect(atTime(model, 1.115).requests[0]).toMatchObject({
+      connectionIndex: 1,
+      direction: "request",
+    });
+    expect(atTime(model, 1.16).requests[0]).toMatchObject({
+      connectionIndex: 1,
+      phase: "processing",
+    });
+    expect(atTime(model, 1.225).requests[0]).toMatchObject({
+      connectionIndex: 2,
+      direction: "request",
+    });
+    expect(atTime(model, 1.27).requests[0]).toMatchObject({
+      connectionIndex: 2,
+      phase: "processing",
+    });
+    const databaseReply = atTime(model, 1.335);
     expect(
       databaseReply.requests.find((packet) => packet.requestId === 1),
     ).toMatchObject({ connectionIndex: 2, direction: "response" });
     expect(databaseReply.completed).toBe(0);
-    const backendReply = advance(model, 0.05);
-    expect(
-      backendReply.requests.find((packet) => packet.requestId === 1),
-    ).toMatchObject({ connectionIndex: 1, direction: "response" });
-    const frontendReply = advance(model, 0.05);
-    expect(
-      frontendReply.requests.find((packet) => packet.requestId === 1),
-    ).toMatchObject({ connectionIndex: 0, direction: "response" });
-    const delivered = advance(model, 0.05);
+    expect(atTime(model, 1.345).requests[0]).toMatchObject({
+      connectionIndex: 1,
+      direction: "response",
+    });
+    expect(atTime(model, 1.355).requests[0]).toMatchObject({
+      connectionIndex: 0,
+      direction: "response",
+    });
+    const delivered = atTime(model, 1.37);
     expect(delivered.requests.some((packet) => packet.requestId === 1)).toBe(
       false,
     );
     expect(delivered.completed).toBe(1);
-    expect(delivered.metrics.p95Ms).toBeCloseTo(600, 6);
-  });
-
-  test("linear hops and their response share one presentation branch", () => {
-    const model = new TrafficModel(chain());
-    const branches = new Set<number>();
-    let state = model.step(0);
-    for (let tick = 0; tick < 400 && !state.completed; tick++) {
-      state = model.step(0.01);
-      for (const packet of state.requests)
-        if (packet.requestId === 1) branches.add(packet.branch);
-    }
-    expect(state.completed).toBe(1);
-    expect(branches.size).toBe(1);
-    expect(state.activeBranches.size).toBe(0);
-  });
-
-  test("fan-out forks and one-way queue deliveries get separate presentation branches", () => {
-    const forked = chain();
-    forked.instances.push({ id: "cache-fast" });
-    forked.connections.push({ from: "compute-api", to: "cache-fast" });
-    const byConnection = new Map<number, number>();
-    const model = new TrafficModel(forked);
-    for (let tick = 0; tick < 200; tick++) {
-      for (const packet of model.step(0.01).requests)
-        if (packet.requestId === 1)
-          byConnection.set(packet.connectionIndex, packet.branch);
-    }
-    expect(byConnection.get(0)).toBe(byConnection.get(1));
-    expect(
-      new Set([byConnection.get(1), byConnection.get(2), byConnection.get(3)])
-        .size,
-    ).toBe(3);
-
-    const queued = chain();
-    queued.instances[3] = { id: "queue-jobs" };
-    queued.instances.push({ id: "worker-job" });
-    queued.connections[2] = { from: "compute-api", to: "queue-jobs" };
-    queued.connections.push({ from: "queue-jobs", to: "worker-job" });
-    const oneWay = new Map<number, number>();
-    const queueModel = new TrafficModel(queued);
-    for (let tick = 0; tick < 200; tick++) {
-      for (const packet of queueModel.step(0.01).requests)
-        if (packet.requestId === 1)
-          oneWay.set(packet.connectionIndex, packet.branch);
-    }
-    expect(oneWay.get(1)).not.toBe(oneWay.get(2));
-    expect(oneWay.get(2)).not.toBe(oneWay.get(3));
+    expect(delivered.metrics.p95Ms).toBeCloseTo(360, 6);
   });
 
   test("traffic comes only from Users and zero-rate sources stay silent", () => {
@@ -241,7 +209,7 @@ describe("individual requests", () => {
     many.instances = [
       { id: "users-source", trafficRps: 20 },
       { id: "web-client" },
-      ...Array.from({ length: 160 }, (_, i) => ({ id: `compute-${i}` })),
+      ...Array.from({ length: 300 }, (_, i) => ({ id: `compute-${i}` })),
     ];
     many.connections = [
       { from: "users-source", to: "web-client" },
@@ -286,7 +254,7 @@ describe("individual requests", () => {
     const completed = advance(model, 0.51);
     expect(completed.generated).toBe(1);
     expect(completed.completed).toBe(1);
-    expect(completed.metrics.p95Ms).toBeCloseTo(600, 6);
+    expect(completed.metrics.p95Ms).toBeCloseTo(360, 6);
     expect(advance(model, 0.4).generated).toBe(2);
     expect(new TrafficModel(chain(0)).begin().generated).toBe(0);
   });
@@ -317,8 +285,8 @@ describe("individual requests", () => {
     const model = new TrafficModel(design);
     let sawDelivery = false,
       sawHttpResponse = false;
-    for (let i = 0; i < 120; i++) {
-      const state = model.step(0.1);
+    for (let i = 0; i < 3000; i++) {
+      const state = model.step(0.002);
       for (const packet of state.requests) {
         if (packet.connectionIndex >= 2) {
           sawDelivery = true;
@@ -344,7 +312,7 @@ describe("individual requests", () => {
     design.instances.push({ id: "cache-fast", latencyMs: 100 });
     design.connections.push({ from: "compute-api", to: "cache-fast" });
     const model = new TrafficModel(design);
-    const waiting = advance(model, 1.8);
+    const waiting = atTime(model, 1.5);
     expect(
       waiting.requests.filter(
         (packet) =>
@@ -353,7 +321,7 @@ describe("individual requests", () => {
           packet.connectionIndex === 1,
       ),
     ).toHaveLength(0);
-    const replied = advance(model, 0.12);
+    const replied = atTime(model, 1.745);
     expect(
       replied.requests.find((packet) => packet.requestId === 1),
     ).toMatchObject({ connectionIndex: 1, direction: "response" });
@@ -368,9 +336,9 @@ describe("individual requests", () => {
       errorRate: 1,
     });
     const state = advance(model, 22);
-    expect(state.metrics.samples).toBe(21);
-    expect(state.metrics.p95Ms).toBeCloseTo(10_100, 5);
-    expect(state.metrics.p99Ms).toBeCloseTo(10_600, 5);
+    expect(state.metrics.samples).toBe(22);
+    expect(state.metrics.p95Ms).toBeCloseTo(10_360, 5);
+    expect(state.metrics.p99Ms).toBeCloseTo(10_860, 5);
     expect(state.metrics.errorRate).toBe(0);
   });
 
@@ -381,16 +349,16 @@ describe("individual requests", () => {
         p95Ms: 60_000,
         p99Ms: 60_000,
         errorRate: 1,
-        [key]: 599,
+        [key]: 359,
       };
       const model = new TrafficModel(chain(), limits);
-      expect(advance(model, 1.5).crash).toBeNull();
-      const crashed = advance(model, 0.2);
+      expect(advance(model, 1.35).crash).toBeNull();
+      const crashed = advance(model, 0.02);
       expect(crashed.crash?.breaches).toEqual([key]);
-      expect(crashed.crash?.at).toBeCloseTo(1.6, 8);
+      expect(crashed.crash?.at).toBeCloseTo(1.36, 8);
       expect(model.step(0.5)).toEqual(crashed);
       const boundary = advance(
-        new TrafficModel(chain(), { p95Ms: 600, p99Ms: 600, errorRate: 0 }),
+        new TrafficModel(chain(), { p95Ms: 360, p99Ms: 360, errorRate: 0 }),
         1.7,
       );
       expect(boundary.crash).toBeNull();
@@ -406,7 +374,7 @@ describe("individual requests", () => {
     );
     expect(state.metrics.samples).toBe(3);
     expect(state.metrics.errorRate).toBe(2 / 3);
-    expect(state.metrics.p95Ms).toBeCloseTo(600, 6);
+    expect(state.metrics.p95Ms).toBeCloseTo(360, 6);
   });
 
   test("rolling metrics expire old outcomes and report unknown until a response completes", () => {
