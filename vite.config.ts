@@ -21,12 +21,13 @@ const ignored = [
 ];
 
 export default defineConfig({
-  // Cloudflare's quick tunnel arrives with a *.trycloudflare.com Host header.
-  // Dev-server host checking only affects `vp dev`, so allow every host here
-  // and keep the production build unchanged.
+  // The tunnel script reads the bound URL after startup, so an occupied 5173
+  // (for example another checkout) moves this server to the next free port
+  // instead of failing. Host checking only affects `vp dev`; allow every host
+  // for the quick tunnel's *.trycloudflare.com hostname.
   server: {
     port: 5173,
-    strictPort: true,
+    strictPort: false,
     allowedHosts: true,
   },
   fmt: {
