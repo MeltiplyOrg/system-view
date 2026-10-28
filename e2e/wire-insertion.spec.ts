@@ -84,7 +84,7 @@ test("wire context menu inserts cache in place, persists coverage, and only miss
     saved.instances.find((node: { id: string }) => node.id === "cache-1")
       .cacheHitPercent,
   ).toBe(100);
-  await advance(page, 250);
+  await advance(page, 400);
   await expect(
     page.locator('.connection[data-connection-index="3"]'),
   ).toHaveAttribute("data-rate-rps", "0");
@@ -95,18 +95,18 @@ test("wire context menu inserts cache in place, persists coverage, and only miss
   await page
     .getByRole("button", { name: "Set cache coverage", exact: true })
     .click();
-  await advance(page, 140);
+  await advance(page, 280);
   await expect(
     page.locator('.connection[data-connection-index="3"]'),
   ).toHaveAttribute("data-rate-rps", "1");
   await expect(page.locator("#traffic-summary")).toContainText("0 delivered");
-  await advance(page, 20);
+  await advance(page, 110);
   await expect(page.locator("#traffic-summary")).toContainText("1 delivered");
   await page.locator("#cache-hit-percent").fill("90");
   await page
     .getByRole("button", { name: "Set cache coverage", exact: true })
     .click();
-  await advance(page, 1050);
+  await advance(page, 1200);
   await expect(
     page.locator('.connection[data-connection-index="3"]'),
   ).toHaveAttribute("data-rate-rps", "1");

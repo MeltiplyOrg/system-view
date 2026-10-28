@@ -52,30 +52,29 @@ test("individual request identity travels through the boot journey without light
   await step(page, 100);
   const first = page.locator('.request-marker[data-request-id="1"]');
   await expect(first).toHaveAttribute("data-connection-index", "0");
-  await step(page, 1);
+  await step(page, 30);
   await expect(first).toHaveAttribute("data-phase", "processing");
   await step(page, 10);
   await expect(first).toHaveAttribute("data-connection-index", "1");
-  await step(page, 1);
-  await expect(first).toHaveAttribute("data-connection-index", "1");
+  await step(page, 30);
   await expect(first).toHaveAttribute("data-phase", "processing");
   await step(page, 10);
   await expect(first).toHaveAttribute("data-connection-index", "2");
-  await step(page, 1);
+  await step(page, 30);
   await expect(first).toHaveAttribute("data-phase", "processing");
   await step(page, 10);
   await expect(first).toHaveAttribute("data-direction", "response");
   await expect(first).toHaveAttribute("data-connection-index", "2");
   await expect(page.locator("#traffic-summary")).toContainText("0 delivered");
-  await step(page, 1);
+  await step(page, 30);
   await expect(first).toHaveAttribute("data-connection-index", "1");
-  await step(page, 1);
+  await step(page, 30);
   await expect(first).toHaveAttribute("data-connection-index", "0");
-  await step(page, 1);
+  await step(page, 30);
   await expect(first).toHaveCount(0);
   await expect(page.locator("#traffic-summary")).toContainText("1 delivered");
-  await expect(page.locator("#traffic-p95")).toHaveText("360ms");
-  await expect(page.locator("#traffic-time")).toHaveText("sim 1.36s");
+  await expect(page.locator("#traffic-p95")).toHaveText("2100ms");
+  await expect(page.locator("#traffic-time")).toHaveText("sim 3.10s");
   await page.locator("#traffic-reset").click();
   await expect(page.locator(".request-marker")).toHaveCount(0);
 });
@@ -118,7 +117,14 @@ test("overload queues at 100%, then a tail-latency breach crashes and Reset clea
   ).capacityRps = 1;
   await page.locator("#source").fill(JSON.stringify(design));
   await page.getByRole("button", { name: "Apply", exact: true }).click();
-  await step(page, 40);
+  await page.getByText("Crash limits", { exact: true }).click();
+  await page.locator("#traffic-p95-limit").fill("2500");
+  await page.locator("#traffic-p99-limit").fill("4000");
+  await page.locator("#traffic-error-limit").fill("100");
+  await page
+    .getByRole("button", { name: "Apply limits & reset", exact: true })
+    .click();
+  await step(page, 150);
   expect(
     Number(await page.locator("#traffic-queued").textContent()),
   ).toBeGreaterThan(0);
@@ -129,13 +135,13 @@ test("overload queues at 100%, then a tail-latency breach crashes and Reset clea
     );
   expect(loads.every((load) => load <= 100)).toBe(true);
   expect(loads).toContain(100);
-  await step(page, 200);
+  await step(page, 500);
   await expect(page.locator("#traffic-health")).toContainText("system crashed");
-  await expect(page.locator("#traffic-health")).toContainText("p95 > 1000ms");
+  await expect(page.locator("#traffic-health")).toContainText("p95 > 2500ms");
   const p95 = Number(
     (await page.locator("#traffic-p95").textContent())?.replace("ms", ""),
   );
-  expect(p95).toBeGreaterThan(1000);
+  expect(p95).toBeGreaterThan(2500);
   await expect(page.locator("#traffic-error-rate")).toHaveText("0.0%");
   await expect(page.locator("#traffic-toggle")).toBeDisabled();
   await expect(page.locator("#traffic-step")).toBeDisabled();
@@ -154,22 +160,22 @@ test("editable p99 crash limits survive reset and can restart a healthy simulati
   await page.goto("/");
   await page.getByText("Crash limits", { exact: true }).click();
   await page.locator("#traffic-p95-limit").fill("60000");
-  await page.locator("#traffic-p99-limit").fill("300");
+  await page.locator("#traffic-p99-limit").fill("2000");
   await page.locator("#traffic-error-limit").fill("100");
   await page
     .getByRole("button", { name: "Apply limits & reset", exact: true })
     .click();
-  await step(page, 162);
-  await expect(page.locator("#traffic-health")).toContainText("p99 > 300ms");
+  await step(page, 350);
+  await expect(page.locator("#traffic-health")).toContainText("p99 > 2000ms");
   await page.locator("#traffic-reset").click();
-  await expect(page.locator("#traffic-p99-limit")).toHaveValue("300");
+  await expect(page.locator("#traffic-p99-limit")).toHaveValue("2000");
   await page.locator("#traffic-p99-limit").fill("60000");
   await page
     .getByRole("button", { name: "Apply limits & reset", exact: true })
     .click();
-  await step(page, 162);
-  await expect(page.locator("#traffic-p95")).toHaveText("360ms");
-  await expect(page.locator("#traffic-p99")).toHaveText("360ms");
+  await step(page, 350);
+  await expect(page.locator("#traffic-p95")).toHaveText("2100ms");
+  await expect(page.locator("#traffic-p99")).toHaveText("2100ms");
   await expect(page.locator("#traffic-health")).toHaveText("system healthy");
 });
 
@@ -198,5 +204,5 @@ test("Run advances the fixed simulation clock without a playback control", async
   await page.locator("#traffic-toggle").click();
   await expect(page.locator("#traffic-summary")).toContainText("1 delivered");
   await page.locator("#traffic-toggle").click();
-  await expect(page.locator("#traffic-p95")).toHaveText("360ms");
+  await expect(page.locator("#traffic-p95")).toHaveText("2100ms");
 });

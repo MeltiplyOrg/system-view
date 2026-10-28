@@ -4,7 +4,7 @@ import { inferInstanceType } from "./layout";
 import { hasResponse } from "./component-rules";
 
 /** Fixed time for one node-to-node journey, in simulated and wall seconds. */
-const NETWORK_SECONDS = 0.01;
+const NETWORK_SECONDS = 0.3;
 
 /** Illustrative service budgets, not vendor benchmarks. */
 const CAPACITY: Partial<Record<PlacedInstance["type"], number>> = {
@@ -48,8 +48,8 @@ export interface CrashLimits {
   errorRate: number;
 }
 export const DEFAULT_CRASH_LIMITS: Readonly<CrashLimits> = {
-  p95Ms: 1_000,
-  p99Ms: 2_000,
+  p95Ms: 3_000,
+  p99Ms: 4_000,
   errorRate: 0.05,
 };
 export interface TrafficMetrics {
@@ -102,7 +102,7 @@ export function capacityRps(instance: DesignInstance): number | null {
 }
 
 /**
- * Deterministic simulated time: 10ms per wire leg, configured processing, then
+ * Deterministic simulated time: 300ms per wire leg, configured processing, then
  * dependency calls. A caller waits for every synchronous child response before
  * replying on its own incoming wire. One-way children detach at dispatch, so
  * queue jobs/replication cannot invent responses or hold an HTTP caller open.

@@ -259,7 +259,7 @@ One pass explains where most edits belong:
   the first real source emission, not processing work. The sole RAF samples at
   most 30Hz, stops while paused/hidden/crashed, and never catches up a stalled
   page. Source/graph edits reset obsolete work.
-- Each node-to-node hop takes a fixed 10 simulated milliseconds, not an
+- Each node-to-node hop takes a fixed 300 simulated milliseconds, not an
   animation-derived duration. Request arrivals wait FIFO for target capacity
   tokens, then process for `latencyMs` (default 100ms). Queue waiting adds to
   end-to-end latency; saturation alone never rejects a request. Only the queue
@@ -317,8 +317,8 @@ One pass explains where most edits belong:
   errors or invented weighted samples are added. Detached async deliveries do
   not bias caller-response SLOs, although they still count as deliveries.
 - Crash limits are editable session settings in simulated milliseconds: defaults
-  p95 1000ms, p99 2000ms, errors 5%. The boot round trip is 360ms simulated
-  (six 10ms hops plus three 100ms processing delays). A measured value strictly
+  p95 3000ms, p99 4000ms, errors 5%. The boot round trip is 2100ms simulated
+  (six 300ms hops plus three 100ms processing delays). A measured value strictly
   above any limit latches a crash with its causes and simulated time; Run and
   Step disable, the RAF stops, and queued/travelling calls freeze. There is no
   automatic recovery when old samples expire. Reset/graph edits start a fresh

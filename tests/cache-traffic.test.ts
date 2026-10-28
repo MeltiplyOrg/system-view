@@ -33,8 +33,8 @@ function cacheSystem(percent: number): Design {
 function originRequests(percent: number, dt: number): number[] {
   const model = new TrafficModel(cacheSystem(percent));
   const ids = new Set<number>();
-  for (let at = 0; at < 2.6 - 1e-9; at += dt) {
-    const state = model.step(Math.min(dt, 2.6 - at));
+  for (let at = 0; at < 3.5 - 1e-9; at += dt) {
+    const state = model.step(Math.min(dt, 3.5 - at));
     for (const request of state.requests)
       if (
         request.connectionIndex === 3 &&
@@ -49,21 +49,21 @@ function originRequests(percent: number, dt: number): number[] {
 }
 
 test("90% cache coverage serves nine requests and sends every tenth identity to the origin", () => {
-  expect(originRequests(90, 0.001)).toEqual([10, 20]);
+  expect(originRequests(90, 0.01)).toEqual([10, 20]);
 });
 
 test("cache coverage boundaries and fractional settings preserve individual requests", () => {
-  expect(originRequests(100, 0.001)).toEqual([]);
-  expect(originRequests(0, 0.001)).toEqual(
+  expect(originRequests(100, 0.01)).toEqual([]);
+  expect(originRequests(0, 0.01)).toEqual(
     Array.from({ length: 20 }, (_, i) => i + 1),
   );
-  expect(originRequests(87.5, 0.001)).toEqual([8, 16]);
+  expect(originRequests(87.5, 0.01)).toEqual([8, 16]);
 });
 
 test("a hit returns from cache while a miss waits for the origin response", () => {
   const model = new TrafficModel(cacheSystem(90));
   const phases = new Map<number, Set<string>>();
-  for (let tick = 0; tick < 1500; tick++) {
+  for (let tick = 0; tick < 4000; tick++) {
     const state = model.step(0.001);
     for (const request of state.requests) {
       if (request.requestId > 10) continue;
@@ -83,7 +83,7 @@ test("an unconnected cache cannot fulfill a miss but can serve a hit", () => {
     const design = cacheSystem(percent);
     design.connections.pop();
     const model = new TrafficModel(design);
-    for (let i = 0; i < 60; i++) model.step(0.01);
+    for (let i = 0; i < 500; i++) model.step(0.01);
     expect(model.snapshot().rejected > 0).toBe(percent === 0);
     expect(
       model.snapshot().crash?.breaches.includes("errorRate") ?? false,
