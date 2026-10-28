@@ -9,7 +9,7 @@ import {
 } from "./design";
 import { inferInstanceType, instanceColor } from "./layout";
 import { resizeReplicas } from "./replicas";
-import { findProvider, providersFor } from "./providers";
+import { findProvider, providersFor, type ProviderTheme } from "./providers";
 import { SystemScene } from "./scene";
 import { WorldBuilder } from "./world-builder";
 import { pinWorld, BUILD_TYPES } from "./construction";
@@ -1060,37 +1060,43 @@ interface ArchitectureEntry {
 let architectureEntries: ArchitectureEntry[] = [];
 let architectureFrame: number | null = null;
 
-/** Label every logical target once: clusters as pools, everything else individually. */
-function architectureTargets(): {
+/** One architecture card's text and optional provider mark. */
+interface ArchitectureTarget {
   key: string;
   kind: string;
   name: string;
   meta: string;
-}[] {
+  provider?: ProviderTheme;
+}
+
+/** Label every logical target once: clusters as pools, everything else individually. */
+function architectureTargets(): ArchitectureTarget[] {
   const groupOf = new Map<string, string>();
   for (const group of current.groups ?? [])
     for (const id of group.instances) groupOf.set(id, group.label);
   const clustered = new Set(
     current.clusters.flatMap((cluster) => cluster.instances),
   );
-  const targets: { key: string; kind: string; name: string; meta: string }[] =
-    [];
+  const targets: ArchitectureTarget[] = [];
   for (const [index, cluster] of current.clusters.entries()) {
     const id = cluster.id ?? `cluster-${index + 1}`,
       first = current.instances.find(
         (instance) => instance.id === cluster.instances[0],
       ),
-      kind =
-        BUILD_TYPES.find(
-          (item) => item.type === inferInstanceType(first?.id ?? ""),
-        )?.label ?? "Cluster";
+      type = inferInstanceType(first?.id ?? ""),
+      kind = BUILD_TYPES.find((item) => item.type === type)?.label ?? "Cluster",
+      state = providerState(cluster.instances),
+      provider = state.mixed ? null : findProvider(state.provider, type);
     targets.push({
       key: `cluster:${id}`,
       kind: groupOf.get(cluster.instances[0])
         ? `${groupOf.get(cluster.instances[0])} · Cluster`
         : "Cluster",
       name: cluster.label ?? id,
-      meta: `${cluster.instances.length} × ${kind}`,
+      meta: `${cluster.instances.length} × ${kind}${
+        provider ? ` · ${provider.label}` : ""
+      }`,
+      provider: provider ?? undefined,
     });
   }
   for (const instance of current.instances) {
@@ -1106,6 +1112,7 @@ function architectureTargets(): {
       kind: group ? `${group} · ${kind}` : kind,
       name: instance.label ?? instance.id,
       meta: provider?.label ?? instance.id,
+      provider: provider ?? undefined,
     });
   }
   return targets;
@@ -1132,7 +1139,19 @@ function rebuildArchitectureLabels(): void {
     const meta = document.createElement("span");
     meta.className = "architecture-meta";
     meta.textContent = target.meta;
-    card.append(kind, name, meta);
+    if (target.provider) {
+      const mark = document.createElement("span");
+      mark.className = "architecture-provider";
+      mark.dataset.provider = target.provider.id;
+      mark.setAttribute("aria-hidden", "true");
+      mark.innerHTML = target.provider.logo;
+      mark.style.setProperty("--provider-color", target.provider.color);
+      if (target.provider.plate)
+        mark.style.setProperty("--provider-plate", target.provider.plate);
+      card.append(mark, kind, name, meta);
+    } else {
+      card.append(kind, name, meta);
+    }
     element.append(card);
     architectureLabels.append(element);
     architectureEntries.push({

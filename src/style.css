@@ -435,14 +435,48 @@ body.view-mode .architecture-labels {
   top: var(--label-y, 0px);
   left: var(--label-x, 0px);
   display: grid;
+  grid-template-columns: minmax(0, 1fr);
   gap: 1px;
   width: max-content;
-  max-width: 210px;
+  max-width: 230px;
   padding: 5px 8px 6px;
   border: 1px solid var(--border);
   border-radius: 4px;
   background: color-mix(in srgb, var(--panel) 94%, transparent);
   box-shadow: 0 3px 12px color-mix(in srgb, var(--page) 55%, transparent);
+}
+.architecture-label-card:has(.architecture-provider) {
+  grid-template-columns: 26px minmax(0, 1fr);
+  column-gap: 7px;
+}
+.architecture-provider {
+  grid-column: 1;
+  grid-row: 1 / 4;
+  align-self: center;
+  display: grid;
+  place-items: center;
+  width: 26px;
+  height: 26px;
+  padding: 3px;
+  border: 1px solid
+    color-mix(in srgb, var(--provider-color, var(--border)) 55%, var(--border));
+  border-radius: 3px;
+  background: var(--provider-plate, var(--brand-plate));
+}
+.architecture-provider svg {
+  display: block;
+  width: 100%;
+  height: 100%;
+  fill: var(--brand-mark);
+}
+.architecture-kind,
+.architecture-name,
+.architecture-meta {
+  grid-column: 1;
+}
+.architecture-label-card:has(.architecture-provider)
+  :is(.architecture-kind, .architecture-name, .architecture-meta) {
+  grid-column: 2;
 }
 .architecture-kind {
   color: var(--muted);

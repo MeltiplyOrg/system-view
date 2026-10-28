@@ -30,6 +30,25 @@ test("View mode hides editing chrome and labels the complete architecture", asyn
 
   const labels = page.locator(".architecture-label");
   await expect(labels).toHaveCount(20);
+  const providerMarks = page.locator(".architecture-provider");
+  await expect(providerMarks).toHaveCount(10);
+  await expect(
+    page.locator(
+      '.architecture-label[data-target="instance:cache-catalog"] .architecture-provider',
+    ),
+  ).toHaveAttribute("data-provider", "redis");
+  await expect(
+    page.locator(
+      '.architecture-label[data-target="instance:db-catalog"] .architecture-provider',
+    ),
+  ).toHaveAttribute("data-provider", "postgresql");
+  await expect(
+    page.locator(
+      '.architecture-label[data-target="instance:cdn-shop"] .architecture-provider',
+    ),
+  ).toHaveAttribute("data-provider", "cloudflare");
+  await expect(providerMarks.first().locator("svg")).toHaveCount(1);
+  await expect(providerMarks.first()).toHaveAttribute("aria-hidden", "true");
   await expect(labels.first()).toContainText("Edge · Users");
   await expect(labels.first()).toContainText("Shoppers");
   await expect(labels.nth(1)).toContainText("Edge · Web frontend");
@@ -143,4 +162,23 @@ test("Escape leaves view mode and restores the design controls", async ({
   await expect(page.locator("body")).not.toHaveClass(/view-mode/);
   await expect(page.locator("#view-toggle")).toHaveText("View");
   await expect(page.locator("#panel-toggle")).toBeVisible();
+});
+
+test("cluster overview labels show one shared provider mark and label", async ({
+  page,
+}) => {
+  await page.goto("/");
+  await page.locator("#panel-toggle").click();
+  await page.selectOption("#example", "saas-workspace");
+  await page.locator("#panel-close").click();
+  await page.locator("#view-toggle").click();
+  const cluster = page.locator(
+    '.architecture-label[data-target="cluster:cluster-1"]',
+  );
+  await expect(cluster).toContainText("PostgreSQL");
+  await expect(cluster.locator(".architecture-provider")).toHaveAttribute(
+    "data-provider",
+    "postgresql",
+  );
+  await expect(cluster.locator(".architecture-provider svg")).toHaveCount(1);
 });
