@@ -104,6 +104,14 @@ One pass explains where most edits belong:
   type and provider; organizational `groups` may contain any mix of types.
 - `parseDesign` owns limits and reference checks. Add a field there before
   teaching the renderer or editor about it.
+- `examples` is the curated application catalogue. `DesignExample.group`
+  drives native `<optgroup>` sections and must stay contiguous; the picker
+  order is the catalogue order. Every non-starter entry is a complete
+  architecture with at least eight components and links, a Users source,
+  application services, storage and any asynchronous workers. Keep new app
+  designs in `src/app-examples.ts` (or `media-example.ts`) and catalogue
+  metadata in `src/design.ts`. Catalogue tests enforce unique names/groups,
+  parser round-trips, Users coverage and non-overlapping explicit sites.
 
 ### Factory construction
 
@@ -250,7 +258,8 @@ One pass explains where most edits belong:
 
 - The boot walkthrough is Users → Frontend → Backend → Database. Only Users
   emit requests; neither clients nor zero-indegree services implicitly generate
-  traffic. Other structural examples remain idle until a Users source is wired.
+  traffic. Every curated example wires a Users source so Run has a real entry
+  path; custom graphs without one stay idle.
 - Select Users to edit persisted `trafficRps` in its detail HUD. Each source is
   independent: finite 0–20 requests/s, default 1; zero disables that source.
   The small cap makes every request visible without weighted/sampled markers.

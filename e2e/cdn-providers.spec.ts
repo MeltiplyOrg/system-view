@@ -126,7 +126,9 @@ test("all CDN providers persist on independent edges and share product artwork",
         .map(({ provider }) => provider),
     ).toEqual([id, id, id]);
     expect(exported.connections).toEqual(design.connections);
-    await expect(page.locator(".connection")).toHaveCount(2);
+    await expect(page.locator(".connection")).toHaveCount(
+      design.connections.length,
+    );
     await expect(
       page.locator(".transformer-rig,.transformer-waiting"),
     ).toHaveCount(0);
@@ -167,5 +169,7 @@ test("all CDN providers persist on independent edges and share product artwork",
       .filter((node) => node.id === "cdn-west" || node.id === "cdn-east")
       .map((node) => node.provider),
   ).toEqual(["alibaba-cloud-cdn", "alibaba-cloud-cdn"]);
-  await expect(page.locator(".connection")).toHaveCount(2);
+  await expect(page.locator(".connection")).toHaveCount(
+    design.connections.length,
+  );
 });

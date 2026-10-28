@@ -53,14 +53,35 @@ async function openSidebar(page: Page) {
 }
 
 /**
- * Load the three-replica database example through the picker.
+ * Apply a three-rack database cluster through the portable editor.
  *
- * Boot now starts on the all-renderer web-app scene, so tests that depend on a
- * database cluster or ten database racks select this catalogue entry first.
+ * Replica, culling and cached-geometry tests need a known cluster size; owning
+ * the fixture here keeps them independent of the curated example catalogue.
  */
 async function useDatabaseCluster(page: Page) {
   await openSidebar(page);
-  await page.locator("#example").selectOption("horizontal-scaling");
+  await page.locator("#source").fill(
+    JSON.stringify({
+      version: 1,
+      name: "Database cluster fixture",
+      instances: [
+        { id: "db-01", label: "Database Rack 01" },
+        { id: "db-02", label: "Database Rack 02" },
+        { id: "db-03", label: "Database Rack 03" },
+      ],
+      connections: [
+        { from: "db-01", to: "db-02", relation: "replicates" },
+        { from: "db-02", to: "db-03", relation: "replicates" },
+      ],
+      clusters: [
+        {
+          label: "Database cluster",
+          instances: ["db-01", "db-02", "db-03"],
+        },
+      ],
+    }),
+  );
+  await page.locator("#apply").click();
   await page.getByRole("button", { name: "Close design sidebar" }).click();
   await expect(page.locator("#sidebar")).toBeHidden();
 }
@@ -131,39 +152,40 @@ test.describe("minimal isometric canvas", () => {
     await expect(page.getByRole("button", { name: "Design" })).toBeVisible();
   });
 
-  test("loads reference designs from the example picker", async ({ page }) => {
+  test("loads grouped full-architecture references from the example picker", async ({
+    page,
+  }) => {
     await page.goto("/");
     await openSidebar(page);
     const picker = page.locator("#example");
     await expect(picker).toHaveValue("web-app");
     await expect(page.locator("#example-hint")).toContainText("request");
+    expect(
+      await picker
+        .locator("optgroup")
+        .evaluateAll((groups) =>
+          groups.map((group) => group.getAttribute("label")),
+        ),
+    ).toEqual(["Applications", "Media & delivery", "Data & scale"]);
 
-    await picker.selectOption("sharding");
-    await expect(page.locator("#scene-title")).toHaveText("Database sharding");
+    await picker.selectOption("sharded-social");
+    await expect(page.locator("#scene-title")).toHaveText(
+      "Sharded social feed",
+    );
     await expect(page.locator(".database-rack")).toHaveCount(3);
-    await expect(page.locator(".connection")).toHaveCount(3);
-    await expect(page.locator(".wire-label")).toHaveText([
-      "keys 0-33%",
-      "keys 34-66%",
-      "keys 67-100%",
-    ]);
-    await expect(page.locator("#example-hint")).toContainText("shard");
+    await expect(page.locator(".connection")).toHaveCount(24);
+    await expect(page.locator("#example-hint")).toContainText("Sharded");
 
     await picker.selectOption("microservices");
-    await expect(page.locator("#scene-title")).toHaveText("Microservices");
-    await expect(page.locator(".connection")).toHaveCount(5);
-    await expect(page.locator(".wire-label")).toHaveText([
-      "HTTPS",
-      "gRPC",
-      "gRPC",
-      "SQL",
-      "SQL",
-    ]);
+    await expect(page.locator("#scene-title")).toHaveText(
+      "Microservices marketplace",
+    );
+    await expect(page.locator(".connection")).toHaveCount(17);
 
-    await picker.selectOption("read-replicas");
-    await expect(page.locator("#scene-title")).toHaveText("Read replicas");
-    await expect(page.locator(".connection[data-to-cluster]")).toHaveCount(3);
-    await expect(page.locator(".connection[data-cluster-id]")).toHaveCount(2);
+    await picker.selectOption("saas-workspace");
+    await expect(page.locator("#scene-title")).toHaveText("SaaS workspace");
+    await expect(page.locator(".connection[data-to-cluster]")).toHaveCount(6);
+    await expect(page.locator(".connection[data-cluster-id]")).toHaveCount(1);
 
     await page.locator("#reset").click();
     await expect(picker).toHaveValue("web-app");
@@ -433,10 +455,12 @@ test.describe("minimal isometric canvas", () => {
     if (!path) throw new Error("Download did not produce a local file.");
     const exported = JSON.parse(readFileSync(path, "utf8")) as Design;
     expect(exported.name).toBe("Horizontal scaling");
-    expect(exported.instances).toHaveLength(3);
+    expect(exported.instances).toHaveLength(13);
     expect(exported.instances[0]).toEqual({
-      id: "db-01",
-      label: "Database Rack 01",
+      id: "users-scale",
+      label: "Users",
+      placement: { x: -1680, y: 0 },
+      trafficRps: 1,
     });
     expect(
       exported.instances.every(
@@ -446,11 +470,9 @@ test.describe("minimal isometric canvas", () => {
           !Object.hasOwn(instance, "color"),
       ),
     ).toBe(true);
-    expect(exported.clusters).toEqual([
-      {
-        label: "Database cluster",
-        instances: ["db-01", "db-02", "db-03"],
-      },
+    expect(exported.clusters.map(({ label }) => label)).toEqual([
+      "Stateless API fleet",
+      "Primary + stand-by replicas",
     ]);
   });
 
@@ -1015,7 +1037,7 @@ test.describe("provider switching safety", () => {
       page.locator(
         '.scene-instance [data-renderer-type="cache"][data-raster-ready="true"]',
       ),
-    ).toHaveCount(10);
+    ).toHaveCount(10, { timeout: 10_000 });
     await page.evaluate(() => {
       const stats = { peakRigs: 0, peakWaiting: 0 };
       (

@@ -10,11 +10,18 @@ import {
   DatabaseRack,
   project,
 } from "../src/database";
-import { example } from "../src/design";
+import type { Design } from "../src/design";
 import { layoutDesign } from "../src/layout";
 
-/** First placed rack from the default clustered design. */
-const placed = layoutDesign(example).instances[0];
+/** Minimal placed rack; catalogue content must not shape renderer geometry tests. */
+const fixture: Design = {
+  version: 1,
+  name: "Rack fixture",
+  instances: [{ id: "db-01", label: "Database Rack 01" }],
+  connections: [],
+  clusters: [],
+};
+const placed = layoutDesign(fixture).instances[0];
 
 describe("Database Rack geometry", () => {
   test("projects model axes to the isometric plane", () => {

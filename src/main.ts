@@ -1052,16 +1052,26 @@ const exampleHint = mustQuery<HTMLElement>("#example-hint");
  * no longer loaded.
  */
 function showExampleSummary(exampleId: string | null): void {
-  exampleHint.textContent =
-    examples.find((item) => item.id === exampleId)?.summary ??
-    "Choose a reference design to load it on the canvas.";
+  const example = examples.find((item) => item.id === exampleId);
+  exampleHint.textContent = example
+    ? `${example.group} · ${example.summary}`
+    : "Choose a reference design to load it on the canvas.";
 }
 
 for (const item of examples) {
+  let group = exampleSelect.querySelector<HTMLOptGroupElement>(
+    `optgroup[data-group="${CSS.escape(item.group)}"]`,
+  );
+  if (!group) {
+    group = document.createElement("optgroup");
+    group.label = item.group;
+    group.dataset.group = item.group;
+    exampleSelect.append(group);
+  }
   const option = document.createElement("option");
   option.value = item.id;
   option.textContent = item.design.name;
-  exampleSelect.append(option);
+  group.append(option);
 }
 
 // The default scene is one of the catalogue entries; selecting it on boot and

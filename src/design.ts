@@ -7,6 +7,15 @@
  * silently added by the parser.
  */
 import { connectionIssue, replicaGroupIssue } from "./component-rules";
+import {
+  analyticsExample,
+  chatExample,
+  ecommerceExample,
+  paymentsExample,
+  saasExample,
+  shardedSocialExample,
+  videoStreamingExample,
+} from "./app-examples";
 import { mediaExample } from "./media-example";
 import { inferInstanceType } from "./layout";
 
@@ -163,30 +172,114 @@ export interface Design {
 }
 
 /**
- * Horizontal-scaling example: three peers grouped into one cluster with
- * replication links.
- *
- * IDs intentionally use the `db-` prefix; the layout pass turns that prefix
- * into the database-rack renderer, lays the three racks out in one column, and
- * assigns their shared database palette. A dashed floor frame groups replicas.
- * `webAppExample` is the boot scene, mixing application and storage renderers.
+ * Horizontal scaling in a complete web path: stateless API replicas, a shared
+ * cache, a writable database with stand-by replicas, and one asynchronous
+ * worker tier. Explicit placements keep every lane short enough to read.
  */
 export const example: Design = {
   version: 1,
   name: "Horizontal scaling",
   instances: [
-    { id: "db-01", label: "Database Rack 01" },
-    { id: "db-02", label: "Database Rack 02" },
-    { id: "db-03", label: "Database Rack 03" },
+    {
+      id: "users-scale",
+      label: "Users",
+      trafficRps: 1,
+      placement: { x: -1680, y: 0 },
+    },
+    { id: "web-scale", label: "Web frontend", placement: { x: -1260, y: 0 } },
+    {
+      id: "lb-scale",
+      label: "API load balancer",
+      placement: { x: -840, y: 0 },
+    },
+    {
+      id: "compute-scale-1",
+      label: "API replica 1",
+      capacityRps: 80,
+      placement: { x: -420, y: -480 },
+    },
+    {
+      id: "compute-scale-2",
+      label: "API replica 2",
+      capacityRps: 80,
+      placement: { x: -420, y: 0 },
+    },
+    {
+      id: "compute-scale-3",
+      label: "API replica 3",
+      capacityRps: 80,
+      placement: { x: -420, y: 480 },
+    },
+    {
+      id: "cache-scale",
+      label: "Shared session cache",
+      provider: "redis",
+      placement: { x: 0, y: 0 },
+    },
+    {
+      id: "db-primary",
+      label: "Writable primary",
+      provider: "postgresql",
+      placement: { x: 420, y: -160 },
+    },
+    {
+      id: "db-replica-1",
+      label: "Stand-by replica 1",
+      provider: "postgresql",
+      placement: { x: 420, y: 160 },
+    },
+    {
+      id: "db-replica-2",
+      label: "Stand-by replica 2",
+      provider: "postgresql",
+      placement: { x: 420, y: 480 },
+    },
+    {
+      id: "queue-events",
+      label: "Audit events",
+      provider: "rabbitmq",
+      placement: { x: 840, y: 0 },
+    },
+    {
+      id: "worker-events",
+      label: "Audit worker",
+      placement: { x: 1260, y: 0 },
+    },
+    {
+      id: "storage-events",
+      label: "Audit archive",
+      provider: "amazon-s3",
+      placement: { x: 1680, y: 0 },
+    },
   ],
   connections: [
-    { from: "db-01", to: "db-02", relation: "replicates" },
-    { from: "db-02", to: "db-03", relation: "replicates" },
+    { from: "users-scale", to: "web-scale", relation: "HTTPS" },
+    { from: "web-scale", to: "lb-scale", relation: "HTTPS" },
+    { from: "lb-scale", to: "compute-scale-1", relation: "HTTP" },
+    { from: "lb-scale", to: "compute-scale-2", relation: "HTTP" },
+    { from: "lb-scale", to: "compute-scale-3", relation: "HTTP" },
+    { from: "compute-scale-1", to: "cache-scale", relation: "SESSION" },
+    { from: "compute-scale-2", to: "cache-scale", relation: "SESSION" },
+    { from: "compute-scale-3", to: "cache-scale", relation: "SESSION" },
+    { from: "cache-scale", to: "db-primary", relation: "MISS" },
+    { from: "compute-scale-1", to: "db-primary", relation: "SQL" },
+    { from: "compute-scale-2", to: "db-primary", relation: "SQL" },
+    { from: "compute-scale-3", to: "db-primary", relation: "SQL" },
+    { from: "db-primary", to: "db-replica-1", relation: "REPLICATES" },
+    { from: "db-primary", to: "db-replica-2", relation: "REPLICATES" },
+    { from: "compute-scale-1", to: "queue-events", relation: "AUDIT" },
+    { from: "queue-events", to: "worker-events", relation: "DELIVER" },
+    { from: "worker-events", to: "storage-events", relation: "ARCHIVE" },
+    { from: "worker-events", to: "db-primary", relation: "CHECKPOINT" },
   ],
   clusters: [
     {
-      label: "Database cluster",
-      instances: ["db-01", "db-02", "db-03"],
+      label: "Stateless API fleet",
+      instances: ["compute-scale-1", "compute-scale-2", "compute-scale-3"],
+    },
+    {
+      label: "Primary + stand-by replicas",
+      instances: ["db-primary", "db-replica-1", "db-replica-2"],
     },
   ],
 };
@@ -240,242 +333,199 @@ export const webAppExample: Design = {
 };
 
 /**
- * Read/write split: one writable primary streams changes to two read replicas.
- *
- * The database nodes share a replica-set cluster; role labels and directed
- * links carry the split that the isometric geometry cannot.
- */
-const readReplicaExample: Design = {
-  version: 1,
-  name: "Read replicas",
-  instances: [
-    {
-      id: "web-frontend",
-      label: "Web frontend",
-      description: "A browser client that only talks to the backend API.",
-    },
-    {
-      id: "compute-api",
-      label: "Backend API",
-      description:
-        "Sends every write to the primary and spreads reads across the replicas.",
-    },
-    {
-      id: "db-primary",
-      label: "Primary database",
-      description:
-        "The single writer. Streams its changes to the two read replicas.",
-    },
-    {
-      id: "db-read-1",
-      label: "Read replica 1",
-      description:
-        "Serves read queries. May lag slightly behind the primary after a write.",
-    },
-    {
-      id: "db-read-2",
-      label: "Read replica 2",
-      description:
-        "Serves read queries. May lag slightly behind the primary after a write.",
-    },
-  ],
-  connections: [
-    { from: "web-frontend", to: "compute-api", relation: "HTTPS / JSON" },
-    { from: "compute-api", to: "db-primary", relation: "writes" },
-    { from: "compute-api", to: "db-read-1", relation: "reads" },
-    { from: "compute-api", to: "db-read-2", relation: "reads" },
-    { from: "db-primary", to: "db-read-1", relation: "replicates" },
-    { from: "db-primary", to: "db-read-2", relation: "replicates" },
-  ],
-  clusters: [
-    {
-      label: "Users replica set",
-      description:
-        "One writable primary and two read replicas. Reads scale out; writes still have a single home.",
-      instances: ["db-primary", "db-read-1", "db-read-2"],
-    },
-  ],
-};
-
-/**
- * Range-sharded users table.
- *
- * Each shard is an independent database, so a hot key or a failed shard is
- * contained to one slice. The API owns the routing table.
- */
-const shardingExample: Design = {
-  version: 1,
-  name: "Database sharding",
-  instances: [
-    {
-      id: "compute-api",
-      label: "API + shard router",
-      description:
-        "Hashes each user ID and sends the query to the shard that owns that key range.",
-    },
-    {
-      id: "db-shard-a",
-      label: "Shard A",
-      description:
-        "Stores the first third of user rows. No other shard keeps a copy.",
-    },
-    {
-      id: "db-shard-b",
-      label: "Shard B",
-      description:
-        "Stores the middle third of user rows. A hot key here affects only this shard.",
-    },
-    {
-      id: "db-shard-c",
-      label: "Shard C",
-      description:
-        "Stores the last third of user rows. Adding a shard means moving keys.",
-    },
-  ],
-  connections: [
-    { from: "compute-api", to: "db-shard-a", relation: "keys 0-33%" },
-    { from: "compute-api", to: "db-shard-b", relation: "keys 34-66%" },
-    { from: "compute-api", to: "db-shard-c", relation: "keys 67-100%" },
-  ],
-  clusters: [],
-};
-
-/**
- * Stateless API fleet behind one load balancer.
- *
- * Every replica shares the same database and keeps no session state, so any
- * request can land on any healthy server.
- */
-const loadBalancedExample: Design = {
-  version: 1,
-  name: "Load-balanced API",
-  instances: [
-    {
-      id: "web-frontend",
-      label: "Web frontend",
-      description: "Sends requests to one stable load-balancer address.",
-    },
-    {
-      id: "compute-lb",
-      label: "Load balancer",
-      description:
-        "Checks API health and spreads each request across the live replicas.",
-    },
-    { id: "compute-api-1", label: "API replica 1" },
-    { id: "compute-api-2", label: "API replica 2" },
-    { id: "compute-api-3", label: "API replica 3" },
-    {
-      id: "db-app",
-      label: "Application database",
-      description: "Shared state lives here; the API tier stays stateless.",
-    },
-  ],
-  connections: [
-    { from: "web-frontend", to: "compute-lb", relation: "HTTPS" },
-    { from: "compute-lb", to: "compute-api-1", relation: "HTTP" },
-    { from: "compute-lb", to: "compute-api-2", relation: "HTTP" },
-    { from: "compute-lb", to: "compute-api-3", relation: "HTTP" },
-    { from: "compute-api-1", to: "db-app", relation: "SQL" },
-    { from: "compute-api-2", to: "db-app", relation: "SQL" },
-    { from: "compute-api-3", to: "db-app", relation: "SQL" },
-  ],
-  clusters: [
-    {
-      label: "Stateless API tier",
-      description:
-        "Identical API servers behind the load balancer. Add or remove replicas without changing client behavior.",
-      instances: ["compute-api-1", "compute-api-2", "compute-api-3"],
-    },
-  ],
-};
-
-/**
- * Database-per-service topology.
- *
- * Each service owns its schema, so cross-service reads go through the owning
- * API rather than a shared table. Deployments and failures stay independent.
+ * Database-per-service marketplace. Each service owns its schema, so
+ * cross-service reads go through the owning API rather than a shared table;
+ * the gateway also fronts session, queue and media delivery.
  */
 const microservicesExample: Design = {
   version: 1,
-  name: "Microservices",
+  name: "Microservices marketplace",
   instances: [
     {
-      id: "web-frontend",
-      label: "Web app",
-      description:
-        "Calls the API gateway and never queries a service database.",
+      id: "users-market",
+      label: "Marketplace users",
+      trafficRps: 1,
+      placement: { x: -1680, y: 0 },
+    },
+    {
+      id: "web-market",
+      label: "Marketplace web app",
+      placement: { x: -1260, y: 0 },
+    },
+    {
+      id: "lb-market",
+      label: "Gateway load balancer",
+      placement: { x: -840, y: 0 },
     },
     {
       id: "compute-gateway",
       label: "API gateway",
-      description:
-        "Authenticates requests and routes each call to the owning service.",
+      placement: { x: -420, y: 0 },
     },
     {
       id: "compute-orders",
       label: "Orders service",
-      description:
-        "Owns orders and fulfillment. Deploys independently of the users service.",
+      placement: { x: 0, y: -480 },
     },
     {
       id: "db-orders",
       label: "Orders DB",
-      description:
-        "Private to the orders service. Other services call its API instead of reading it directly.",
+      provider: "postgresql",
+      placement: { x: 420, y: -480 },
     },
-    {
-      id: "compute-users",
-      label: "Users service",
-      description:
-        "Owns profiles and authentication data. Deploys independently of orders.",
-    },
+    { id: "compute-users", label: "Users service", placement: { x: 0, y: 0 } },
     {
       id: "db-users",
       label: "Users DB",
-      description:
-        "Private to the users service. Cross-service reads go through the service API.",
+      provider: "postgresql",
+      placement: { x: 420, y: 0 },
+    },
+    {
+      id: "compute-payments",
+      label: "Payments service",
+      placement: { x: 0, y: 480 },
+    },
+    {
+      id: "db-payments",
+      label: "Payments DB",
+      provider: "postgresql",
+      placement: { x: 420, y: 480 },
+    },
+    {
+      id: "cache-gateway",
+      label: "Gateway session cache",
+      provider: "redis",
+      placement: { x: 0, y: 800 },
+    },
+    {
+      id: "queue-events",
+      label: "Domain events",
+      provider: "rabbitmq",
+      placement: { x: 840, y: 0 },
+    },
+    {
+      id: "worker-events",
+      label: "Delivery worker",
+      placement: { x: 1260, y: 0 },
+    },
+    {
+      id: "storage-media",
+      label: "Listing media",
+      provider: "amazon-s3",
+      placement: { x: 840, y: -480 },
+    },
+    {
+      id: "cdn-market",
+      label: "Marketplace CDN",
+      provider: "cloudflare",
+      placement: { x: 1260, y: -480 },
     },
   ],
   connections: [
-    { from: "web-frontend", to: "compute-gateway", relation: "HTTPS" },
+    { from: "users-market", to: "web-market", relation: "HTTPS" },
+    { from: "web-market", to: "lb-market", relation: "HTTPS" },
+    { from: "lb-market", to: "compute-gateway", relation: "HTTP" },
     { from: "compute-gateway", to: "compute-orders", relation: "gRPC" },
     { from: "compute-gateway", to: "compute-users", relation: "gRPC" },
+    { from: "compute-gateway", to: "compute-payments", relation: "gRPC" },
+    { from: "compute-gateway", to: "cache-gateway", relation: "SESSION" },
+    { from: "cache-gateway", to: "db-users", relation: "MISS" },
     { from: "compute-orders", to: "db-orders", relation: "SQL" },
     { from: "compute-users", to: "db-users", relation: "SQL" },
+    { from: "compute-payments", to: "db-payments", relation: "SQL" },
+    { from: "compute-orders", to: "queue-events", relation: "ORDER EVENTS" },
+    { from: "queue-events", to: "worker-events", relation: "DELIVER" },
+    { from: "worker-events", to: "db-orders", relation: "STATUS" },
+    { from: "worker-events", to: "storage-media", relation: "ARCHIVE" },
+    { from: "compute-users", to: "storage-media", relation: "UPLOAD" },
+    { from: "storage-media", to: "cdn-market", relation: "PUBLISH" },
   ],
   clusters: [],
 };
 
 /**
- * Edge delivery: clients receive cached assets from a CDN; only misses reach
- * the origin. Kept separate from the boot example so existing designs stay put.
+ * Edge delivery for a complete site: the CDN serves cached assets, misses
+ * reach an origin, and dynamic API traffic runs behind its own load balancer.
  */
 const cdnDeliveryExample: Design = {
   version: 1,
-  name: "CDN delivery",
+  name: "Global content delivery",
   instances: [
     {
-      id: "web-viewer",
-      label: "Web client",
-      description:
-        "Requests images, scripts, and media from the delivery edge.",
+      id: "users-viewers",
+      label: "Global viewers",
+      trafficRps: 1,
+      placement: { x: -1680, y: 0 },
     },
+    { id: "web-site", label: "Web site", placement: { x: -1260, y: 0 } },
     {
       id: "cdn-edge",
-      label: "CDN edge",
-      description:
-        "Serves cached content from edge points of presence and fetches from the origin only on a cache miss.",
+      label: "Global edge",
+      placement: { x: -840, y: 0 },
     },
     {
       id: "compute-origin",
-      label: "Content origin",
-      description:
-        "Publishes the original assets and fills the CDN when content is missing or expired.",
+      label: "Asset origin",
+      placement: { x: -420, y: -320 },
+    },
+    {
+      id: "storage-assets",
+      label: "Published assets",
+      provider: "amazon-s3",
+      placement: { x: 0, y: -320 },
+    },
+    {
+      id: "lb-api",
+      label: "API load balancer",
+      placement: { x: -420, y: 320 },
+    },
+    {
+      id: "compute-api-a",
+      label: "Dynamic API A",
+      capacityRps: 80,
+      placement: { x: 0, y: 320 },
+    },
+    {
+      id: "compute-api-b",
+      label: "Dynamic API B",
+      capacityRps: 80,
+      placement: { x: 0, y: 640 },
+    },
+    {
+      id: "cache-content",
+      label: "Content cache",
+      provider: "redis",
+      placement: { x: 420, y: 320 },
+    },
+    {
+      id: "db-content",
+      label: "Content database",
+      provider: "postgresql",
+      placement: { x: 420, y: 640 },
+    },
+    {
+      id: "storage-uploads",
+      label: "User uploads",
+      provider: "cloudflare-r2",
+      placement: { x: 420, y: 0 },
     },
   ],
   connections: [
-    { from: "web-viewer", to: "cdn-edge", relation: "HTTPS / ASSETS" },
+    { from: "users-viewers", to: "web-site", relation: "HTTPS" },
+    { from: "web-site", to: "cdn-edge", relation: "STATIC ASSETS" },
+    { from: "web-site", to: "lb-api", relation: "DYNAMIC API" },
     { from: "cdn-edge", to: "compute-origin", relation: "ORIGIN / MISS" },
+    { from: "compute-origin", to: "storage-assets", relation: "READ" },
+    { from: "compute-origin", to: "db-content", relation: "MANIFEST" },
+    { from: "lb-api", to: "compute-api-a", relation: "HTTP" },
+    { from: "lb-api", to: "compute-api-b", relation: "HTTP" },
+    { from: "compute-api-a", to: "cache-content", relation: "LOOKUP" },
+    { from: "compute-api-b", to: "cache-content", relation: "LOOKUP" },
+    { from: "cache-content", to: "db-content", relation: "MISS" },
+    { from: "compute-api-a", to: "db-content", relation: "SQL" },
+    { from: "compute-api-b", to: "db-content", relation: "SQL" },
+    { from: "compute-api-a", to: "storage-uploads", relation: "UPLOAD" },
+    { from: "compute-api-b", to: "storage-uploads", relation: "UPLOAD" },
   ],
   clusters: [],
 };
@@ -489,64 +539,103 @@ const cdnDeliveryExample: Design = {
  */
 export interface DesignExample {
   id: string;
+  /** Picker section; examples with the same label must stay contiguous. */
+  group: string;
   summary: string;
   design: Design;
 }
 
 /**
- * Curated examples ordered from one request path to distributed topologies.
+ * Curated full-architecture examples grouped by product domain.
  *
- * `main.ts` selects the default scene's entry on boot and after Reset. Keep
- * every design valid through `parseDesign` and every name unique: both back
- * the picker's labels and the exported document.
+ * `main.ts` renders one `<optgroup>` per `group`, selects the default scene's
+ * entry on boot/Reset, and keeps the picker and exported document in sync.
+ * Every design must round-trip through `parseDesign`, use unique visible names,
+ * and keep its explicit sites from overlapping.
  */
 export const examples: readonly DesignExample[] = [
   {
-    id: "media-processing",
-    summary:
-      "Design media uploads, queued encoding, parallel processing, publication and CDN playback. Edit the compact routing junctions and wires directly in the world.",
-    design: mediaExample,
-  },
-  {
     id: "web-app",
+    group: "Applications",
     summary:
-      "Follow an individual request from Users to the frontend, backend API and database.",
+      "The starter path: Users → frontend → backend API → application database. Use it to learn individual requests, capacity and queued load before exploring larger products.",
     design: webAppExample,
   },
   {
-    id: "cdn-delivery",
+    id: "ecommerce-checkout",
+    group: "Applications",
     summary:
-      "Serve assets from a delivery edge; fetch from the origin only on a miss.",
+      "A complete storefront: edge assets, load-balanced APIs, session and catalog caches, order and payment services, an asynchronous fulfillment queue, notifications and receipt storage.",
+    design: ecommerceExample,
+  },
+  {
+    id: "saas-workspace",
+    group: "Applications",
+    summary:
+      "Multi-tenant workspace with a load-balanced API tier, writable tenant primary plus read replica, billing service and an asynchronous export worker.",
+    design: saasExample,
+  },
+  {
+    id: "payments-ledger",
+    group: "Applications",
+    summary:
+      "Payment authorization: idempotency cache, risk service, a primary ledger with a read replica, merchant data, settlement workers and archived receipts.",
+    design: paymentsExample,
+  },
+  {
+    id: "chat-platform",
+    group: "Applications",
+    summary:
+      "Realtime chat with presence cache, message storage, attachment CDN, fan-out workers and an offline push queue.",
+    design: chatExample,
+  },
+  {
+    id: "media-processing",
+    group: "Media & delivery",
+    summary:
+      "Upload, queue, encode and publish media. Parallel video/image paths merge before publication, storage, catalogue and playback delivery.",
+    design: mediaExample,
+  },
+  {
+    id: "video-streaming",
+    group: "Media & delivery",
+    summary:
+      "Creator ingest and viewer playback share a transcoding queue, master and rendition buckets, a catalogue cache and a global video CDN.",
+    design: videoStreamingExample,
+  },
+  {
+    id: "cdn-delivery",
+    group: "Media & delivery",
+    summary:
+      "A full delivery site: cached assets at the edge, origin misses, dynamic API replicas, content cache and database, plus user uploads stored back in object storage.",
     design: cdnDeliveryExample,
   },
   {
-    id: "horizontal-scaling",
+    id: "analytics-pipeline",
+    group: "Data & scale",
     summary:
-      "Replicas share the traffic; replication keeps their copies in sync.",
+      "Analyst console over an ingest fleet, buffered event stream, batch loader, raw event lake, warehouse and query cache.",
+    design: analyticsExample,
+  },
+  {
+    id: "horizontal-scaling",
+    group: "Data & scale",
+    summary:
+      "A complete web path with stateless API replicas, shared cache, writable primary and stand-by replicas, plus an asynchronous audit worker.",
     design: example,
   },
   {
-    id: "read-replicas",
+    id: "sharded-social",
+    group: "Data & scale",
     summary:
-      "Send writes to one primary and spread reads across stand-by replicas.",
-    design: readReplicaExample,
-  },
-  {
-    id: "sharding",
-    summary:
-      "Split rows across independent databases so each shard owns a key range.",
-    design: shardingExample,
-  },
-  {
-    id: "load-balanced-api",
-    summary:
-      "Put a load balancer in front of identical, stateless API servers.",
-    design: loadBalancedExample,
+      "Sharded social feed: load-balanced feed APIs, cache, key router, three independent shards, fan-out workers and media delivery.",
+    design: shardedSocialExample,
   },
   {
     id: "microservices",
+    group: "Data & scale",
     summary:
-      "Give each service its own database and let services talk over the network.",
+      "Marketplace microservices with a gateway, independent orders/users/payments databases, session cache, domain-event worker and listing media CDN.",
     design: microservicesExample,
   },
 ];

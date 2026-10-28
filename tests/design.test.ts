@@ -5,6 +5,8 @@
 import { describe, expect, test } from "vite-plus/test";
 import type { Design } from "../src/design";
 import { examples, parseDesign } from "../src/design";
+import { instanceFootprint, layoutDesign } from "../src/layout";
+import { TrafficModel } from "../src/traffic";
 
 /** Connected three-instance fixture, intentionally independent of the default scene. */
 const example: Design = {
@@ -259,8 +261,8 @@ describe("design imports", () => {
 });
 
 describe("example catalogue", () => {
-  test("keeps every reference design valid and uniquely labelled", () => {
-    expect(examples.length).toBeGreaterThan(1);
+  test("groups every reference design and keeps each a full architecture", () => {
+    expect(examples.length).toBeGreaterThanOrEqual(10);
     expect(new Set(examples.map(({ id }) => id)).size).toBe(examples.length);
     expect(new Set(examples.map(({ design }) => design.name)).size).toBe(
       examples.length,
@@ -268,12 +270,65 @@ describe("example catalogue", () => {
     expect(
       examples.some(({ design }) => design.name === "Horizontal scaling"),
     ).toBe(true);
-    for (const { id, summary, design } of examples) {
-      expect(id.trim()).not.toBe("");
+
+    const groups: string[] = [];
+    for (const { id, group, summary, design } of examples) {
+      expect(group.trim()).not.toBe("");
       expect(summary.trim()).not.toBe("");
-      expect(design.instances.length).toBeGreaterThan(0);
-      expect(design.connections.length).toBeGreaterThan(0);
+      expect(id.trim()).not.toBe("");
+      // The boot walkthrough is deliberately minimal; every curated app is a
+      // complete architecture with several tiers and asynchronous work.
+      const minimumNodes = id === "web-app" ? 4 : 8;
+      const minimumConnections = id === "web-app" ? 3 : 8;
+      expect(design.instances.length).toBeGreaterThanOrEqual(minimumNodes);
+      expect(design.connections.length).toBeGreaterThanOrEqual(
+        minimumConnections,
+      );
+      expect(design.instances.some(({ id }) => id.startsWith("users-"))).toBe(
+        true,
+      );
       expect(parseDesign(JSON.stringify(design))).toEqual(design);
+      if (groups.at(-1) !== group) groups.push(group);
+    }
+    // Grouped picker sections must stay contiguous and appear once.
+    expect(new Set(groups).size).toBe(groups.length);
+    expect(groups.length).toBeGreaterThanOrEqual(3);
+
+    for (const { design } of examples) {
+      const placed = layoutDesign(design).instances;
+      for (let a = 0; a < placed.length; a++)
+        for (let b = a + 1; b < placed.length; b++) {
+          const first = placed[a],
+            second = placed[b],
+            firstFoot = instanceFootprint(first.type, first.provider),
+            secondFoot = instanceFootprint(second.type, second.provider);
+          const separated =
+            Math.abs(first.position.x - second.position.x) >=
+              firstFoot.halfWidth + secondFoot.halfWidth + 12 ||
+            Math.abs(first.position.y - second.position.y) >=
+              firstFoot.halfDepth + secondFoot.halfDepth + 12;
+          expect(
+            separated,
+            `${design.name}: ${first.id} and ${second.id} overlap`,
+          ).toBe(true);
+        }
+    }
+  });
+
+  test("every example runs a real request without rejected calls", () => {
+    for (const { design } of examples) {
+      const model = new TrafficModel(design, {
+        p95Ms: 1_000_000,
+        p99Ms: 1_000_000,
+        errorRate: 1,
+      });
+      let state = model.step(0);
+      for (let time = 0; time < 30; time += 0.05) state = model.step(0.05);
+      expect(
+        { example: design.name, rejected: state.rejected, crash: state.crash },
+        `${design.name} must have a complete runnable path`,
+      ).toEqual({ example: design.name, rejected: 0, crash: null });
+      expect(state.completed).toBeGreaterThan(0);
     }
   });
 });

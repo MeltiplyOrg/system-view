@@ -5,6 +5,12 @@ export const mediaExample: Design = {
   version: 1,
   name: "Media processing web app",
   instances: [
+    {
+      id: "users-media",
+      label: "Viewers",
+      trafficRps: 1,
+      placement: { x: -1360, y: 160 },
+    },
     { id: "web-media", label: "Media web app", placement: { x: -960, y: 160 } },
     {
       id: "branch-action",
@@ -94,6 +100,7 @@ export const mediaExample: Design = {
     },
   ],
   connections: [
+    { from: "users-media", to: "web-media", relation: "OPEN APP" },
     { from: "web-media", to: "branch-action", relation: "REQUEST" },
     {
       from: "branch-action",

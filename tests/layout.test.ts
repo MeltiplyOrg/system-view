@@ -4,7 +4,6 @@
  */
 import { describe, expect, test } from "vite-plus/test";
 import type { Design, PlacedInstance } from "../src/design";
-import { example } from "../src/design";
 import { inferInstanceType, layoutDesign, instanceColor } from "../src/layout";
 
 /** Build a minimal document around the supplied instances and clusters. */
@@ -17,7 +16,17 @@ function design(
 
 describe("automatic layout", () => {
   test("places cluster members in one column with a shared database palette", () => {
-    const layout = layoutDesign(example);
+    const layout = layoutDesign(
+      design(
+        [{ id: "db-01" }, { id: "db-02" }, { id: "db-03" }],
+        [
+          {
+            label: "Database cluster",
+            instances: ["db-01", "db-02", "db-03"],
+          },
+        ],
+      ),
+    );
     expect(layout.instances.map((instance) => instance.position)).toEqual([
       { x: 0, y: 0, z: 0 },
       { x: 0, y: 176, z: 0 },
