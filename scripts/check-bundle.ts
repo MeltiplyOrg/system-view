@@ -15,7 +15,7 @@ import { gzipSync } from "node:zlib";
  *
  * Includes artwork, assembly controls, visible traffic, queued capacity,
  * rolling SLO/crash HUD, inline wire insertion and cache coverage. The build
- * measures about 80 KiB JS gzip / 88.5 KiB total; 81 / 90 KiB bounds transfer.
+ * measures about 80.7 KiB JS gzip / 89.3 KiB total; 81 / 90 KiB bounds transfer.
  * No SDKs, codecs or model copies are loaded. The 512-call runtime ceiling,
  * shared raster pixel budget and single-encoder limit remain independent.
  */

@@ -38,6 +38,11 @@ describe("cable relation labels", () => {
     expect(rounded(cableLabelPoint(corner, 10))).toEqual([200, -10]);
   });
 
+  test("can place a caption away from the midpoint to avoid collisions", () => {
+    expect(rounded(cableLabelPoint(corner, 10, 0.25))).toEqual([100, -10]);
+    expect(rounded(cableLabelPoint(corner, 10, 0.8))).toEqual([290, 20]);
+  });
+
   test("follows the normal on a sloped isometric segment", () => {
     const [x, y] = cableLabelPoint(diagonal, 10)!;
     expect(x).toBeCloseTo(57.071, 3);

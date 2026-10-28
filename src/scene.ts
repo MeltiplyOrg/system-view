@@ -333,9 +333,9 @@ function contentExtent(
 }
 
 /**
- * Point halfway along a projected polyline, lifted off the cable.
+ * Point a fraction of the way along a projected polyline, lifted off the cable.
  *
- * Length is measured in projected space, so the caption stays centered on the
+ * Length is measured in projected space, so the caption stays attached to the
  * drawn route rather than drifting toward a corner when the world-space
  * segments have different lengths. The offset follows the local segment
  * normal toward screen-up (negative Y), which keeps horizontal text clear of
@@ -344,11 +344,13 @@ function contentExtent(
  *
  * @param points - Projected path vertices in draw order.
  * @param offset - Distance from the centerline in SVG user units.
+ * @param fraction - Position along the route, 0..1; defaults to the midpoint.
  * @returns The caption anchor, or null when there is no drawable segment.
  */
 export function cableLabelPoint(
   points: readonly (readonly [number, number])[],
   offset: number,
+  fraction = 0.5,
 ): readonly [number, number] | null {
   const lengths: number[] = [];
   let total = 0;
@@ -362,7 +364,7 @@ export function cableLabelPoint(
   }
   if (total === 0) return null;
 
-  let remaining = total / 2;
+  let remaining = total * Math.min(1, Math.max(0, fraction));
   for (let index = 1; index < points.length; index++) {
     const length = lengths[index - 1];
     if (length === 0) continue;
@@ -541,6 +543,64 @@ function clusterPortStub(port: ClusterPort): RoutePoint {
     default:
       return { x: port.x, y: port.y };
   }
+}
+
+/**
+ * Pick the branch fitting edge for a wire by the target's dominant direction,
+ * never giving two outlets the same edge. A true route that heads upward exits
+ * the top while a false route heading right exits the right side, so the two
+ * cables diverge at the fitting instead of sharing a corridor.
+ */
+function branchPortEdges(
+  from: PlacedInstance,
+  outgoing: readonly {
+    index: number;
+    to: PlacedInstance;
+  }[],
+): Map<number, Exclude<ClusterEdge, null>> {
+  const edges = new Map<number, Exclude<ClusterEdge, null>>(),
+    used = new Set<Exclude<ClusterEdge, null>>();
+  const all: Exclude<ClusterEdge, null>[] = ["right", "top", "left", "bottom"];
+  for (const { index, to } of outgoing) {
+    const dx = to.position.x - from.position.x,
+      dy = to.position.y - from.position.y,
+      horizontal: Exclude<ClusterEdge, null> = dx < 0 ? "left" : "right",
+      vertical: Exclude<ClusterEdge, null> = dy < 0 ? "top" : "bottom";
+    const preferred = Math.abs(dy) >= Math.abs(dx) ? vertical : horizontal,
+      secondary = preferred === vertical ? horizontal : vertical,
+      edge =
+        [preferred, secondary, ...all].find(
+          (candidate) => !used.has(candidate),
+        ) ?? preferred;
+    used.add(edge);
+    edges.set(index, edge);
+  }
+  return edges;
+}
+
+/** Port on the fitting perimeter, not its center, so sibling cables never share a start. */
+function branchPort(
+  from: PlacedInstance,
+  edge: Exclude<ClusterEdge, null>,
+): ClusterPort {
+  const footprint = instanceFootprint(from.type, from.provider);
+  return {
+    x:
+      from.position.x +
+      (edge === "right"
+        ? footprint.halfWidth
+        : edge === "left"
+          ? -footprint.halfWidth
+          : 0),
+    y:
+      from.position.y +
+      (edge === "bottom"
+        ? footprint.halfDepth
+        : edge === "top"
+          ? -footprint.halfDepth
+          : 0),
+    edge,
+  };
 }
 
 /** World-space rectangle covered by a node's dashed frame. */
@@ -1271,6 +1331,37 @@ export class SystemScene {
       createClusterLabels(layout.clusters),
     );
 
+    const placedById = new Map(
+      layout.instances.map((instance) => [instance.id, instance]),
+    );
+    const branchIncident = new Map<
+      string,
+      { index: number; to: PlacedInstance }[]
+    >();
+    for (const [index, link] of design.connections.entries()) {
+      const from = placedById.get(link.from),
+        to = placedById.get(link.to);
+      if (!from || !to) continue;
+      if (from.type === "branch") {
+        const incident = branchIncident.get(from.id) ?? [];
+        incident.push({ index, to });
+        branchIncident.set(from.id, incident);
+      }
+      if (to.type === "branch") {
+        const incident = branchIncident.get(to.id) ?? [];
+        incident.push({ index, to: from });
+        branchIncident.set(to.id, incident);
+      }
+    }
+    const branchEdgesByIndex = new Map<
+      string,
+      Map<number, Exclude<ClusterEdge, null>>
+    >();
+    for (const [id, incident] of branchIncident) {
+      const from = placedById.get(id)!;
+      branchEdgesByIndex.set(id, branchPortEdges(from, incident));
+    }
+
     const linkPlans: LinkPlan[] = design.connections.map((link, index) => {
       const from = byId.get(link.from),
         to = byId.get(link.to),
@@ -1305,17 +1396,22 @@ export class SystemScene {
         // where two coincident routes would look like one uncontrolled fork.
         fromPort:
           from.type === "branch"
-            ? {
-                x: from.position.x,
-                y: from.position.y,
-                edge: link.outlet === "true" ? "right" : "top",
-              }
+            ? branchPort(
+                from,
+                branchEdgesByIndex.get(from.id)?.get(index) ?? "right",
+              )
             : fromFrame
               ? clusterPort(fromFrame, from.position, to.position)
               : undefined,
-        toPort: toFrame
-          ? clusterPort(toFrame, to.position, from.position)
-          : undefined,
+        toPort:
+          to.type === "branch"
+            ? branchPort(
+                to,
+                branchEdgesByIndex.get(to.id)?.get(index) ?? "left",
+              )
+            : toFrame
+              ? clusterPort(toFrame, to.position, from.position)
+              : undefined,
       };
     });
 
@@ -1371,8 +1467,16 @@ export class SystemScene {
       }
     }
 
-    // Caption lanes still stack links whose drawn route coincides.
+    // Caption lanes stack identical routes; the placement pass below also
+    // shifts different routes along their own cable when the boxes would collide.
     const labelLanes = new Map<string, number>();
+    const labelBoxes: {
+      left: number;
+      right: number;
+      top: number;
+      bottom: number;
+    }[] = [];
+    const routedPaths: RoutePoint[][] = [];
     this.renderedWires.clear();
     for (const plan of linkPlans) {
       const {
@@ -1454,7 +1558,12 @@ export class SystemScene {
                 : clusterFrameRect(frame);
             }),
         ];
-        const route = routeOrthogonal(fromAnchor, toAnchor, obstacles);
+        const route = routeOrthogonal(
+          fromAnchor,
+          toAnchor,
+          obstacles,
+          routedPaths,
+        );
         worldPath = [
           ...(fromPort ? [fromPoint] : []),
           ...route,
@@ -1464,6 +1573,7 @@ export class SystemScene {
       const projected = worldPath.map((point) =>
         project(point.x, point.y, from.position.z + 4),
       );
+      routedPaths.push(worldPath);
       this.wirePaths.set(connectionId, {
         from: link.from,
         to: link.to,
@@ -1502,11 +1612,57 @@ export class SystemScene {
       if (relation) {
         const lane = labelLanes.get(d) ?? 0;
         labelLanes.set(d, lane + 1);
-        const point = cableLabelPoint(
-          projected,
-          CABLE_LABEL_OFFSET + lane * CABLE_LABEL_STACK,
-        );
+        const base = CABLE_LABEL_OFFSET + lane * CABLE_LABEL_STACK,
+          width =
+            relation.length > CABLE_LABEL_MAX_CHARS
+              ? CABLE_LABEL_WIDTH
+              : Math.max(20, relation.length * 4.2),
+          height = 9;
+        let point = null as readonly [number, number] | null,
+          box: (typeof labelBoxes)[number] | null = null;
+        for (const fraction of [0.5, 0.35, 0.65, 0.2, 0.8]) {
+          for (const extra of [0, CABLE_LABEL_STACK, CABLE_LABEL_STACK * 2]) {
+            const candidate = cableLabelPoint(
+              projected,
+              base + extra,
+              fraction,
+            );
+            if (!candidate) continue;
+            const bounds = {
+              left: candidate[0] - width / 2 - 2,
+              right: candidate[0] + width / 2 + 2,
+              top: candidate[1] - height - 2,
+              bottom: candidate[1] + 4,
+            };
+            if (
+              labelBoxes.some(
+                (placed) =>
+                  bounds.left < placed.right &&
+                  bounds.right > placed.left &&
+                  bounds.top < placed.bottom &&
+                  bounds.bottom > placed.top,
+              )
+            )
+              continue;
+            point = candidate;
+            box = bounds;
+            break;
+          }
+          if (point) break;
+        }
+        if (!point)
+          point = cableLabelPoint(projected, base) as
+            | readonly [number, number]
+            | null;
         if (point) {
+          if (!box)
+            box = {
+              left: point[0] - width / 2 - 2,
+              right: point[0] + width / 2 + 2,
+              top: point[1] - height - 2,
+              bottom: point[1] + 4,
+            };
+          labelBoxes.push(box);
           const label = document.createElementNS(NS, "text");
           label.classList.add("wire-label");
           label.dataset.connectionId = connectionId;

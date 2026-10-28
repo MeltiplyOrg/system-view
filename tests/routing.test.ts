@@ -43,6 +43,38 @@ describe("wire routing", () => {
     ]);
   });
 
+  test("detours around an already-routed parallel cable", () => {
+    const existing = [
+      { x: 0, y: 0 },
+      { x: 120, y: 0 },
+    ];
+    const route = routeOrthogonal(
+      { x: 0, y: 0 },
+      { x: 200, y: 0 },
+      [],
+      [existing],
+    );
+    expect(route).toEqual([
+      { x: 0, y: 0 },
+      { x: 0, y: -37 },
+      { x: 200, y: -37 },
+      { x: 200, y: 0 },
+    ]);
+  });
+
+  test("allows perpendicular crossings but not merged parallel lanes", () => {
+    const existing = [
+      { x: 0, y: 0 },
+      { x: 100, y: 0 },
+    ];
+    expect(
+      routeOrthogonal({ x: 50, y: -50 }, { x: 50, y: 50 }, [], [existing]),
+    ).toEqual([
+      { x: 50, y: -50 },
+      { x: 50, y: 50 },
+    ]);
+  });
+
   test("leaves an unrelated obstacle untouched", () => {
     expect(
       routeOrthogonal({ x: 0, y: 0 }, { x: 100, y: 100 }, [

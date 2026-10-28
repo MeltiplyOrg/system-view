@@ -227,8 +227,9 @@ One pass explains where most edits belong:
 - If/Else and Merge render as cable-sized fittings, not machine appliances.
   `isWireJunction` in `layout.ts` owns this classification. Their 48 × 48 ground
   footprint drives placement, hit bounds and routing clearance; they contribute
-  no platform and have no standalone dashed frame. Cables terminate at the
-  fitting center, never at an invisible machine-sized frame port.
+  no platform and have no standalone dashed frame. Cables terminate on the
+  compact fitting perimeter, choosing distinct sides by target direction rather
+  than an invisible machine-sized frame port or one shared center point.
 - Static fitting artwork uses the normal shared raster cache. A live transparent
   hit/selection ring remains outside cached pixels; full names stay accessible
   through the root label, tooltip and inspector rather than a large nameplate.
@@ -406,6 +407,20 @@ One pass explains where most edits belong:
 - Ports leave and enter on a fixed outward stub. The router avoids frame
   rectangles, and the final leg meets the border perpendicular. Internal
   same-cluster links stay rack-to-rack and have no border port.
+- Routing is cable-aware. The direct X-then-Y corner remains preferred only
+  when it is clear and does not share a corridor; otherwise the router scores
+  Y-then-X and detour lanes by collinear overlap with already-drawn routes
+  first (14-unit minimum separation), then by length. Perpendicular crossings
+  are still allowed. Thin blocker lanes are generated only for segments the
+  direct candidates would actually share, keeping dense diagrams deterministic.
+- Branch fittings expose distinct perimeter ports chosen by each incident
+  cable's dominant target direction. Incoming and outgoing wires no longer
+  share one center point, so sibling routes diverge at the fitting instead of
+  riding the same initial corridor.
+- Relation captions try several positions along their own projected cable and
+  increasingly lifted offsets, accepting the first estimated text box that does
+  not intersect an earlier caption. Identical routes still stack by lane first.
+  Captions remain attached to their connection and never move to another wire.
 - External wires keep a neutral jacket/core and endpoint sockets. Only separate
   `.request-marker` circles carry the traffic accent; no animated wire paths,
   dash patterns, broad glow or active-wire recoloring remain. More emitted
